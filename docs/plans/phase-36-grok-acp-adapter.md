@@ -70,7 +70,7 @@ Mapping:
 | `send(text)` | queue, then `session/prompt`; resolve the turn on the response `stopReason` | measured |
 | `interrupt()` | `session/cancel`; the pending prompt resolves with `cancelled` | measured, about 5 ms |
 | turn outcome | `stopReason: "cancelled"` is returned both for an interrupt and for a rejected permission; the wrapper distinguishes them by `_meta.cancellationCategory` (`MidTurnAbort` / `PermissionRejected`) and reports an operator reject as a rejection, not an interrupt | measured (SDK probe) |
-| `close()` / SIGTERM | close stdin, SIGTERM to the process group, SIGKILL after a grace below the runner's 5000 ms reset escalation | measured: tool child gone within 5 s |
+| `close()` / SIGTERM | close stdin, SIGTERM to the process group, SIGKILL after a grace below the runner's 5000 ms reset escalation | measured: tool child gone within 5 s after SIGTERM |
 | kaoiro tools | the existing stdio MCP bridge (`dist/bridge.js` pattern from Codex) as `mcpServers[0]`; the model reaches it via grok's `search_tool` and `use_tool` as `kaoiro__<tool>` | measured only for the ACP stdio MCP path with a probe server; the production bridge to ToolHost path is acceptance item 2 |
 | state | `session/update` chunks and tool calls to running states; `_x.ai/session_notification` `turn_completed` to `waiting_input`; `pending_interaction` kind `permission` to `waiting_permission` only when a `session/request_permission` is actually outstanding | observed; acceptance item 1 records it |
 | turn identity | `session/prompt` result `_meta.promptId` (equal to `requestId`); the matching `_x.ai/session_notification` `turn_completed.prompt_id` | measured: equal on all 16 recorded turns |
@@ -313,8 +313,10 @@ signal other processes:
    `_x.ai/session_notification` kinds are recorded as metadata
 2. A kaoiro tool call goes through the production bridge to the ToolHost
    handler with the right arguments, and its result reaches the model
-3. `interrupt()` during a long tool: the turn ends `cancelled`, the tool child
-   is gone
+3. `interrupt()` during a long tool: the turn ends `cancelled` and the state
+   leaves running. The known tool child remains alive after cancellation;
+   assert this measured difference so a vendor behavior change is visible.
+   The same child must disappear after close/SIGTERM (item 4)
 4. `close()` and SIGTERM: no owned process remains after the grace period
 5. Permission: a policy-escalated `session/request_permission` reaches the
    PermissionBroker; the state is `waiting_permission` only while that request

@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { expect, it, vi } from "vitest";
 import type { WrapperConfig } from "@kaoiro/agent-common";
 import { nativeRun } from "./native-support.js";
@@ -21,7 +22,7 @@ const config: WrapperConfig = {
   persona: { id: "default", name: "Default", sprite_set: "default" },
 };
 it.skipIf(!live)(
-  "native interrupt cancels a long shell tool and removes its child",
+  "native cancel leaves a live tool child; close removes that child",
   async () => {
     const root = mkdtempSync(join(homedir(), ".kaoiro-grok-cancel-"));
     const pidPath = join(root, "owned-pid");
@@ -42,14 +43,36 @@ it.skipIf(!live)(
         });
         const pid = Number(readFileSync(pidPath, "utf8"));
         expect(pid).toBeGreaterThan(1);
+        const before = readFileSync(`/proc/${pid}/stat`, "utf8");
         await host.interrupt();
         await turn;
         expect(
           envelopes.filter((e) => e.type === "result").at(-1)?.ext?.stop_reason,
         ).toBe("cancelled");
-        await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), {
-          timeout: 5000,
-        });
+        expect(host.state).toBe("waiting_input");
+        await delay(5_000);
+        expect(() => process.kill(pid, 0)).not.toThrow();
+        const after = readFileSync(`/proc/${pid}/stat`, "utf8");
+        expect(after.split(" ")[2]).toBe("S");
+        expect(after.split(" ")[21]).toBe(before.split(" ")[21]);
+        const startedAt = Date.now();
+        host.close();
+        await host.closed;
+        await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
+        expect(Date.now() - startedAt).toBeLessThan(4_500);
+        if (process.env.KAOIRO_LIVE_GROK_LIFECYCLE_REPORT) {
+          writeFileSync(
+            process.env.KAOIRO_LIVE_GROK_LIFECYCLE_REPORT,
+            JSON.stringify({
+              pid,
+              grok_pid: host.processId,
+              before,
+              after,
+              after_close: null,
+              shutdown_ms: Date.now() - startedAt,
+            }),
+          );
+        }
       });
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -108,13 +131,14 @@ it.skipIf(!live)(
   180_000,
 );
 it.skipIf(!live)(
-  "native wrapper SIGTERM closes its resident Grok group within runner grace",
+  "native wrapper SIGTERM removes Grok and its active tool child",
   async () => {
     const { spawn } = await import("node:child_process");
     const { fileURLToPath } = await import("node:url");
     const root = mkdtempSync(join(homedir(), ".kaoiro-grok-sigterm-"));
     const file = join(root, "agent.json");
     const ready = join(root, "ready");
+    const toolPidFile = join(root, "tool-pid");
     const driver = join(root, "driver.mjs");
     writeFileSync(file, JSON.stringify(config));
     const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
@@ -136,6 +160,11 @@ await runGrokCli({
   const timer = setInterval(() => { if (host.state === 'waiting_input') {
    clearInterval(timer);
    writeFileSync(${JSON.stringify(ready)}, String(host.processId));
+   void host.send(${JSON.stringify(
+     "Use run_terminal_command exactly: " +
+       `printf '%s' "$$" > ${JSON.stringify(toolPidFile)}; exec sleep 120. ` +
+       "Do not run any other command.",
+   )}).catch(() => {});
   } }, 25);
  }
 });
@@ -153,13 +182,25 @@ await runGrokCli({
       await vi.waitFor(() => expect(existsSync(ready)).toBe(true), {
         timeout: 40_000,
       });
+      await vi.waitFor(() => expect(existsSync(toolPidFile)).toBe(true), {
+        timeout: 120_000,
+      });
+      const toolPid = Number(readFileSync(toolPidFile, "utf8"));
+      expect(toolPid).toBeGreaterThan(1);
+      expect(readFileSync(`/proc/${toolPid}/stat`, "utf8").split(" ")[1]).toBe(
+        "(sleep)",
+      );
       const grokPid = Number(readFileSync(ready, "utf8"));
       expect(grokPid).toBeGreaterThan(1);
       const startedAt = Date.now();
       child.kill("SIGTERM");
       await exited;
       expect(Date.now() - startedAt).toBeLessThan(4_500);
-      expect(() => process.kill(-grokPid, 0)).toThrow();
+      await vi.waitFor(() => {
+        expect(() => process.kill(-grokPid, 0)).toThrow();
+        expect(() => process.kill(toolPid, 0)).toThrow();
+      });
+      expect(Date.now() - startedAt).toBeLessThan(4_500);
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill("SIGKILL");
@@ -168,5 +209,5 @@ await runGrokCli({
       rmSync(root, { recursive: true, force: true });
     }
   },
-  60_000,
+  180_000,
 );

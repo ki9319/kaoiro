@@ -73,6 +73,16 @@ individual hook verification belongs to the settings repository.
 
 These are reference notes; no upstream report is part of this work.
 
+## Known cancellation difference
+
+On Grok Build 1.0.52, `session/cancel` ends the turn with `cancelled` and
+returns the wrapper to `waiting_input`, but a running shell tool can remain
+alive. Cancel does not guarantee termination of tool processes. Work unit 1
+preserves the resident session and does not discover or kill tool PGIDs.
+Closing the wrapper sends SIGTERM to Grok, whose shutdown removes the known
+tool child. Native tests assert both the survival after cancel and cleanup
+on close and wrapper SIGTERM. Individual tool cancellation needs follow-up.
+
 ## Diagnostics and shutdown
 
 ACP diagnostic records contain bounded method, variant and identifier
