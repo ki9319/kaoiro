@@ -373,7 +373,7 @@ export class GrokHost implements EngineAdapter {
       turn.resolve();
     } catch (cause) {
       error = cause instanceof Error ? cause : new Error("grok turn failed");
-      this.#state("error");
+      this.#event({ kind: "result", subtype: "error_during_execution" });
       this.#options.send(
         makeResult(this.#options.config, new Date().toISOString(), {
           text: "",
@@ -402,7 +402,13 @@ export class GrokHost implements EngineAdapter {
 
   #progress() {
     clearTimeout(this.#timer);
-    if (!this.#active) return;
+    if (
+      !this.#active ||
+      this.#closing ||
+      this.#pendingPermission ||
+      this.#pendingQuestion
+    )
+      return;
     this.#timer = setTimeout(() => {
       this.close();
     }, this.#settings.inactivityMs);

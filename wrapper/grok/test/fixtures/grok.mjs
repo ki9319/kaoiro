@@ -186,6 +186,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
               },
             }) + "\n",
           );
+          setTimeout(
+            () =>
+              update({
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: "BROKER_WAIT_PROGRESS" },
+              }),
+            25,
+          );
           break;
         }
         if (text === "pending-only") {

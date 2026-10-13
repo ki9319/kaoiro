@@ -23,6 +23,7 @@ export const config: WrapperConfig = {
 const hosts: GrokHost[] = [];
 const scratch: string[] = [];
 afterEach(async () => {
+  vi.useRealTimers();
   for (const host of hosts.splice(0)) {
     host.close();
     await host.closed;
@@ -198,10 +199,24 @@ describe("resident ACP host", () => {
       decidePermission: (...args) => broker.decide(...args),
     });
     host = startedHost.host;
+    vi.useFakeTimers();
     const turn = host.send("permission");
     void turn.catch(() => {});
     await vi.waitFor(() => expect(host.state).toBe("waiting_permission"));
     const request = envelopes.find((e) => e.type === "permission_request")!;
+    await vi.waitFor(() =>
+      expect(
+        envelopes.some(
+          (e) => e.type === "log" && e.payload.text === "BROKER_WAIT_PROGRESS",
+        ),
+      ).toBe(true),
+    );
+    try {
+      await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
+      expect(host.state).toBe("waiting_permission");
+    } finally {
+      vi.useRealTimers();
+    }
     broker.resolve({
       request_id: String(request.payload.request_id),
       allow: false,
@@ -212,6 +227,15 @@ describe("resident ACP host", () => {
       envelopes.filter((e) => e.type === "result")[0]?.payload.error_code,
     ).toBe("permission_rejected");
     expect(host.state).toBe("waiting_input");
+    await host.send("AFTER_REJECT_TEXT");
+    expect(
+      envelopes.find(
+        (e) =>
+          e.type === "log" &&
+          e.payload.text === "AFTER_REJECT_TEXT" &&
+          e.payload.kind === "assistant",
+      )?.state,
+    ).toBe("thinking");
     broker.close();
   });
   it("drops unknown bodies and keeps diagnostics content-free", async () => {
