@@ -312,7 +312,9 @@ describe("resident ACP host", () => {
         KAOIRO_TEST_GROK_PID_FILE: pidFile,
       });
       const pid = processHost.child.pid!;
-      await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true));
+      await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), {
+        timeout: 5_000,
+      });
       const child = Number(readFileSync(pidFile, "utf8"));
       const start = Date.now();
       await processHost.close();

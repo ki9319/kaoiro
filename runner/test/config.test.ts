@@ -760,6 +760,13 @@ describe("buildRegister", () => {
       sandbox: true,
       approval: true,
     });
+    expect(register.engines?.[3]?.models).toEqual([
+      { value: "default", display_name: "Account default" },
+    ]);
+    expect(register.engines?.[3]?.launch_permission_axes).toEqual({
+      sandbox: true,
+      approval: false,
+    });
   });
 
   it("allowed_personas を register に含める", () => {
