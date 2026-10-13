@@ -8,9 +8,13 @@ last_updated: 2026-10-14
 # Grok Build ACP engine
 
 The `grok` engine requires Grok Build on `PATH`. The wrapper launches
-`grok --no-auto-update agent stdio` once, initializes one ACP session and
+`grok --no-auto-update agent --no-leader stdio` once, initializes one ACP session and
 uses `session/prompt` for each queued turn. It does not launch `grok -p`
 per turn. The ACP SDK is pinned to 1.8.0.
+
+`--no-leader` overrides `cli.use_leader`: the wrapper must own the backend
+whose sandbox environment it sets and whose process group it terminates.
+Connecting to a shared leader would break those ownership assumptions.
 
 The server-composed persona and common footer are sent in `session/new`
 `_meta.rules`. The kaoiro stdio MCP bridge is passed as `mcpServers` and

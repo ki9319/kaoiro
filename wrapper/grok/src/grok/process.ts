@@ -10,12 +10,16 @@ export class GrokProcess {
   #closing: Promise<void> | undefined;
 
   constructor(executable: string, cwd: string, env: NodeJS.ProcessEnv) {
-    this.child = spawn(executable, ["--no-auto-update", "agent", "stdio"], {
-      cwd,
-      env,
-      detached: process.platform !== "win32",
-      stdio: "pipe",
-    });
+    this.child = spawn(
+      executable,
+      ["--no-auto-update", "agent", "--no-leader", "stdio"],
+      {
+        cwd,
+        env,
+        detached: process.platform !== "win32",
+        stdio: "pipe",
+      },
+    );
     this.exited = new Promise((resolve, reject) => {
       this.child.once("error", () =>
         reject(new GrokLaunchError("grok spawn failed")),

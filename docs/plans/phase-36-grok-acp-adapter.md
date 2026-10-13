@@ -49,7 +49,7 @@ Module layout:
 |---|---|
 | `acp/connection.ts` | `@agentclientprotocol/sdk` client over the child's stdio, with a stream tee that records method and variant metadata only (no content) and counts SDK-dropped variants |
 | `acp/session.ts` | `initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/set_config_option`; engine-neutral ACP only |
-| `grok/process.ts` | Spawn `grok --no-auto-update agent stdio` in its own process group with the env below; SIGTERM, grace, SIGKILL of the owned group only |
+| `grok/process.ts` | Spawn `grok --no-auto-update agent --no-leader stdio` in its own process group with the env below; SIGTERM, grace, SIGKILL of the owned group only |
 | `grok/events.ts` | ACP `session/update` and `_x.ai/session_notification` to common `AdapterEvent`, log and result |
 | `host.ts` | `EngineAdapter`, turn queue, state, capability flags |
 | `cli.ts` | Composition root (config, server connection, persona wait, brokers, ToolHost, shutdown), following the Antigravity package |
