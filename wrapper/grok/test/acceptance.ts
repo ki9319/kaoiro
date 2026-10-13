@@ -20,3 +20,10 @@ export function checkToolRoundTrip(
   );
   assert(evidence.text.includes(marker), "tool result did not reach the model");
 }
+export function checkForegroundTool(input: unknown, command: string) {
+  assert(input && typeof input === "object", "tool arguments missing");
+  const raw = input as Record<string, unknown>;
+  assert(raw.command === command, "tool command changed");
+  assert(raw.block_until_ms === 120_000, "foreground wait changed");
+  assert(raw.is_background !== true, "tool was backgrounded");
+}

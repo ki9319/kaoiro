@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { checkToolRoundTrip, type ToolEvidence } from "./acceptance.js";
+import {
+  checkForegroundTool,
+  checkToolRoundTrip,
+  type ToolEvidence,
+} from "./acceptance.js";
 it("rejects invalid tool round-trip evidence", () => {
   const evidence: ToolEvidence = {
     calls: [{ name: "list_agents", input: {}, isError: false }],
@@ -18,5 +22,18 @@ it("rejects invalid tool round-trip evidence", () => {
     expect(() =>
       checkToolRoundTrip(broken, "list_agents", {}, "marker"),
     ).toThrow();
+  }
+});
+it("rejects altered foreground tool arguments", () => {
+  const command = "sleep 120";
+  const input = { command, block_until_ms: 120_000, is_background: false };
+  checkForegroundTool(input, command);
+  for (const broken of [
+    undefined,
+    { ...input, command: "sleep 1" },
+    { ...input, block_until_ms: 0 },
+    { ...input, is_background: true },
+  ]) {
+    expect(() => checkForegroundTool(broken, command)).toThrow();
   }
 });

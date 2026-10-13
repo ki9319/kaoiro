@@ -77,15 +77,21 @@ individual hook verification belongs to the settings repository.
 
 These are reference notes; no upstream report is part of this work.
 
-## Known cancellation difference
+## Cancellation and background tasks
 
 On Grok Build 1.0.52, `session/cancel` ends the turn with `cancelled` and
-returns the wrapper to `waiting_input`, but a running shell tool can remain
-alive. Cancel does not guarantee termination of tool processes. Work unit 1
-preserves the resident session and does not discover or kill tool PGIDs.
-Closing the wrapper sends SIGTERM to Grok, whose shutdown removes the known
-tool child. Native tests assert both the survival after cancel and cleanup
-on close and wrapper SIGTERM. Individual tool cancellation needs follow-up.
+returns the wrapper to `waiting_input`. A foreground shell tool with actual
+`block_until_ms: 120000` disappeared after cancel in all six controlled
+trials, with and without `--no-leader`. Native acceptance verifies the actual
+arguments and asserts foreground-child termination.
+
+A tool moved to the background (`_x.ai/task_backgrounded`) can remain alive
+after cancel. Close and wrapper SIGTERM remove active tool children.
+The wrapper preserves the resident session and does not discover or kill
+tool PGIDs. Background survival is recorded as a vendor behavior; tests do
+not assert it because the model chooses whether to background a task.
+Per-task cancellation through `_x.ai/task/kill` needs follow-up measurement.
+See the [dated evidence](../../evidence/grok/2026-10-14-premises.md).
 
 ## Diagnostics and shutdown
 

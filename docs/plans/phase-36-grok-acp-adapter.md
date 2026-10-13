@@ -313,10 +313,12 @@ signal other processes:
    `_x.ai/session_notification` kinds are recorded as metadata
 2. A kaoiro tool call goes through the production bridge to the ToolHost
    handler with the right arguments, and its result reaches the model
-3. `interrupt()` during a long tool: the turn ends `cancelled` and the state
-   leaves running. The known tool child remains alive after cancellation;
-   assert this measured difference so a vendor behavior change is visible.
-   The same child must disappear after close/SIGTERM (item 4)
+3. `interrupt()` during a foreground long tool: verify the actual
+   `tool_call.rawInput` command and `block_until_ms: 120000`, then assert
+   the turn ends `cancelled`, the state leaves running and the known tool
+   child disappears. Background-task survival is documented as an observed
+   vendor behavior, not asserted because the model chooses backgrounding.
+   Close/SIGTERM must remove an active tool child (item 4)
 4. `close()` and SIGTERM: no owned process remains after the grace period
 5. Permission: a policy-escalated `session/request_permission` reaches the
    PermissionBroker; the state is `waiting_permission` only while that request

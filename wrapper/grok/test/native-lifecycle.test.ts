@@ -12,6 +12,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { expect, it, vi } from "vitest";
 import type { WrapperConfig } from "@kaoiro/agent-common";
 import { nativeRun } from "./native-support.js";
+import * as grokEvents from "../src/grok/events.js";
+import { checkForegroundTool } from "./acceptance.js";
 const live = process.env.KAOIRO_LIVE_GROK === "1";
 const config: WrapperConfig = {
   agent_id: "native.lifecycle",
@@ -22,20 +24,38 @@ const config: WrapperConfig = {
   persona: { id: "default", name: "Default", sprite_set: "default" },
 };
 it.skipIf(!live)(
-  "native cancel leaves a live tool child; close removes that child",
+  "native foreground cancel removes the known tool child",
   async () => {
     const root = mkdtempSync(join(homedir(), ".kaoiro-grok-cancel-"));
     const pidPath = join(root, "owned-pid");
+    const calls: Record<string, unknown>[] = [];
+    const updateEvents = grokEvents.updateEvents;
+    const observe = vi
+      .spyOn(grokEvents, "updateEvents")
+      .mockImplementation((notification) => {
+        if (
+          notification.update.sessionUpdate === "tool_call" ||
+          notification.update.sessionUpdate === "tool_call_update"
+        ) {
+          calls.push(
+            notification.update as unknown as Record<string, unknown>,
+          );
+        }
+        return updateEvents(notification);
+      });
     try {
-      await nativeRun(config, root, async (host, _callbacks, envelopes) => {
+      await nativeRun(config, root, async (
+        host, _link, envelopes, metadata,
+      ) => {
         await vi.waitFor(() => expect(host.state).toBe("waiting_input"), {
           timeout: 40_000,
         });
         const command =
           `printf '%s' "$$" > ${JSON.stringify(pidPath)}; ` + "exec sleep 120";
         const turn = host.send(
-          `Use run_terminal_command exactly: ${command}. ` +
-            "Do not run any other command.",
+          "Call run_terminal_command exactly once with these arguments: " +
+            JSON.stringify({ command, block_until_ms: 120_000 }) +
+            ". Keep it in the foreground. Do not use other tools.",
         );
         void turn.catch(() => {});
         await vi.waitFor(() => expect(existsSync(pidPath)).toBe(true), {
@@ -44,6 +64,21 @@ it.skipIf(!live)(
         const pid = Number(readFileSync(pidPath, "utf8"));
         expect(pid).toBeGreaterThan(1);
         const before = readFileSync(`/proc/${pid}/stat`, "utf8");
+        expect(before.slice(0, before.lastIndexOf(")") + 1)).toContain(
+          "(sleep)",
+        );
+        const input = calls.map((c) => c.rawInput).find((raw) =>
+          raw && typeof raw === "object" &&
+          (raw as Record<string, unknown>).command === command,
+        );
+        checkForegroundTool(input, command);
+        expect(() => checkForegroundTool(
+          { ...(input as Record<string, unknown>), block_until_ms: 0 },
+          command,
+        )).toThrow();
+        expect(metadata.some((m) => m.method === "_x.ai/task_backgrounded"))
+          .toBe(false);
+        expect(host.state).toBe("tool_running");
         await host.interrupt();
         await turn;
         expect(
@@ -51,14 +86,11 @@ it.skipIf(!live)(
         ).toBe("cancelled");
         expect(host.state).toBe("waiting_input");
         await delay(5_000);
-        expect(() => process.kill(pid, 0)).not.toThrow();
-        const after = readFileSync(`/proc/${pid}/stat`, "utf8");
-        expect(after.split(" ")[2]).toBe("S");
-        expect(after.split(" ")[21]).toBe(before.split(" ")[21]);
+        expect(() => process.kill(pid, 0)).toThrow();
+        expect(existsSync(`/proc/${pid}/stat`)).toBe(false);
         const startedAt = Date.now();
         host.close();
         await host.closed;
-        await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
         expect(Date.now() - startedAt).toBeLessThan(4_500);
         if (process.env.KAOIRO_LIVE_GROK_LIFECYCLE_REPORT) {
           writeFileSync(
@@ -66,8 +98,9 @@ it.skipIf(!live)(
             JSON.stringify({
               pid,
               grok_pid: host.processId,
+              calls,
               before,
-              after,
+              after_cancel: null,
               after_close: null,
               shutdown_ms: Date.now() - startedAt,
             }),
@@ -75,6 +108,7 @@ it.skipIf(!live)(
         }
       });
     } finally {
+      observe.mockRestore();
       rmSync(root, { recursive: true, force: true });
     }
   },
