@@ -86,3 +86,11 @@ full topic index.
 ## Input-bound inter-agent replies
 
 See [the reply-basis contract](../inter-agent/reply-basis.md) for negotiated protection, native tool origin binding, inline recovery, and the staged rollout boundary.
+
+## Grok work unit 1
+
+The catalog offers `default` (account default). Text, user questions and
+normal peer delivery are supported; early and yield are `none`. Model,
+effort and permission switching, attachments, reset, cold resume, history
+and context reporting are unsupported. Reply-basis v1 is not negotiated.
+See the [engine reference](../engines/grok-acp.md).

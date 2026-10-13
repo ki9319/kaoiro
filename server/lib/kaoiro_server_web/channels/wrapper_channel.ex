@@ -2229,7 +2229,7 @@ defmodule KaoiroServerWeb.WrapperChannel do
     engine =
       case envelope do
         %{"ext" => %{"engine" => e}}
-        when e in ["claude-code", "codex", "antigravity"] ->
+        when e in ["claude-code", "codex", "antigravity", "grok"] ->
           e
 
         _ ->
@@ -2364,7 +2364,7 @@ defmodule KaoiroServerWeb.WrapperChannel do
          "ext" => %{"permission_control" => permission_control, "engine" => engine}
        })
        when is_map(permission_control) and
-              engine in ["claude-code", "codex", "antigravity"] do
+              engine in ["claude-code", "codex", "antigravity", "grok"] do
     case record_permission_observation_safely(agent_id, engine, permission_control) do
       {:confirmed, %{engine: confirmed_engine, effective: effective}} ->
         record_confirmed_permission_snapshot(agent_id, confirmed_engine, effective)

@@ -269,3 +269,12 @@ full topic index.
 - [Permission requests](permission-requests.md).
 - [Permission synchronization and audit](permission-sync-audit.md).
 - [Permission control (two-axis model)](../../architecture/security-boundaries.md#permission-control-two-axis-model).
+
+## Grok permission projection
+
+Grok's launch-fixed approval axis is projected as `on-request`. The Linux
+restrictive profiles report enforcement `os`; the `off` profile omits it.
+`ext.permission_policy` contains only the launch observations from inspect
+and the selected profile. It is displayed to the operator and is not used
+to decide permissions. Unknown inspect output remains explicitly unknown.
+See the [engine reference](../engines/grok-acp.md).

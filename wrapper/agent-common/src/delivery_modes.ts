@@ -5,6 +5,7 @@ export const DELIVERY_ENGINE_SETTINGS = [
   { engine: "claude-code", enabled: true, default: true },
   { engine: "codex", enabled: true, default: true },
   { engine: "antigravity", enabled: false, default: false },
+  { engine: "grok", enabled: false, default: false },
 ] as const;
 
 export const DELIVERY_ENV_KEYS = [

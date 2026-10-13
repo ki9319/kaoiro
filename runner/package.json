@@ -34,6 +34,7 @@
     "@kaoiro/codex": "workspace:*",
     "@kaoiro/antigravity": "workspace:*",
     "@kaoiro/wrapper-core": "workspace:*",
-    "@kaoiro/agent-common": "workspace:*"
+    "@kaoiro/agent-common": "workspace:*",
+    "@kaoiro/grok": "workspace:*"
   }
 }

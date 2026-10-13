@@ -26,6 +26,7 @@ import {
   type AntigravityBehaviourConfig,
   type ClaudeCodeConfig,
   type CodexBehaviourConfig,
+  type WatchdogConfig,
 } from "./behaviour-settings.js";
 import { ConfigError } from "./config-error.js";
 import type {
@@ -77,6 +78,7 @@ export interface RunnerConfig {
   codex?: CodexConfig;
   antigravity?: AntigravityConfig;
   claude_code?: ClaudeCodeConfig;
+  grok?: WatchdogConfig;
   /** No-response window before a permission request is denied, for every
    *  engine's wrapper (issue #469). Omitted = wait for the operator. */
   permission_timeout_ms?: number;
@@ -560,6 +562,12 @@ export function parseRunnerConfig(raw: unknown): RunnerConfig {
     config.antigravity = antigravity;
   }
 
+  if (raw.grok !== undefined) {
+    if (!isObject(raw.grok) || Array.isArray(raw.grok)) {
+      throw new ConfigError("grok must be an object");
+    }
+    config.grok = parseBehaviourBlock("grok", raw.grok);
+  }
   if (raw.claude_code !== undefined) {
     if (!isObject(raw.claude_code) || Array.isArray(raw.claude_code)) {
       throw new ConfigError("claude_code must be an object");
@@ -613,7 +621,9 @@ export function loadRunnerConfig(path: string): RunnerConfig {
 
 /** Engines this runner build bundles (ADR-0032 F4a, ADR-0057 F1); the
  *  default capabilities when the config file does not restrict them. */
-const BUNDLED_ENGINES: EngineKind[] = ["claude-code", "codex", "antigravity"];
+const BUNDLED_ENGINES: EngineKind[] = [
+  "claude-code", "codex", "antigravity", "grok",
+];
 
 /** Effective capabilities: the configured list (legacy "claude" normalized
  *  to "claude-code" with a warning — the server keeps the same one-release
@@ -696,6 +706,13 @@ export function buildRegister(
         antigravityCatalogOverride ?? antigravityCatalogSnapshot(),
         config.antigravity?.extra_models,
       ),
+    });
+  }
+  if (capabilities.includes("grok")) {
+    engines.push({
+      id: "grok",
+      models: [{ value: "default", display_name: "Account default" }],
+      launch_permission_axes: { sandbox: true, approval: false },
     });
   }
   const safeBuildInfo =

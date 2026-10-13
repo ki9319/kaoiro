@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick, untrack } from "svelte";
+  import GrokPermissionPolicy from "./GrokPermissionPolicy.svelte";
   import DeliveryPolicyControl from "./DeliveryPolicyControl.svelte";
   import type { DeliveryPolicyStore } from "./deliveryPolicyStore.svelte";
   import type { DeliveryPolicy } from "./deliveryPolicy";
@@ -3209,6 +3210,11 @@
                 })}
               </dd>
             </div>
+          {/if}
+          {#if engineFrom(envelope) === "grok"}
+            <div class="cc-row"><dt>grok policy</dt><dd>
+              <GrokPermissionPolicy policy={envelope.ext?.permission_policy} />
+            </dd></div>
           {/if}
           {#if resumeDrift && resumeDrift.length > 0}
             <!-- ADR-0014 F1 addendum (phase-15 D8): resume drift warning.

@@ -65,4 +65,4 @@ export interface DeliveryPolicySpawnRequest {
   delivery_policy?: DeliveryPolicy;
 }
 
-export type InFlightDefaults = Partial<Record<"claude-code" | "codex" | "antigravity", boolean>>;
+export type InFlightDefaults = Partial<Record<"claude-code" | "codex" | "antigravity" | "grok", boolean>>;

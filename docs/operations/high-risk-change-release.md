@@ -86,7 +86,9 @@ git diff --name-only <base>..<head> -- \
   wrapper/codex/src/startup.ts wrapper/codex/src/app_server_host_runtime.ts \
   wrapper/codex/src/app_server_input.ts wrapper/codex/src/app_server_session.ts \
   wrapper/codex/src/app_server_transport.ts wrapper/codex/src/app_server_rpc.ts \
-  wrapper/codex/src/app_server_steer.ts wrapper/codex/src/tool_home.ts
+  wrapper/codex/src/app_server_steer.ts wrapper/codex/src/tool_home.ts \
+  wrapper/grok/src/acp/connection.ts wrapper/grok/src/acp/session.ts \
+  wrapper/grok/src/grok/process.ts
 ```
 
 Changes to the tagging workflows, allocator or central tag-domain definition

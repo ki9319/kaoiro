@@ -391,7 +391,7 @@ export type PermissionMode =
 /** Engine kinds a host can run (ADR-0032 F4a, ADR-0057 F1). The value set of
  *  the runner register `capabilities`, `SpawnMessage.engine`, and
  *  `ext.engine`. */
-export type EngineKind = "claude-code" | "codex" | "antigravity";
+export type EngineKind = "claude-code" | "codex" | "antigravity" | "grok";
 
 /** ext.permission — the agent's current permission posture as the
  *  engine-neutral two-axis form (ADR-0033 F1). Claude adapters derive it

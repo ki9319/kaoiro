@@ -221,6 +221,8 @@ describe("registry", () => {
   it("lists the documented variables in table order, each tied to its engine and key", () => {
     expect(BEHAVIOUR_ROWS.map((r) => [r.env, r.engine, r.block ?? null, r.key])).toEqual([
       ...FILE_KEYS.map(([key, env]) => [env, "claude-code", "claude_code", key]),
+      ["KAOIRO_GROK_TURN_WATCHDOG_INACTIVITY_MS", "grok", "grok", "turn_watchdog_inactivity_ms"],
+      ["KAOIRO_GROK_TURN_WATCHDOG_ABORT_GRACE_MS", "grok", "grok", "turn_watchdog_abort_grace_ms"],
       ["KAOIRO_CLAUDE_TURN_WATCHDOG_INACTIVITY_MS", "claude-code", "claude_code", "turn_watchdog_inactivity_ms"],
       ["KAOIRO_CLAUDE_TURN_WATCHDOG_ABORT_GRACE_MS", "claude-code", "claude_code", "turn_watchdog_abort_grace_ms"],
       ["KAOIRO_CODEX_TURN_WATCHDOG_INACTIVITY_MS", "codex", "codex", "turn_watchdog_inactivity_ms"],

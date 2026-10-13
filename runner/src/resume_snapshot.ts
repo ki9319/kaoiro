@@ -160,6 +160,7 @@ const P0_FIELDS_BY_ENGINE: Record<EngineKind, readonly P0ApplyField[]> = {
   "claude-code": ["permissionMode"],
   codex: ["sandbox", "networkAccess"],
   antigravity: ["sandbox", "approval", "networkAccess"],
+  grok: ["sandbox", "networkAccess"],
 };
 
 /** P1 (phase-23): 5-case source-aware pair rule for `model` / `effort`.

@@ -213,7 +213,7 @@ export function writeReleaseTree(
   // used to miss entirely: removing a file from it verified clean and then
   // failed at import, on a real tarball (issue #219, 2026-08-16). A fixture
   // with no dependency edges could not measure the difference.
-  for (const wrapper of ["claude-code", "codex", "antigravity"]) {
+  for (const wrapper of ["claude-code", "codex", "antigravity", "grok"]) {
     // The codex wrapper locates its bridge through `new URL(...,
     // import.meta.url)` — a real runtime module edge no import statement
     // expresses. The closure walk missed it entirely until もも removed
@@ -232,7 +232,7 @@ export function writeReleaseTree(
     // sites would let the other's deletion survive review, the same class
     // of gap that missed probe.js in round 2.
     const asset: string[] =
-      wrapper === "codex"
+      (wrapper === "codex" || wrapper === "grok")
         ? ["dist/bridge.js"]
         : wrapper === "claude-code"
           ? ["dist/probe.js"]
@@ -263,7 +263,7 @@ export function writeReleaseTree(
     // they are what proves the verifier no longer reads edges out of call
     // text.
     const bridgeEdge =
-      wrapper === "codex"
+      (wrapper === "codex" || wrapper === "grok")
         ? 'const b = new URL("../dist/bridge.js", import.meta.url);\n'
         : wrapper === "antigravity"
           ? 'const b = new URL("../dist/bridge.js", import.meta.url);\n' +
@@ -275,9 +275,14 @@ export function writeReleaseTree(
     );
   }
   put("node_modules/@kaoiro/codex/dist/bridge.js", "// stub bridge\n");
+  put("node_modules/@kaoiro/grok/dist/bridge.js", "// stub bridge\n");
   put("node_modules/@kaoiro/claude-code/dist/probe.js", "// stub probe\n");
   put("node_modules/@kaoiro/antigravity/dist/bridge.js", "// stub bridge\n");
   put("node_modules/@kaoiro/antigravity/dist/hook.js", "// stub hook\n");
+  put(
+    "node_modules/@kaoiro/grok/dist/build-info.json",
+    JSON.stringify({ revision, dirty, built_at: "2026-08-16T00:00:00.000Z", version: "0.0.0", channel: "dev" }),
+  );
   put(
     "node_modules/@kaoiro/antigravity/dist/build-info.json",
     JSON.stringify({
@@ -417,9 +422,9 @@ export function writeWorkspaceCheckout(
   writeFileSync(
     join(ws, "pnpm-workspace.yaml"),
     "packages:\n  - runner\n  - wrapper/claude-code\n  - wrapper/codex\n" +
-      "  - wrapper/antigravity\n",
+      "  - wrapper/antigravity\n  - wrapper/grok\n",
   );
-  for (const wrapper of ["claude-code", "codex", "antigravity"]) {
+  for (const wrapper of ["claude-code", "codex", "antigravity", "grok"]) {
     const link = join(runner, "node_modules", "@kaoiro", wrapper);
     const member = join(ws, "wrapper", wrapper);
     mkdirSync(dirname(member), { recursive: true });

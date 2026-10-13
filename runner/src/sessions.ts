@@ -764,6 +764,7 @@ export function listSessions(
   cwd: string,
   engine: EngineKind = "claude-code",
 ): SessionMeta[] | Promise<SessionMeta[]> {
+  if (engine === "grok") return [];
   if (engine === "antigravity") {
     return listAntigravitySessionsFrom(antigravityDatabasePath(), cwd);
   }
@@ -779,6 +780,7 @@ export function sessionExists(
   sessionId: string,
   engine: EngineKind = "claude-code",
 ): boolean | Promise<boolean> {
+  if (engine === "grok") return false;
   if (engine === "antigravity") {
     return antigravitySessionExistsIn(antigravityDatabasePath(), cwd, sessionId);
   }

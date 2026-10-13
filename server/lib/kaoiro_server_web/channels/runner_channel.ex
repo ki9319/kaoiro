@@ -260,7 +260,7 @@ defmodule KaoiroServerWeb.RunnerChannel do
 
     if is_map(value) and
          Enum.all?(value, fn {engine, enabled} ->
-           engine in ~w(claude-code codex antigravity) and is_boolean(enabled)
+           engine in ~w(claude-code codex antigravity grok) and is_boolean(enabled)
          end), do: {:ok, value}, else: {:error, :invalid_register}
   end
 

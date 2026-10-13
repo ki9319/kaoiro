@@ -71,6 +71,7 @@ describe("changedFields", () => {
   // RunnerConfig (typed Required<>), and each is mutated in turn.
   it("RunnerConfig の全 top-level key の変更を差分に含める", () => {
     const full: Required<RunnerConfig> = {
+      grok: { turn_watchdog_inactivity_ms: 60_000 },
       in_flight_delivery: { codex: { enabled: true } },
       host_id: "h",
       server_url: "ws://a/runner",
@@ -87,6 +88,7 @@ describe("changedFields", () => {
       log_phoenix_heartbeats: false,
     };
     const changed: Required<RunnerConfig> = {
+      grok: { turn_watchdog_inactivity_ms: 120_000 },
       in_flight_delivery: { codex: { enabled: false } },
       host_id: "h2",
       server_url: "ws://b/runner",

@@ -1,7 +1,7 @@
 ---
 title: Phase 36 — Grok Build adapter (fourth engine, resident ACP host)
 description: Add Grok Build as engine `grok` — wrapper/grok package hosting a resident `grok agent stdio` child over the Agent Client Protocol, kaoiro tools through the stdio MCP bridge, persona through `_meta.rules`, a declared permission projection with display-only policy details, and the closed-set wiring across protocol, runner, server and dashboard.
-status: approved
+status: in_progress
 phase: 36
 depends_on: [phase-34-antigravity-adapter]
 related: [issue-589, issue-590, issue-591, issue-592, issue-593]
@@ -226,9 +226,12 @@ The seccomp state is observed from inside the tool process. Landlock is
 inferred from the `EACCES` failures and grok's docs, not observed directly.
 `enforcement: "os"` is reported on that basis.
 
-Supported pairs in work unit 1: (`read-only`, network off) to `read-only`;
-(`workspace-write`, network on) to `workspace`; (`danger-full-access`,
-network on) to `off`. Every other pair is rejected at spawn with a reason. The
+Supported pairs in work unit 1: on Linux, (`read-only`, network off) to `read-only`;
+(`workspace-write`, network on) to `workspace`. These OS sandbox pairs are
+rejected on non-Linux platforms with a reason: their enforcement has only
+been measured on Linux. (`danger-full-access`, network on) maps to `off` on
+every platform. macOS remains unmeasured until work unit 2 or later.
+Every other pair is rejected at spawn with a reason. The
 `ext.permission` axes keep their existing meaning; the grok profile name the
 wrapper set is shown next to them (`grok_sandbox_env`). What a profile permits
 beyond the axes (all profiles keep `/tmp`, `/var/tmp` and `~/.grok` writable;
@@ -327,7 +330,8 @@ signal other processes:
    with `send_to_agent` through the production bridge; the delivery is
    confirmed (ack) to the sender; a failed delivery notifies the sender;
    `delivery_modes` reports `none` / `none`
-8. `ext.permission` (`on-request`, `os`) and `ext.permission_policy` go from
+8. `ext.permission` (`on-request`, `os` for Linux restrictive profiles;
+   omitted enforcement for `off`) and `ext.permission_policy` go from
    the wrapper through the server to the operator dashboard and are rendered.
    Each displayed value is checked against its own source: `sources`,
    `managed_settings_active`, `rules_loaded` and `rules_skipped` against the
@@ -346,8 +350,10 @@ signal other processes:
    and yield `enabled: false` or `inspect: "unavailable"` respectively
 9. A `session/update` variant unknown to the SDK, injected into the same
    transport stream the adapter uses, is counted by the tee and its variant
-   name appears in the log, while a marker string placed in its content and in
-   a normal prompt and tool result appears in no log or stderr output
+   name appears in diagnostic metadata. A marker in the unknown variant body
+   appears nowhere. Markers in normal prompts and tool results appear in no
+   ACP tee metadata, filtered SDK console diagnostics or wrapper stderr;
+   protocol display logs and results intentionally carry normal content
 
 Negative controls (each turns its check red):
 
@@ -378,7 +384,7 @@ permission pages, the runner configuration page, and an ADR for the engine
 
 | Unit | Issue | Status |
 |---|---|---|
-| 1. Registration, launch and minimal ACP host | [#590](https://github.com/sakuraiyuta/kaoiro/issues/590) | ⏳ |
+| 1. Registration, launch and minimal ACP host | [#590](https://github.com/sakuraiyuta/kaoiro/issues/590) | In progress |
 | 2. Permission and sandbox enforcement | [#591](https://github.com/sakuraiyuta/kaoiro/issues/591) | ⏳ |
 | 3. Resume, history replay and catalog probe | [#592](https://github.com/sakuraiyuta/kaoiro/issues/592) | ⏳ |
 | 4. Context usage, live model and effort switching | [#593](https://github.com/sakuraiyuta/kaoiro/issues/593) | ⏳ |

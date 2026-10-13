@@ -49,6 +49,7 @@ const ENGINE_PACKAGES: Record<EngineKind, string> = {
   "claude-code": "@kaoiro/claude-code",
   codex: "@kaoiro/codex",
   antigravity: "@kaoiro/antigravity",
+  grok: "@kaoiro/grok",
 };
 
 // Leading argv for `process.execPath` (node) that runs the wrapper of the

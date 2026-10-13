@@ -5,6 +5,7 @@ packages:
   - wrapper/claude-code
   - wrapper/codex
   - wrapper/antigravity
+  - wrapper/grok
   - runner
   # dashboard(トップレベル dashboard/)は別ビルド系のため非メンバ。
   # wrapper/ 直下はメタ shim (workspace 非メンバ、scripts のみ)。

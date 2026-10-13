@@ -29,7 +29,7 @@ one host with the other.
   "host_id": "lab-pc-1",
   "server_url": "wss://kaoiro.example.com/runner",
   "cwd_allowlist": ["/home/agent/repos"],
-  "capabilities": ["claude-code", "codex", "antigravity"]
+  "capabilities": ["claude-code", "codex", "antigravity", "grok"]
 }
 ```
 
@@ -91,6 +91,7 @@ keys. Omitted keys resolve independently:
 | `claude-code` | `in_flight_delivery.claude-code` | `true` | `true` |
 | `codex` | `in_flight_delivery.codex` | `true` | `true` |
 | `antigravity` | `in_flight_delivery.antigravity` | `false` | `false` |
+| `grok` | `in_flight_delivery.grok` | `false` | `false` |
 
 `enabled: false` is a launch ceiling: it disables every in-flight mechanism
 for that engine, even when a legacy flag or persona list enables it. `true`
@@ -151,6 +152,8 @@ hidden by a variable.
 | `KAOIRO_CLAUDE_PENDING_RECEIPT_ROOT_TIMEOUT_MS` | `claude_code.pending_receipt_root_timeout_ms` | integer | 1..60000 | 2000 | Claude wrapper (`parseConfig`) | variable > file > default |
 | `KAOIRO_CLAUDE_URGENT_OVERTAKE_LIMIT` | `claude_code.urgent_overtake_limit` | integer | 1..64 | 2 | Claude wrapper (`parseConfig`) | variable > file > default |
 | `KAOIRO_CLAUDE_FOLDS_PER_TURN` | `claude_code.folds_per_turn` | integer | 1..64 | 3 | Claude wrapper (`parseConfig`) | variable > file > default |
+| `KAOIRO_GROK_TURN_WATCHDOG_INACTIVITY_MS` | `grok.turn_watchdog_inactivity_ms` | integer | 60000..2147483647 | 1800000 | Grok wrapper (`readTurnWatchdogSettings`) | variable > file > default |
+| `KAOIRO_GROK_TURN_WATCHDOG_ABORT_GRACE_MS` | `grok.turn_watchdog_abort_grace_ms` | integer | 1..2147483647 | 3000 | Grok wrapper (`readTurnWatchdogSettings`) | variable > file > default |
 | `KAOIRO_CLAUDE_TURN_WATCHDOG_INACTIVITY_MS` | `claude_code.turn_watchdog_inactivity_ms` | integer | 60000..2147483647 | 1800000 | Claude wrapper (`resolveTurnWatchdogSettings`) | variable > file > default |
 | `KAOIRO_CLAUDE_TURN_WATCHDOG_ABORT_GRACE_MS` | `claude_code.turn_watchdog_abort_grace_ms` | integer | 1..2147483647 | 60000 | Claude wrapper (`resolveTurnWatchdogSettings`) | variable > file > default |
 | `KAOIRO_CODEX_TURN_WATCHDOG_INACTIVITY_MS` | `codex.turn_watchdog_inactivity_ms` | integer | 60000..2147483647 | 1800000 | Codex wrapper (`resolveTurnWatchdogSettings`) | variable > file > default |
@@ -367,3 +370,12 @@ reaches only spawns after the reload. A reload resolves the path again, so a
 fixed executable can recover without a config-text change. A catalog snapshot
 fallback merely preserves model choices; it does not prove that a wrapper can
 start.
+
+## Grok runner configuration
+
+Add `grok` to capabilities to expose the account-default catalog. The `grok`
+block supports `turn_watchdog_inactivity_ms` and `turn_watchdog_abort_grace_ms`
+through the same behaviour registry; deprecated environment overrides are
+`KAOIRO_GROK_TURN_WATCHDOG_INACTIVITY_MS` and
+`KAOIRO_GROK_TURN_WATCHDOG_ABORT_GRACE_MS`. The Grok CLI must be on PATH.
+Session enumeration is empty and cold resume is rejected in work unit 1.

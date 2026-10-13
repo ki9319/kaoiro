@@ -49,6 +49,7 @@ const SENTINELS = [
   "node_modules/@kaoiro/claude-code/dist/cli.js",
   "node_modules/@kaoiro/codex/dist/cli.js",
   "node_modules/@kaoiro/antigravity/dist/cli.js",
+  "node_modules/@kaoiro/grok/dist/cli.js",
 ];
 
 const REVISION_RE = /^[0-9a-f]{40}$/;
@@ -804,6 +805,7 @@ const ENTRY_PACKAGES = [
   "@kaoiro/claude-code",
   "@kaoiro/codex",
   "@kaoiro/antigravity",
+  "@kaoiro/grok",
 ];
 
 /** Specifiers this verifier follows at all. `node:` builtins and third-party

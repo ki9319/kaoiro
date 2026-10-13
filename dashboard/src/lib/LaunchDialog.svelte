@@ -641,7 +641,7 @@
           エンジン
           <select bind:value={engine}>
             {#each engines as e (e)}
-              <option value={e}>{e}</option>
+              <option value={e}>{e === "grok" ? "Grok Build" : e}</option>
             {/each}
           </select>
         </label>

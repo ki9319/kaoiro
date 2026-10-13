@@ -79,7 +79,7 @@ The dashboard interface is currently Japanese-only.
 - **Multi-host** — one runner per machine registers that host, declares which
   engines it can spawn, and supervises the wrapper processes living there
   ([deployment architecture](docs/architecture/deployment.md)).
-- **Three engines, one protocol** — Claude Code, Codex, and Antigravity use one
+- **Four engines, one protocol** — Claude Code, Codex, Antigravity and Grok Build use one
   adapter boundary. The UI branches on declared capabilities rather than engine
   names ([adapter contract](docs/reference/engines/adapter-contract.md)).
 - **Personas as zip packs** — characters are versioned, hash-checked packs read
@@ -168,7 +168,9 @@ data flow.
 
 ### Target agents
 
-The supported engines are **Claude Code**, **Codex**, and **Antigravity**. The
+The supported engines are **Claude Code**, **Codex**, **Antigravity**, and
+**Grok Build**. Grok requires its CLI on PATH and uses a resident ACP host
+([Grok reference](docs/reference/engines/grok-acp.md)). The
 engine is selectable at launch. Engine-specific differences are represented by
 `ext.session_capabilities` in the envelope, so the UI does not branch on engine
 names. Additional engines can use the same adapter boundary
@@ -247,3 +249,11 @@ somewhere eventually.
 Finally, `iro` in kaoiro means color. I also mixed a spoonful of hope into the
 name: that kaoiro might add a little color to work that can so easily feel
 bleak.
+
+## Grok Build engine
+
+Grok Build runs as one resident ACP session with the kaoiro tool bridge and
+server-composed persona. Work unit 1 supports text, resident conversation,
+cancellation and normal peer delivery. See the
+[Grok reference](docs/reference/engines/grok-acp.md) for supported sandbox
+pairs and operations deferred to later work units.

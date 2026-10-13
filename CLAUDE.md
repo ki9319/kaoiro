@@ -6,11 +6,10 @@ kaoiro — 複数の CLI AI エージェントの状態をキャラクターと�
 
 ## Stack
 
-- ラッパー: TypeScript。engine ごとにパッケージを分け、Claude Code は
-  Claude Agent SDK(`@anthropic-ai/claude-agent-sdk`)、Codex は Codex SDK、
-  Antigravity は Antigravity CLI をホストする(`core` / `agent-common` /
-  `claude-code` / `codex` / `antigravity` の 5 パッケージ — ADR-0017 /
-  ADR-0032 / ADR-0057)
+- Wrapper: TypeScript packages per engine. Claude Code uses the Claude Agent
+  SDK, Codex uses the Codex SDK, Antigravity hosts its CLI, and Grok Build
+  hosts resident ACP. The six packages are `core`, `agent-common`,
+  `claude-code`, `codex`, `antigravity` and `grok` (ADR-0017/0032/0057).
 - サーバ: Elixir / OTP + Phoenix
 - クライアント: Web(TypeScript)。同梱ダッシュボードは Svelte 5 + Vite
   (`dashboard/`、pnpm workspace の非メンバで独立ルート・独立 lockfile)

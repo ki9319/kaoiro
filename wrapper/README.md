@@ -1,8 +1,8 @@
-# Wrapper — kaoiro agent adapters (five pnpm packages)
+# Wrapper — kaoiro agent adapters (six pnpm packages)
 
 The TypeScript wrapper packages host agent CLIs, derive kaoiro state from
 engine events, and translate them into the common envelope. The workspace
-contains five packages ([ADR-0017](../docs/adr/0017-wrapper-multientity-packages.md),
+contains six packages ([ADR-0017](../docs/adr/0017-wrapper-multientity-packages.md),
 [ADR-0032](../docs/adr/0032-codex-adapter.md), [ADR-0057](../docs/adr/0057-antigravity-adapter.md)).
 
 ## Packages
@@ -14,6 +14,7 @@ contains five packages ([ADR-0017](../docs/adr/0017-wrapper-multientity-packages
 | `@kaoiro/claude-code` | `claude-code/` | Claude Code adapter: SDK event mapping, file uploads, inter-agent tools, and CLI |
 | `@kaoiro/codex` | `codex/` | Codex adapter: thread and turn event mapping, tool host bridge, session restore, model catalog, file uploads, and CLI |
 | `@kaoiro/antigravity` | `antigravity/` | Antigravity adapter: CLI event mapping, tool bridge, and CLI |
+| `@kaoiro/grok` | `grok/` | Grok Build adapter: resident ACP session, stdio MCP bridge, cancellation and CLI |
 
 Dependency graph (arrows point to dependencies):
 
@@ -22,6 +23,8 @@ graph TD
   CC["@kaoiro/claude-code"] --> AC["@kaoiro/agent-common"]
   CX["@kaoiro/codex"] --> AC
   AG["@kaoiro/antigravity"] --> AC
+  GK["@kaoiro/grok"] --> AC
+  GK --> CORE
   AC --> CORE["@kaoiro/wrapper-core"]
   CC --> CORE
   CX --> CORE
@@ -134,3 +137,12 @@ wrapper は常駐モードで動作する。起動後、server の join に成�
   場合は `http://localhost:4000/?token=<token>` で開く。トークンを使わない
   運用は OAuth ログイン([ADR-0042](../docs/adr/0042-oauth-allowlist-login.md))
   が代替経路。手順は [server/README.md](../server/README.md) を参照。
+
+## Grok ACP package
+
+`grok/` separates the resident process, ACP transport, session and event
+mapping. Its ToolHost serves the common descriptors through `dist/bridge.js`.
+Signal tests run in a PID namespace whose init reaps adopted children;
+Linux `unshare` and `setsid` are required for that suite. Live acceptance is
+opt-in with `KAOIRO_LIVE_GROK=1` and consumes the provider's account quota.
+See the [engine reference](../docs/reference/engines/grok-acp.md).

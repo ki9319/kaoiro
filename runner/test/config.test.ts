@@ -722,7 +722,7 @@ describe("buildRegister", () => {
       version: "0",
       host_id: "lab-pc-1",
       cwd_allowlist: valid.cwd_allowlist,
-      capabilities: ["claude-code", "codex", "antigravity"],
+      capabilities: ["claude-code", "codex", "antigravity", "grok"],
     });
     expect(register.personas).toBeUndefined();
     expect(register.allowed_personas).toBeUndefined();
@@ -736,6 +736,7 @@ describe("buildRegister", () => {
       "claude-code",
       "codex",
       "antigravity",
+      "grok",
     ]);
     expect(register.engines?.[0]?.models.map((m) => m.value)).toEqual([
       "default",

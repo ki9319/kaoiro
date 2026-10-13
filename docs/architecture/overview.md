@@ -72,3 +72,11 @@ None (this spec is accepted).
 - Related specs: [architecture](system-overview.md), [non-goals](scope.md),
   [glossary](../reference/glossary.md)
 - ADRs: [0001](../adr/0001-agent-sdk-integration.md)
+
+## Grok resident host
+
+`@kaoiro/grok` owns a child process and one ACP session for the wrapper's
+lifetime. Engine-specific process, transport, session and event modules
+feed the common state machine, brokers and tool handlers. Persona/footer
+rules use native `_meta.rules`; MCP calls use the wrapper's stdio bridge.
+See the [engine reference](../reference/engines/grok-acp.md).

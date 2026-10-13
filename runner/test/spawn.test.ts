@@ -102,14 +102,14 @@ process.exit(0);`);
     process.env.NODE_OPTIONS = `--require=${capture}`;
     process.env.FUJI464_CAPTURE = scratch;
     const launch = makeLauncher();
-    for (const engine of ["codex", "claude-code", "antigravity"] as const) {
+    for (const engine of ["codex", "claude-code", "antigravity", "grok"] as const) {
       const id = `fuji464-${engine}`;
       await new Promise<void>((resolve, reject) => {
         const child = launch(id, { agent_id: id, codex_tool_home: process.env.CODEX_HOME } as never, scratch, undefined, undefined, engine);
         child.on("exit", resolve);
         setTimeout(() => reject(new Error(`${engine} did not exit`)), 10_000).unref();
       });
-      const resultFile = join(scratch, `${id}-${["codex", "claude-code", "antigravity"].indexOf(engine)}.json.result`);
+      const resultFile = join(scratch, `${id}-${["codex", "claude-code", "antigravity", "grok"].indexOf(engine)}.json.result`);
       const result = JSON.parse(readFileSync(resultFile, "utf8")) as { home: string | null; config: { codex_tool_home?: string } };
       if (engine === "codex") {
         expect(result.home).toBe(process.env.CODEX_HOME);

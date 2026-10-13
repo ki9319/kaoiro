@@ -2910,7 +2910,7 @@ defmodule KaoiroServerWeb.AgentsChannel do
   # F4a, ADR-0057 F1). Absent = nil (the runner defaults to claude-code),
   # so an old dashboard keeps working; an unknown or undeclared value is
   # rejected rather than silently launching the wrong engine.
-  @engine_values ["claude-code", "codex", "antigravity"]
+  @engine_values ["claude-code", "codex", "antigravity", "grok"]
   defp fetch_allowed_engine(host, payload) do
     case payload["engine"] do
       nil ->

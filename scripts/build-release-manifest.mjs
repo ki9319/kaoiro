@@ -43,6 +43,7 @@ const ENTRY_PACKAGES = [
   "@kaoiro/claude-code",
   "@kaoiro/codex",
   "@kaoiro/antigravity",
+  "@kaoiro/grok",
 ];
 
 const CODE_FILE_RE = /\.(js|mjs|cjs|json)$/;

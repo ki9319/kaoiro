@@ -9161,4 +9161,45 @@ defmodule KaoiroServerWeb.WrapperChannelTest do
       "delivery" => %{"advisory" => %{"unresolved_count" => 2}}
     }
   end
+
+  test "Grok permission metadata reaches the operator envelope unchanged" do
+    id = "test.grok-policy"
+    @endpoint.subscribe("agents:lobby")
+    socket = join_wrapper(id)
+
+    policy = %{
+      "inspect" => "ok",
+      "grok_sandbox_env" => "workspace",
+      "grok_version" => "fixture version",
+      "sources" => ["user", "project"],
+      "managed_settings_active" => false,
+      "rules_loaded" => 3,
+      "rules_skipped" => 1,
+      "claude_hooks" => %{"enabled" => true, "source" => "config"}
+    }
+
+    ext = %{
+      "engine" => "grok",
+      "permission_policy" => policy,
+      "permission" => %{
+        "sandbox" => "workspace-write",
+        "approval" => "on-request",
+        "enforcement" => "os"
+      }
+    }
+
+    message =
+      envelope(id, "waiting_input")
+      |> Map.put("ext", ext)
+      |> Map.put("session_id", "grok-fixture-session")
+
+    ref = push(socket, "envelope", message)
+    assert_reply ref, :ok
+    assert_broadcast "envelope", %{"agent_id" => ^id, "ext" => received}
+    assert received["engine"] == "grok"
+    assert received["permission_policy"] == policy
+    assert received["permission"] == ext["permission"]
+    assert AgentStates.snapshot()[id]["ext"]["permission_policy"] == policy
+    assert SessionPointers.get(id).engine == "grok"
+  end
 end

@@ -1,0 +1,37 @@
+{
+  "name": "@kaoiro/grok",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Grok Build resident ACP engine adapter",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "kaoiro": {
+    "runtimeAssets": [
+      "dist/bridge.js",
+      "dist/build-info.json"
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/generate-wrapper-build-info.mjs dist",
+    "typecheck": "tsc --noEmit",
+    "pretest": "pnpm build",
+    "test": "python3 ../../scripts/run-grok-test-namespace.py -- vitest run"
+  },
+  "dependencies": {
+    "@kaoiro/agent-common": "workspace:*",
+    "@kaoiro/wrapper-core": "workspace:*",
+    "@agentclientprotocol/sdk": "1.8.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@kaoiro/protocol": "workspace:*",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

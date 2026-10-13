@@ -185,6 +185,7 @@ describe("runSetup", () => {
       "y", // claude-code
       "n", // codex
       "n", // antigravity
+      "n", // grok off
       "y", // set a token?
       "n", // generate?
       "manual-token", // token
@@ -225,6 +226,7 @@ describe("runSetup", () => {
       "y", // claude-code
       "n", // codex
       "n", // antigravity
+      "n", // grok off
       "n", // no token
       "", // node path
     ]);
@@ -247,6 +249,7 @@ describe("runSetup", () => {
       "n", // claude-code off
       "y", // codex on
       "n", // antigravity
+      "n", // grok off
       "y", // codex uses a ChatGPT plan
       "y", // set a token
       "y", // generate
@@ -273,6 +276,7 @@ describe("runSetup", () => {
       "y", // claude-code
       "n", // codex
       "n", // antigravity
+      "n", // grok off
       "n", // no token
       "", // node path
       "n", // overwrite runner.config.json? -> no
@@ -299,6 +303,7 @@ describe("runSetup", () => {
       "n", // claude-code off
       "y", // codex on
       "n", // antigravity
+      "n", // grok off
       "n", // ChatGPT plan? -> no, so API key
       "n", // no token
       "", // node path
@@ -326,6 +331,7 @@ describe("runSetup", () => {
       "y", // claude-code
       "n", // codex
       "n", // antigravity
+      "n", // grok off
       "y", // set a token
       "n", // generate?
       "tok", // token
@@ -350,6 +356,7 @@ describe("runSetup", () => {
       "n", // claude-code off
       "n", // codex off
       "n", // antigravity off
+      "n", // grok off
       "n", // no token
       "", // node path
     ]);
@@ -370,6 +377,7 @@ describe("runSetup", () => {
       "n", // claude-code off
       "n", // codex off
       "y", // antigravity on
+      "n", // grok off
       "n", // no token
       "", // node path
     ]);
@@ -397,6 +405,7 @@ describe("runSetup", () => {
       "n", // claude-code off
       "n", // codex off
       "y", // antigravity on
+      "n", // grok off
     ]);
 
     await expect(
@@ -426,6 +435,7 @@ describe("runSetup", () => {
       "n", // claude-code off
       "n", // codex off
       "y", // antigravity on
+      "n", // grok off
       "n", // no token
       "", // node path
     ]);

@@ -25,11 +25,12 @@ import {
   readTurnWatchdogSettings as readClaudeWatchdog,
 } from "@kaoiro/claude-code/settings";
 import type { EngineKind, WrapperConfig } from "@kaoiro/protocol";
+import { readTurnWatchdogSettings as readGrokWatchdog } from "@kaoiro/grok";
 import { ConfigError } from "./config-error.js";
 import { DELIVERY_ENGINE_SETTINGS } from "@kaoiro/agent-common";
 import type { RunnerConfig } from "./config.js";
 
-export type BehaviourBlock = "claude_code" | "codex" | "antigravity";
+export type BehaviourBlock = "claude_code" | "codex" | "antigravity" | "grok";
 export type BehaviourValue = number | boolean | string;
 
 export const HOST_DELIVERY_ROWS = DELIVERY_ENGINE_SETTINGS;
@@ -161,6 +162,11 @@ type WatchdogKey = keyof typeof WATCHDOG_RANGES;
 /** Each engine keeps its own variable names; the grammar and bounds of a set
  *  variable come from that engine's own reader. */
 const WATCHDOG_ENGINES = [
+  {
+    block: "grok", engine: "grok", read: readGrokWatchdog,
+    inactivity: "KAOIRO_GROK_TURN_WATCHDOG_INACTIVITY_MS",
+    abortGrace: "KAOIRO_GROK_TURN_WATCHDOG_ABORT_GRACE_MS",
+  },
   {
     block: "claude_code",
     engine: "claude-code",
@@ -468,7 +474,7 @@ function isEnabled(
   return config.capabilities?.includes(engine) ?? true;
 }
 
-const ALL_ENGINES: readonly EngineKind[] = ["claude-code", "codex", "antigravity"];
+const ALL_ENGINES: readonly EngineKind[] = ["claude-code", "codex", "antigravity", "grok"];
 
 interface SetVariable {
   row: BehaviourRow;

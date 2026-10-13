@@ -308,7 +308,8 @@ export function parseSpawn(payload: unknown): ParsedSpawn | null {
     if (
       payload.engine !== "claude-code" &&
       payload.engine !== "codex" &&
-      payload.engine !== "antigravity"
+      payload.engine !== "antigravity" &&
+      payload.engine !== "grok"
     ) {
       return null;
     }
@@ -1237,7 +1238,8 @@ export class Supervisor {
       if (
         payload.engine !== "claude-code" &&
         payload.engine !== "codex" &&
-        payload.engine !== "antigravity"
+        payload.engine !== "antigravity" &&
+        payload.engine !== "grok"
       ) {
         this.#sendSessions({
           version: "0",
