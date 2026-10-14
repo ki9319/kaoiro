@@ -544,6 +544,42 @@ describe("codexErrorClassification (issue #300)", () => {
     ).toBeLessThanOrEqual(MAX_ERROR_CODE_BYTES);
   });
 
+  it("matches the pre-#624 clip on a leading BOM, above and below the bound", () => {
+    // The clip as it was at 6e635e46: a fatal TextDecoder drops a leading BOM
+    // on the oversized branch; a value within the bound is returned as is.
+    const previous = (value: string): string => {
+      const bytes = Buffer.from(value, "utf8");
+      if (bytes.length <= MAX_ERROR_CODE_BYTES) return value;
+      const decoder = new TextDecoder("utf-8", { fatal: true });
+      for (let end = MAX_ERROR_CODE_BYTES; end > 0; end--) {
+        try {
+          return decoder.decode(bytes.subarray(0, end));
+        } catch {
+          continue;
+        }
+      }
+      return "";
+    };
+    const bom = "\ufeff";
+    const values = [
+      bom + "a".repeat(10),
+      bom + "a".repeat(MAX_ERROR_CODE_BYTES - 3),
+      bom + "a".repeat(MAX_ERROR_CODE_BYTES - 2),
+      bom + "a".repeat(300),
+      bom + "\u3042".repeat(MAX_ERROR_CODE_BYTES),
+      "a" + bom + "a".repeat(300),
+    ];
+    for (const value of values) {
+      const code = codexErrorClassification({ message: "x", code: value })
+        ?.error_code;
+      expect(code).toBe(previous(value));
+    }
+    expect(
+      codexErrorClassification({ message: "x", code: bom + "a".repeat(300) })
+        ?.error_code,
+    ).toBe("a".repeat(MAX_ERROR_CODE_BYTES - 3));
+  });
+
   it.each([
     ["2-byte", "\u00e9"],
     ["3-byte", "\u3042"],

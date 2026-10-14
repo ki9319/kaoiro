@@ -11,7 +11,7 @@ import type {
   TasklistSourceItem,
 } from "@kaoiro/agent-common";
 import { redactCredentials } from "@kaoiro/agent-common";
-import { clipUtf8Head } from "@kaoiro/wrapper-core";
+import { utf8HeadEnd } from "@kaoiro/wrapper-core";
 import { clipTail } from "./turn_diagnostics.js";
 
 /** Tool-ish items: they occupy the tool_running state between item.started
@@ -353,11 +353,19 @@ interface CodexErrorCodeInfo {
  *  before the table lookup never changes behavior for a legitimate code. */
 export const MAX_ERROR_CODE_BYTES = 256;
 
+const ERROR_CODE_DECODER = new TextDecoder("utf-8", { fatal: true });
+
 /** A straight byte cut can land mid-codepoint, and the decoded U+FFFD can
  *  push the result back over MAX_ERROR_CODE_BYTES (issue #300 round 2), so
- *  the clip stops at a character boundary. */
+ *  the clip stops at a character boundary. An oversized code is decoded with
+ *  TextDecoder, which drops a leading BOM; a code within the bound is
+ *  returned as is (issue #624 kept both behaviours). */
 function clipErrorCode(value: string): string {
-  return clipUtf8Head(value, MAX_ERROR_CODE_BYTES);
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.length <= MAX_ERROR_CODE_BYTES) return value;
+  return ERROR_CODE_DECODER.decode(
+    bytes.subarray(0, utf8HeadEnd(bytes, MAX_ERROR_CODE_BYTES)),
+  );
 }
 
 /** Closed, wrapper-owned code -> {summary, hint} table for Codex's own
