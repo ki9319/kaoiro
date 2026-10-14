@@ -2847,11 +2847,32 @@ export function runRollback(flags, config) {
         `pre-deploy archive at ${manifest.archive.path} does not match its recorded sha256 (expected ${manifest.archive.sha256}, got ${preflightArchiveSha}) — refusing before stopping or touching anything`,
       );
     }
+    // This tzf pass and the listing below both read the whole archive. The
+    // tzf pass is kept on purpose: it reports an integrity failure with its
+    // own message, distinct from the listing or the required_entries check.
     try {
       execFileSync("tar", ["tzf", manifest.archive.path]);
     } catch (err) {
       fail(
         `pre-deploy archive at ${manifest.archive.path} failed full-traversal verification: ${err.message} — refusing before stopping or touching anything`,
+      );
+    }
+    // issue #552 S1: the restore-time check below runs only after the wipe.
+    // Check the recorded required_entries against this archive's own listing
+    // here, so a manifest recorded before the LC_ALL=C change (UTF-8 form of
+    // a non-ASCII name) is refused before any stop, archive, or wipe.
+    let preflightListing;
+    try {
+      preflightListing = listArchiveVerbose(manifest.archive.path);
+    } catch (err) {
+      fail(
+        `pre-deploy archive at ${manifest.archive.path} failed listing for required_entries verification: ${err.message} — refusing before stopping or touching anything`,
+      );
+    }
+    const preflightEntries = parseTarEntries(preflightListing);
+    if (!requiredEntriesMatch(preflightEntries, manifest.required_entries)) {
+      fail(
+        `pre-deploy archive at ${manifest.archive.path} does not match the recorded required_entries (expected ${JSON.stringify(manifest.required_entries)}, got ${JSON.stringify(preflightEntries)}) — refusing before stopping or touching anything`,
       );
     }
     const upEntry = journal.history.find((entry) => entry.phase === PHASE.UP);
@@ -3339,9 +3360,9 @@ function splitTarEntryName(typeChar, rawName) {
  *  which parseTarEntries cannot read. Other variables are inherited.
  *  Trade-off: under LC_ALL=C tar escapes non-ASCII entry names as octal
  *  (e.g. \346\227\245.txt). A manifest recorded under a UTF-8 locale before
- *  this change can therefore differ from a listing taken now for such
- *  names, and rollback then fails closed. Manifests recorded after this
- *  change match, and ASCII names are unaffected. */
+ *  this change differs from a listing taken now for such names, and
+ *  rollback refuses it at preflight, before any stop or wipe. Manifests
+ *  recorded after this change match, and ASCII names are unaffected. */
 export function listArchiveVerbose(archivePath) {
   return execFileSync("tar", ["tvzf", archivePath, "--numeric-owner"], {
     encoding: "utf8",

@@ -151,7 +151,7 @@ case "$1" in
           exit 0
         fi
         case "$FAKE_DOCKER_SCENARIO" in
-          stopped|running|retag-drift|running-clean-stop|running-clean-stop-retag-drift|running-clean-stop-restarts|running-clean-stop-restartcount-unreadable|running-clean-stop-torture|running-dirty-stop|running-no-mount|running-empty-vol|running-broken-archive|alpine-missing|running-tag-drift|running-archive-drifts-empty|compose-config-renamed-service|compose-config-missing-environment-key|mount-vanishes-after-stop|system-df-fails|system-df-invalid-json|system-df-not-array|target-id-mismatch|target-remains-running|rollback-target-remains-running|rollback-id-mismatch|up-fails-container|up-fails-no-container|rollback-running-reappears)
+          stopped|running|retag-drift|running-clean-stop|running-clean-stop-retag-drift|running-clean-stop-restarts|running-clean-stop-restartcount-unreadable|running-clean-stop-torture|running-clean-stop-utf8|running-dirty-stop|running-no-mount|running-empty-vol|running-broken-archive|alpine-missing|running-tag-drift|running-archive-drifts-empty|compose-config-renamed-service|compose-config-missing-environment-key|mount-vanishes-after-stop|system-df-fails|system-df-invalid-json|system-df-not-array|target-id-mismatch|target-remains-running|rollback-target-remains-running|rollback-id-mismatch|up-fails-container|up-fails-no-container|rollback-running-reappears)
             printf 'kaoiro-c1\\n' ;;
           # round 4 review B-1 (expanded): rollback's own "2+ containers,
           # refuse" guard, distinct from requireRunningContainer's own
@@ -421,7 +421,7 @@ case "$1" in
             if [ -f "$KAOIRO_TEST_STOP_FILE" ]; then printf 'exited\\n'; exit 0; fi
             case "$FAKE_DOCKER_SCENARIO" in
               stopped) printf 'exited\\n' ;;
-              running|retag-drift|running-clean-stop|running-clean-stop-retag-drift|running-clean-stop-restarts|running-clean-stop-restartcount-unreadable|running-clean-stop-torture|running-dirty-stop|running-no-mount|running-empty-vol|running-broken-archive|alpine-missing|running-tag-drift|running-archive-drifts-empty|compose-config-renamed-service|compose-config-missing-environment-key|mount-vanishes-after-stop|system-df-fails|system-df-invalid-json|system-df-not-array|target-id-mismatch|target-remains-running|rollback-target-remains-running|rollback-id-mismatch|up-fails-container|up-fails-no-container|rollback-running-reappears|rollback-running-after-forensic|rollback-volume-filter-foreign-running|rollback-forensic-corrupt|rollback-restore-drifts|multiple-containers)
+              running|retag-drift|running-clean-stop|running-clean-stop-retag-drift|running-clean-stop-restarts|running-clean-stop-restartcount-unreadable|running-clean-stop-torture|running-clean-stop-utf8|running-dirty-stop|running-no-mount|running-empty-vol|running-broken-archive|alpine-missing|running-tag-drift|running-archive-drifts-empty|compose-config-renamed-service|compose-config-missing-environment-key|mount-vanishes-after-stop|system-df-fails|system-df-invalid-json|system-df-not-array|target-id-mismatch|target-remains-running|rollback-target-remains-running|rollback-id-mismatch|up-fails-container|up-fails-no-container|rollback-running-reappears|rollback-running-after-forensic|rollback-volume-filter-foreign-running|rollback-forensic-corrupt|rollback-restore-drifts|multiple-containers)
                 printf 'running\\n' ;;
             esac
             ;;
@@ -433,14 +433,14 @@ case "$1" in
             ;;
           '{{.State.ExitCode}}')
             case "$FAKE_DOCKER_SCENARIO" in
-              running-clean-stop|running-clean-stop-retag-drift|running-clean-stop-restarts|running-clean-stop-restartcount-unreadable|running-clean-stop-torture|running-no-mount|running-empty-vol|running-broken-archive|alpine-missing|running-archive-drifts-empty|mount-vanishes-after-stop|up-fails-container|up-fails-no-container) printf '0\\n' ;;
+              running-clean-stop|running-clean-stop-retag-drift|running-clean-stop-restarts|running-clean-stop-restartcount-unreadable|running-clean-stop-torture|running-clean-stop-utf8|running-no-mount|running-empty-vol|running-broken-archive|alpine-missing|running-archive-drifts-empty|mount-vanishes-after-stop|up-fails-container|up-fails-no-container) printf '0\\n' ;;
               running-dirty-stop) printf '137\\n' ;;
               *) printf 'unknown\\n' ;;
             esac
             ;;
           '{{.State.OOMKilled}}')
             case "$FAKE_DOCKER_SCENARIO" in
-              running-clean-stop|running-clean-stop-retag-drift|running-clean-stop-restarts|running-clean-stop-restartcount-unreadable|running-clean-stop-torture|running-no-mount|running-empty-vol|running-broken-archive|alpine-missing|running-archive-drifts-empty|mount-vanishes-after-stop|up-fails-container|up-fails-no-container) printf 'false\\n' ;;
+              running-clean-stop|running-clean-stop-retag-drift|running-clean-stop-restarts|running-clean-stop-restartcount-unreadable|running-clean-stop-torture|running-clean-stop-utf8|running-no-mount|running-empty-vol|running-broken-archive|alpine-missing|running-archive-drifts-empty|mount-vanishes-after-stop|up-fails-container|up-fails-no-container) printf 'false\\n' ;;
               running-dirty-stop) printf 'true\\n' ;;
               *) printf 'unknown\\n' ;;
             esac
@@ -593,6 +593,14 @@ case "$1" in
               ln "$hostdir/.fakesrc-torture/real.txt" "$hostdir/.fakesrc-torture/hard.txt"
               tar --owner=1000 --group=1000 -czf "$hostdir/$outfile" -C "$hostdir/.fakesrc-torture" .
               ;;
+            # issue #552 S1: a real archive whose entry name is non-ASCII, so
+            # the recorded required_entries carry the octal-escaped form.
+            running-clean-stop-utf8)
+              mkdir -p "$hostdir/.fakesrc-utf8"
+              printf x > "$hostdir/.fakesrc-utf8/real.txt"
+              printf x > "$hostdir/.fakesrc-utf8/日本.txt"
+              tar --owner=1000 --group=1000 -czf "$hostdir/$outfile" -C "$hostdir/.fakesrc-utf8" .
+              ;;
             *)
               mkdir -p "$hostdir/.fakesrc"
               printf 'x' > "$hostdir/.fakesrc/users.dets"
@@ -710,7 +718,7 @@ case "$1" in
         # -exec stat -c '%n %u:%g %04a' {} \\;) — only whether anything is
         # there, not what gets recorded (that comes from tar tvzf now).
         case "$FAKE_DOCKER_SCENARIO" in
-          running-clean-stop|running-clean-stop-retag-drift|running-clean-stop-restarts|running-clean-stop-restartcount-unreadable|running-clean-stop-torture|running-dirty-stop|running-broken-archive|alpine-missing|running-archive-drifts-empty|up-fails-container|up-fails-no-container) printf '/data/users.dets 1000:1000 0600\\n' ;;
+          running-clean-stop|running-clean-stop-retag-drift|running-clean-stop-restarts|running-clean-stop-restartcount-unreadable|running-clean-stop-torture|running-clean-stop-utf8|running-dirty-stop|running-broken-archive|alpine-missing|running-archive-drifts-empty|up-fails-container|up-fails-no-container) printf '/data/users.dets 1000:1000 0600\\n' ;;
           running-empty-vol) ;;
         esac
         exit 0
@@ -3206,6 +3214,86 @@ test("runUpdate parses the hardlink listing under LC_ALL=ja_JP.UTF-8 with LANGUA
   const byPath = Object.fromEntries(result.requiredEntries.map((e) => [e.path, e]));
   assert.deepEqual(Object.keys(byPath).sort(), ["hard.txt", "real.txt", "sym.txt"]);
   assert.deepEqual(byPath["hard.txt"], { path: "hard.txt", owner: "1000:1000", mode: "0664" });
+});
+
+// issue #552 S1: a manifest recorded before the LC_ALL=C change carries the
+// UTF-8 form of a non-ASCII entry name. Rollback must refuse it at preflight,
+// before any stop, forensic archive, wipe/restore, or compose up.
+const UTF8_JP_NAME = "日本.txt";
+const OCTAL_JP_NAME = "\\346\\227\\245\\346\\234\\254.txt";
+
+function recordUtf8Transaction() {
+  let transactionId;
+  withScenario("running-clean-stop-utf8", () => {
+    const update = runUpdate(
+      { repo: workDir, target: headSha, maintenanceApproved: true },
+      configWithCleanStopMeasured(),
+    );
+    assert.equal(update.phase, "done");
+    transactionId = update.transactionId;
+  });
+  return transactionId;
+}
+
+function runRollbackCapturingCalls(transactionId) {
+  const logPath = join(root, `docker-calls-${transactionId}.log`);
+  process.env.KAOIRO_TEST_CALL_LOG = logPath;
+  let outcome;
+  try {
+    outcome = withScenario("running-clean-stop-utf8", () => {
+      try {
+        return {
+          result: runRollback(
+            { repo: workDir, transaction: transactionId, confirmRestore: true },
+            configWithCleanStopMeasured(),
+          ),
+        };
+      } catch (err) {
+        return { caught: err };
+      }
+    });
+  } finally {
+    delete process.env.KAOIRO_TEST_CALL_LOG;
+  }
+  return { ...outcome, calls: readCallLog(logPath) };
+}
+
+test("rollback refuses a pre-change manifest with a UTF-8 non-ASCII name at preflight, before any destructive step", () => {
+  const transactionId = recordUtf8Transaction();
+  const dir = join(root, "kaoiro-deploy", transactionId);
+  const manifest = readManifest(dir);
+  assert.ok(
+    manifest.required_entries.some((e) => e.path === OCTAL_JP_NAME),
+    "sanity: the recorded form is the octal-escaped one",
+  );
+  manifest.required_entries = manifest.required_entries.map((e) =>
+    e.path === OCTAL_JP_NAME ? { ...e, path: UTF8_JP_NAME } : e,
+  );
+  writeFileSync(join(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const { caught, result, calls } = runRollbackCapturingCalls(transactionId);
+  assert.ok(caught instanceof DeployError, "expected a preflight refusal");
+  assert.match(caught.message, /does not match the recorded required_entries/);
+  assert.match(caught.message, /refusing before stopping or touching anything/);
+  assert.equal(result, undefined);
+  assert.ok(!calls.some((l) => l.startsWith("stop ")), "no stop before the refusal");
+  assert.ok(!calls.some((l) => l.includes("tar czf")), "no forensic archive before the refusal");
+  // The wipe and the restore share one `docker run ... sh -c` line (see the
+  // rollback restore step), so the wipe is asserted on its own by its command.
+  assert.ok(!calls.some((l) => l.includes("find /data")), "no volume wipe (find) before the refusal");
+  assert.ok(!calls.some((l) => l.includes("rm -rf")), "no volume wipe (rm -rf) before the refusal");
+  assert.ok(!calls.some((l) => l.includes("xzf")), "no restore (tar xzf) before the refusal");
+  assert.ok(!calls.some((l) => / up( |$)/.test(l)), "no compose up before the refusal");
+  const journal = readJournal(dir);
+  assert.notEqual(journal.phase, "rolled_back");
+  assert.ok(!journal.history.some((e) => e.phase.startsWith("rollback_")), "no rollback checkpoint recorded");
+});
+
+test("rollback accepts a manifest recorded after the change with a non-ASCII entry name and reaches rolled_back", () => {
+  const transactionId = recordUtf8Transaction();
+  const { caught, result } = runRollbackCapturingCalls(transactionId);
+  assert.equal(caught, undefined, caught?.message);
+  assert.equal(result.phase, "rolled_back");
 });
 
 // issue #552 trade-off: under the forced C listing a non-ASCII entry name is
