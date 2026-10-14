@@ -395,7 +395,13 @@ describe("resident ACP host", () => {
   });
   it("keeps running until every parallel tool call has completed", async () => {
     const { host, envelopes } = await started();
+    const start = envelopes.length;
     await host.send("parallel");
+    expect(envelopes.slice(start).filter(e => e.type === "state_change")
+      .map(e => e.state)).toEqual([
+        "sending", "tool_running", "tool_running", "tool_running",
+        "thinking", "thinking", "waiting_input", "waiting_input",
+      ]);
     expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "assistant")
       .map(e => ({ state: e.state, payload: e.payload }))).toEqual([
         { state: "thinking", payload: { kind: "assistant", text: "B_STILL_PENDINGfinished" } },
