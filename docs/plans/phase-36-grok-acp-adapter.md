@@ -47,10 +47,11 @@ Module layout:
 
 | Module | Responsibility |
 |---|---|
-| `acp/connection.ts` | `@agentclientprotocol/sdk` client over the child's stdio, with a stream tee that records method and variant metadata only (no content) and counts SDK-dropped variants; lines above the 4 MiB metadata limit pass through without metadata, under the SDK's own message limit |
-| `acp/session.ts` | `initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/set_config_option`; engine-neutral ACP only |
+| `acp/connection.ts` | `@agentclientprotocol/sdk` client over the child's stdio, with a stream tee that records method and variant metadata only (no content) and counts SDK-dropped variants; lines above the 4 MiB metadata limit pass through without metadata, under the SDK's own message limit. Engine-neutral: vendor behaviour enters only through the `AcpExtension` argument of `connectAcp` (extra `_`-prefixed notifications and a wire-metadata field extractor) |
+| `acp/session.ts` | `initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/set_config_option`; engine-neutral ACP only. `open` takes the `session/new` `_meta` as an injected value |
 | `grok/process.ts` | Spawn `grok --no-auto-update agent --no-leader stdio` in its own process group with the env below; SIGTERM, grace, SIGKILL of the owned group only |
-| `grok/events.ts` | ACP `session/update` and `_x.ai/session_notification` to common `AdapterEvent`, log and result |
+| `grok/events.ts` | ACP `session/update` to common `AdapterEvent`, log and result; `turnCompletion` (the `_x.ai` `turn_completed` match), `promptIdOf` and `cancellationKind` (Grok's `_meta` keys) as pure functions |
+| `grok/wire.ts` | Everything Grok injects into `acp/`: the `_x.ai/session_notification` registration, the `session/new` `_meta` value (`{ rules }`), and the extractor for the Grok wire-metadata fields (`vendor_kind`, `prompt_id`, `request_id`, `hook_event`) |
 | `host.ts` | `EngineAdapter`, turn queue, state, capability flags |
 | `cli.ts` | Composition root (config, server connection, persona wait, brokers, ToolHost, shutdown), following the Antigravity package |
 
@@ -391,7 +392,7 @@ permission pages, the runner configuration page, and an ADR for the engine
 | Unit | Issue | Status |
 |---|---|---|
 | 1. Registration, launch and minimal ACP host | [#590](https://github.com/sakuraiyuta/kaoiro/issues/590) | ✅ landed 3364c0e8 |
-| 1b. Keep vendor extensions out of `acp/` (before unit 2) | [#597](https://github.com/sakuraiyuta/kaoiro/issues/597) | ⏳ |
+| 1b. Keep vendor extensions out of `acp/` (before unit 2) | [#597](https://github.com/sakuraiyuta/kaoiro/issues/597) | ⏳ implemented on `issue-597-acp-vendor-boundary`; review and landing pending |
 | 2. Permission and sandbox enforcement | [#591](https://github.com/sakuraiyuta/kaoiro/issues/591) | ⏳ |
 | 3. Resume, history replay and catalog probe | [#592](https://github.com/sakuraiyuta/kaoiro/issues/592) | ⏳ |
 | 4. Context usage, live model and effort switching | [#593](https://github.com/sakuraiyuta/kaoiro/issues/593) | ⏳ |

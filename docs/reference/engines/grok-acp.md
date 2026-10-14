@@ -21,6 +21,35 @@ The server-composed persona and common footer are sent in `session/new`
 forwards calls to wrapper-owned ToolHost handlers. Grok discovers tools
 through its `search_tool` and `use_tool` interfaces.
 
+## ACP module boundary
+
+`wrapper/grok/src/acp/` is engine-neutral so that it can move to
+`agent-common` when a second ACP engine arrives. It refers only to ACP
+methods and `@agentclientprotocol/sdk` types. Vendor behaviour reaches it
+through injection points; Grok's side of each lives in `src/grok/wire.ts`
+and `src/grok/events.ts`.
+
+| Injection point | Where | Grok's value |
+|---|---|---|
+| `session/new` `_meta` | third argument of `AcpSession.open`, passed by value (the host already holds everything it needs; no builder function) | `grokSessionMeta(rules)`, that is `{ rules }` |
+| Extra notifications | `AcpExtension.notifications` of `connectAcp`: method, parser and handler per entry. The method must start with `_` (ACP's extension-name convention); any other name, including every ACP method, makes `connectAcp` throw | `_x.ai/session_notification`, handled by the host's turn-completion match |
+| Wire-metadata fields | `AcpExtension.wireFields` of `connectAcp` and `metadataTee`: a function from one parsed JSON-RPC line to extra fields, merged after `variant` | `grokWireFields`: `vendor_kind`, `prompt_id`, `request_id`, `hook_event` |
+
+`acp/` itself records `direction`, `method`, `variant`, `sdk_diagnostic` and
+`oversized_lines`. With no extension it registers ACP methods only and adds
+no vendor fields: an unknown notification is dropped by the SDK. The
+extractor must not throw; if it does, that line's metadata is dropped and
+the transport is not interrupted. Grok's reads of a prompt result `_meta`
+(`promptId`, `cancellationCategory`) are the pure functions `promptIdOf` and
+`cancellationKind` in `grok/events.ts`, called by the host, so `acp/` never
+sees them.
+
+`test/acp-boundary.test.ts` fails when any file under `src/acp/` names
+`_x.ai`, `GROK_`, `grok`, a Grok `_meta` or wire-metadata key
+(`promptId`, `requestId`, `prompt_id`, `request_id`, `cancellationCategory`,
+`vendor_kind`, `hook_event`), uses `rules` as code, or imports from outside
+`acp/`.
+
 ## Capabilities
 
 Work unit 1 supports text turns, conversation continuity while the wrapper
