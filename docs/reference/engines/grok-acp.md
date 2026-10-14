@@ -234,6 +234,16 @@ server rejects an envelope over 65,536 bytes without a reply the wrapper reads,
 which would lose the whole result envelope. Nothing reads `result.text`; the
 reply text reaches the dashboard through the assistant logs.
 
+## State publication
+
+The host sends a `state_change` envelope only when it differs from the last
+one it sent in anything but `ts`: the state, the `ext` or the header fields
+such as `display_name`. Streamed message and thought chunks keep updating the
+machine state but no longer repeat the same `thinking` envelope. The first
+`waiting_input` at startup is always sent. The server keeps the latest
+`state_change` per agent and the transport re-sends the last one after a
+rejoin, so the latest state is unchanged; only the repeats are gone.
+
 ## Diagnostics and shutdown
 
 ACP diagnostic records contain bounded method, variant and identifier
