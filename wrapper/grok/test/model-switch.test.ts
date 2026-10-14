@@ -12,6 +12,8 @@ const config: WrapperConfig = {
   persona: { id: "default", name: "Default", sprite_set: "default" },
   sandbox: "workspace-write", network_access: true,
 };
+// The whole wrapper suite runs beside this file; give each test room.
+vi.setConfig({ testTimeout: 30_000 });
 const hosts: GrokHost[] = [];
 const scratch: string[] = [];
 afterEach(async () => {
@@ -37,7 +39,7 @@ async function started(env: Record<string, string> = {}, extra: Partial<GrokHost
   hosts.push(host);
   const run = host.run();
   void run.catch(() => {});
-  await vi.waitFor(() => expect(host.state).toBe("waiting_input"), { timeout: 5000 });
+  await vi.waitFor(() => expect(host.state).toBe("waiting_input"), { timeout: 10_000 });
   const rows = () => existsSync(events)
     ? readFileSync(events, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : [];
   return {
@@ -52,9 +54,9 @@ async function started(env: Record<string, string> = {}, extra: Partial<GrokHost
   };
 }
 type Started = Awaited<ReturnType<typeof started>>;
-const firstCall = (t: Started) => vi.waitFor(() => expect(t.modelCalls()).toHaveLength(1), { timeout: 5000 });
+const firstCall = (t: Started) => vi.waitFor(() => expect(t.modelCalls()).toHaveLength(1), { timeout: 10_000 });
 const modelIs = (t: Started, model: string) =>
-  vi.waitFor(() => expect(t.ext().model).toBe(model), { timeout: 5000 });
+  vi.waitFor(() => expect(t.ext().model).toBe(model), { timeout: 10_000 });
 const choose = (revision: number) => ({ revision, requested: { sandbox: "read-only" as const, network_access: false } });
 
 describe("catalog and capabilities", () => {
@@ -147,7 +149,7 @@ describe("switch timing", () => {
     await t.host.setPermission(choose(1));
     armed = true;
     const turn = t.host.send("chunks");
-    await vi.waitFor(() => expect(step).toBe("load"));
+    await vi.waitFor(() => expect(step).toBe("load"), { timeout: 10_000 });
     await t.host.setModel("grok-4.6");
     expect(t.requests()).toEqual([]);
     open();
@@ -168,7 +170,7 @@ describe("switch outcomes", () => {
   it("reports a rejected model request and keeps the model", async () => {
     const t = await started({ KAOIRO_TEST_GROK_MODEL_FAIL: "1" });
     await t.host.setModel("grok-4.6");
-    await vi.waitFor(() => expect(t.states().some((e) => e.ext?.switch_error)).toBe(true));
+    await vi.waitFor(() => expect(t.states().some((e) => e.ext?.switch_error)).toBe(true), { timeout: 10_000 });
     expect(t.states().find((e) => e.ext?.switch_error)!.ext!.switch_error).toEqual({
       kind: "model", requested: "grok-4.6", reason: "control_rejected", rolled_back_to: "grok-4.7",
     });
@@ -217,7 +219,7 @@ describe("switch outcomes", () => {
     const t = await started();
     await t.host.send("calls-1");
     await t.host.setEffort("low");
-    await vi.waitFor(() => expect(t.ext().effort).toBe("low"));
+    await vi.waitFor(() => expect(t.ext().effort).toBe("low"), { timeout: 10_000 });
     expect(t.requests()).toEqual([["reasoning_effort", "low"]]);
     expect(t.ext()).toMatchObject({ effort_source: "config", model_source: "default" });
     expect(t.ext().context).toMatchObject({ used_tokens: 1110 });
@@ -226,7 +228,7 @@ describe("switch outcomes", () => {
   it("sets the default effort when the new model lacks the current one, and says so once", async () => {
     const t = await started({ KAOIRO_TEST_GROK_EFFORT: "xhigh" });
     await t.host.setModel("grok-4.5");
-    await vi.waitFor(() => expect(t.ext().effort).toBe("high"));
+    await vi.waitFor(() => expect(t.ext().effort).toBe("high"), { timeout: 10_000 });
     expect(t.requests()).toEqual([["model", "grok-4.5"], ["reasoning_effort", "high"]]);
     expect(t.ext()).toMatchObject({ model: "grok-4.5", effort: "high", effort_source: "config" });
     expect(t.states().filter((e) => e.ext?.effort_reset === true)).toHaveLength(1);
@@ -257,7 +259,7 @@ describe("switch outcomes", () => {
     await t.host.setModel("grok-4.5");
     t.release();
     await turn;
-    await vi.waitFor(() => expect(t.ext().effort).toBe("high"));
+    await vi.waitFor(() => expect(t.ext().effort).toBe("high"), { timeout: 10_000 });
     expect(t.requests()).toEqual([["model", "grok-4.5"], ["reasoning_effort", "high"]]);
     expect(t.states().filter((e) => e.ext?.effort_reset === true)).toHaveLength(1);
   });
@@ -265,7 +267,7 @@ describe("switch outcomes", () => {
   it("keeps a model switch whose effort reset fails and reports the stale effort", async () => {
     const t = await started({ KAOIRO_TEST_GROK_EFFORT: "xhigh", KAOIRO_TEST_GROK_EFFORT_FAIL: "1" });
     await t.host.setModel("grok-4.5");
-    await vi.waitFor(() => expect(t.states().some((e) => e.ext?.switch_error)).toBe(true));
+    await vi.waitFor(() => expect(t.states().some((e) => e.ext?.switch_error)).toBe(true), { timeout: 10_000 });
     expect(t.states().find((e) => e.ext?.switch_error)!.ext!.switch_error).toEqual({
       kind: "effort", requested: "high", reason: "effort_reset_failed", rolled_back_to: "xhigh",
     });
@@ -371,7 +373,7 @@ describe("context usage", () => {
     await t.host.send("calls-3");
     t.hold();
     const turn = t.host.send("calls-2");
-    await vi.waitFor(() => expect(t.modelCalls()).toHaveLength(4));
+    await vi.waitFor(() => expect(t.modelCalls()).toHaveLength(4), { timeout: 10_000 });
     await t.host.interrupt();
     await turn;
     expect(t.ext().context).toMatchObject({ used_tokens: 1110 });

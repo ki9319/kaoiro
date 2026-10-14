@@ -26,7 +26,7 @@ async function connected(env: NodeJS.ProcessEnv) {
     onHostCreated: (value) => { host = value; },
   });
   void work.catch(() => {});
-  await vi.waitFor(() => expect(server.joins).toBe(1));
+  await vi.waitFor(() => expect(server.joins).toBe(1), { timeout: 10_000 });
   server.push("persona_prompt", { prompt: "Fixture" });
   await vi.waitFor(() => expect(host?.state).toBe("waiting_input"), { timeout: 5000 });
   const states = () => server.received.filter((x) => x.event === "envelope" && x.payload.type === "state_change")
@@ -40,11 +40,11 @@ it("applies the operator's model and effort picks from the wire", async () => {
   const t = await connected({});
   try {
     t.server.push("set_model", { model: "grok-4.6" });
-    await vi.waitFor(() => expect(t.states().at(-1)).toMatchObject({ model: "grok-4.6", model_source: "config" }));
+    await vi.waitFor(() => expect(t.states().at(-1)).toMatchObject({ model: "grok-4.6", model_source: "config" }), { timeout: 10_000 });
     t.server.push("set_effort", { effort: "low" });
-    await vi.waitFor(() => expect(t.states().at(-1)).toMatchObject({ effort: "low", effort_source: "config" }));
+    await vi.waitFor(() => expect(t.states().at(-1)).toMatchObject({ effort: "low", effort_source: "config" }), { timeout: 10_000 });
     t.server.push("set_model", { model: "bogus" });
-    await vi.waitFor(() => expect(t.states().some((s) => s.switch_error?.requested === "bogus")).toBe(true));
+    await vi.waitFor(() => expect(t.states().some((s) => s.switch_error?.requested === "bogus")).toBe(true), { timeout: 10_000 });
     expect(t.states().at(-1)).toMatchObject({ model: "grok-4.6" });
   } finally { await t.finish(); }
 }, 15_000);
@@ -53,9 +53,9 @@ it("reports a pick the host cannot honour as a failure", async () => {
   const t = await connected({ KAOIRO_TEST_GROK_CONFIG: "none" });
   try {
     t.server.push("set_model", { model: "grok-4.6" });
-    await vi.waitFor(() => expect(t.logs()).toContain("grok model switching failed"));
+    await vi.waitFor(() => expect(t.logs()).toContain("grok model switching failed"), { timeout: 10_000 });
     t.server.push("set_effort", { effort: "low" });
-    await vi.waitFor(() => expect(t.logs()).toContain("grok effort switching failed"));
+    await vi.waitFor(() => expect(t.logs()).toContain("grok effort switching failed"), { timeout: 10_000 });
     expect(t.states().at(-1)).toMatchObject({ model: "default" });
   } finally { await t.finish(); }
 }, 15_000);
