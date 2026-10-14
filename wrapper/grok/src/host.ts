@@ -50,6 +50,7 @@ import {
 import { formatTurnWatchdogLine } from "@kaoiro/wrapper-core";
 import { resolveTurnWatchdogSettings } from "./settings.js";
 import { GrokLaunchError } from "./grok/errors.js";
+import { stateChangeKey } from "./grok/state_key.js";
 import { MCP_NOT_CONNECTED, ToolHost, type ToolHostStats } from "./toolhost.js";
 
 export interface GrokHostOptions {
@@ -136,6 +137,7 @@ export class GrokHost implements EngineAdapter {
   #pendingQuestion: PendingQuestionExt | null = null;
   #text = "";
   #assistantText = "";
+  #publishedState: string | undefined;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #abortTimer: ReturnType<typeof setTimeout> | undefined;
   #resolveClosed!: () => void;
@@ -231,15 +233,17 @@ export class GrokHost implements EngineAdapter {
   }
   #state(state: MachineState["state"]) {
     this.#machine = { ...this.#machine, state };
-    this.#options.send(
-      makeStateChange(
-        this.#options.config,
-        state,
-        new Date().toISOString(),
-        {},
-        this.statusExtSnapshot(),
-      ),
+    const envelope = makeStateChange(
+      this.#options.config,
+      state,
+      new Date().toISOString(),
+      {},
+      this.statusExtSnapshot(),
     );
+    const key = stateChangeKey(envelope);
+    if (key === this.#publishedState) return;
+    this.#publishedState = key;
+    this.#options.send(envelope);
   }
   #event(event: AdapterEvent) {
     if (event.kind === "assistant" && this.#machine.pendingToolUses.size > 0) {

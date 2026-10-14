@@ -411,6 +411,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             notification: { type: "pending_interaction", kind: "permission" },
           });
         }
+        if (text === "parallel-hold") {
+          for (const id of ["a", "b"])
+            update({ sessionUpdate: "tool_call", toolCallId: id, title: id,
+              kind: "other", status: "in_progress" });
+          update({ sessionUpdate: "tool_call_update", toolCallId: "a", status: "completed" });
+          textChunk("B_STILL_PENDING");
+          break;
+        }
         if (text === "parallel") {
           for (const id of ["a", "b"])
             update({

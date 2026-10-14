@@ -216,6 +216,27 @@ describe("assistant log projection", () => {
     ]);
   });
 });
+describe("state_change publication", () => {
+  const states = (envelopes: Envelope[], from = 0) =>
+    envelopes.slice(from).filter(e => e.type === "state_change").map(e => e.state);
+  it("publishes the first waiting_input at startup", async () => {
+    const { envelopes } = await started();
+    expect(states(envelopes)[0]).toBe("waiting_input");
+  });
+  it("publishes one thinking for a run of chunks", async () => {
+    const { host, envelopes } = await started();
+    const start = envelopes.length;
+    await host.send("chunks");
+    expect(states(envelopes, start)).toEqual(["sending", "thinking", "done", "waiting_input"]);
+  });
+  it("still publishes a rename, which changes only the envelope header", async () => {
+    const { host, envelopes } = await started();
+    const start = envelopes.length;
+    host.renameDisplayName("Renamed", 1);
+    const published = envelopes.slice(start).filter(e => e.type === "state_change");
+    expect(published.map(e => e.display_name)).toEqual(["Renamed"]);
+  });
+});
 describe("resident ACP host", () => {
   it("fails when stdout ends without exiting", async () => {
     const path = mkdtempSync(join(tmpdir(), "kaoiro-grok-eof-"));
@@ -421,8 +442,7 @@ describe("resident ACP host", () => {
     await host.send("parallel");
     expect(envelopes.slice(start).filter(e => e.type === "state_change")
       .map(e => e.state)).toEqual([
-        "sending", "tool_running", "tool_running", "tool_running",
-        "thinking", "thinking", "done", "waiting_input", "waiting_input",
+        "sending", "tool_running", "thinking", "done", "waiting_input",
       ]);
     expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "assistant")
       .map(e => ({ state: e.state, payload: e.payload }))).toEqual([
@@ -431,6 +451,16 @@ describe("resident ACP host", () => {
     expect(envelopes.find(e => e.type === "result")?.payload.text)
       .toBe("B_STILL_PENDINGfinished");
     expect(host.state).toBe("waiting_input");
+  });
+  it("stays tool_running while a second parallel tool call is pending", async () => {
+    const { host } = await started();
+    const received = vi.spyOn(events, "updateEvents");
+    const turn = host.send("parallel-hold");
+    await vi.waitFor(() => expect(received.mock.calls.some(([notification]) =>
+      notification.update.sessionUpdate === "agent_message_chunk")).toBe(true));
+    expect(host.state).toBe("tool_running");
+    await host.interrupt();
+    await turn;
   });
   it.each([
     { scene: "permission", beforeWaitTexts: [], toolNames: ["write fixture"] },
@@ -464,6 +494,8 @@ describe("resident ACP host", () => {
       notification.update.sessionUpdate === "agent_message_chunk" &&
       notification.update.content.type === "text" &&
       notification.update.content.text === "BROKER_WAIT_PROGRESS")).toBe(true));
+    expect(envelopes.filter(e => e.type === "state_change" && e.state === "waiting_permission"))
+      .toHaveLength(1);
     const beforeWait = assistantLogs(envelopes);
     expect(beforeWait.map(e => e.payload.text)).toEqual(beforeWaitTexts);
     for (const log of beforeWait) {
