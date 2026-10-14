@@ -1,6 +1,6 @@
 ---
 title: Phase 36 — Grok Build adapter (fourth engine, resident ACP host)
-description: Add Grok Build as engine `grok` — wrapper/grok package hosting a resident `grok agent stdio` child over the Agent Client Protocol, kaoiro tools through the stdio MCP bridge, persona through `_meta.rules`, a declared permission projection with display-only policy details, and the closed-set wiring across protocol, runner, server and dashboard.
+description: Add Grok Build as engine `grok` — wrapper/grok package hosting a resident `grok agent stdio` child over the Agent Client Protocol, kaoiro tools through an authenticated HTTP MCP server, persona through `_meta.rules`, a declared permission projection with display-only policy details, and the closed-set wiring across protocol, runner, server and dashboard.
 status: in_progress
 phase: 36
 depends_on: [phase-34-antigravity-adapter]
@@ -30,7 +30,7 @@ turn.
 | Option | Decision |
 |---|---|
 | A. `grok -p --output-format streaming-json` per turn, `--resume` between turns | Rejected. Process start per turn (MCP init about 1 s plus session setup), no permission round trip, interrupt only by killing the process |
-| B. Resident `grok agent stdio`, one ACP session | Chosen. Measured: multi-turn, `session/cancel` about 5 ms, stdio MCP tools, `_meta.rules`, OS sandbox via `GROK_SANDBOX`, SIGTERM cleanup |
+| B. Resident `grok agent stdio`, one ACP session | Chosen. Measured: multi-turn, `session/cancel` about 5 ms, MCP tools, `_meta.rules`, OS sandbox via `GROK_SANDBOX`, SIGTERM cleanup |
 | C. Generic ACP engine first, Grok as a profile | Deferred. One ACP engine does not tell us which parts are generic. Keep the ACP client a separable module and extract it when a second ACP engine arrives |
 | D. `@agentclientprotocol/sdk` instead of a hand-written JSON-RPC client | Chosen: the SDK, pinned to 1.8.0. A compatibility probe against grok 1.0.52 passed all six items without raw JSON-RPC (`session/new` with `_meta`, prompt result `_meta`, `_x.ai/session_notification` through `onNotification`, `session/set_config_option` with a plain string, `session/request_permission`, `session/cancel`). Use the `acp.client(...)` API; `ClientSideConnection` is deprecated in 1.8.0. Constraint: a `session/update` variant unknown to the SDK's zod schema is dropped with only a console error, so the transport stream gets a tee that parses each line and records only bounded metadata (JSON-RPC method, `sessionUpdate` variant name, counts), never message content. The SDK's own diagnostic for a dropped variant prints the whole notification, so the wrapper routes SDK console output through a filter that drops it and keeps only the metadata count (check first whether the SDK accepts an injected logger) |
 
@@ -67,12 +67,12 @@ Mapping:
 
 | kaoiro | grok / ACP | Evidence |
 |---|---|---|
-| `run(prompt?)` | spawn, `initialize`, `session/new` with `cwd`, `mcpServers: [kaoiro bridge]`, `_meta.rules` = server-composed persona and footer | measured |
+| `run(prompt?)` | spawn, `initialize`, `session/new` with `cwd`, `mcpServers: [kaoiro HTTP MCP server]`, `_meta.rules` = server-composed persona and footer | measured |
 | `send(text)` | queue, then `session/prompt`; resolve the turn on the response `stopReason` | measured |
 | `interrupt()` | `session/cancel`; the pending prompt resolves with `cancelled` | measured, about 5 ms |
 | turn outcome | `stopReason: "cancelled"` is returned both for an interrupt and for a rejected permission; the wrapper distinguishes them by `_meta.cancellationCategory` (`MidTurnAbort` / `PermissionRejected`) and reports an operator reject as a rejection, not an interrupt | measured (SDK probe) |
 | `close()` / SIGTERM | close stdin, SIGTERM to the process group, SIGKILL after a grace below the runner's 5000 ms reset escalation | measured: tool child gone within 5 s after SIGTERM |
-| kaoiro tools | the existing stdio MCP bridge (`dist/bridge.js` pattern from Codex) as `mcpServers[0]`; the model reaches it via grok's `search_tool` and `use_tool` as `kaoiro__<tool>` | measured only for the ACP stdio MCP path with a probe server; the production bridge to ToolHost path is acceptance item 2 |
+| kaoiro tools | the wrapper's ToolHost, served as an authenticated HTTP MCP server on `127.0.0.1` ([issue #604](https://github.com/sakuraiyuta/kaoiro/issues/604)), as `mcpServers[0]`; the model reaches it via grok's `search_tool` and `use_tool` as `kaoiro__<tool>` | measured with a probe server under every sandbox profile; the production ToolHost path is acceptance item 2 |
 | state | `session/update` chunks and tool calls to running states; `_x.ai/session_notification` `turn_completed` to `waiting_input`; `pending_interaction` kind `permission` to `waiting_permission` only when a `session/request_permission` is actually outstanding | observed; acceptance item 1 records it |
 | turn identity | `session/prompt` result `_meta.promptId` (equal to `requestId`); the matching `_x.ai/session_notification` `turn_completed.prompt_id` | measured: equal on all 16 recorded turns |
 | tool-call origin | grok's MCP `tools/call` carries only `_meta.progressToken`; no turn or session identity | measured |
@@ -312,8 +312,8 @@ signal other processes:
    a tool call run, and `waiting_input` after the turn; the second turn
    remembers the first. The `session/prompt` result `_meta` ids and the
    `_x.ai/session_notification` kinds are recorded as metadata
-2. A kaoiro tool call goes through the production bridge to the ToolHost
-   handler with the right arguments, and its result reaches the model
+2. A kaoiro tool call goes through the production HTTP MCP server to the
+   ToolHost handler with the right arguments, and its result reaches the model
 3. `interrupt()` during a foreground long tool: verify the actual
    `tool_call.rawInput` command and `block_until_ms: 120000`, then assert
    the turn ends `cancelled`, the state leaves running and the known tool
@@ -334,7 +334,7 @@ signal other processes:
    outside and inside cwd under `$HOME`, child network), and each unsupported
    pair is rejected at spawn
 7. Peer delivery: an inbound peer message starts a grok turn; grok replies
-   with `send_to_agent` through the production bridge; the delivery is
+   with `send_to_agent` through the production MCP server; the delivery is
    confirmed (ack) to the sender; a failed delivery notifies the sender;
    `delivery_modes` reports `none` / `none`
 8. `ext.permission` (`on-request`, `os` for Linux restrictive profiles;
@@ -364,7 +364,7 @@ signal other processes:
 
 Negative controls (each turns its check red):
 
-- the bridge never answers: the turn ends with an error within a bounded
+- the MCP server never answers: the turn ends with an error within a bounded
   time, and ToolHost and the child are closed
 - a tool returns an error, the model gets the error
 - the `grok` binary is missing: spawn fails with a clear error

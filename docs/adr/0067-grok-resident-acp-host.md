@@ -33,3 +33,16 @@ Metadata-only diagnostics prevent unknown SDK variants from leaking content.
 Cold resume, history, catalog probing, context usage and live model/effort
 switching belong to later work units. Individual Claude hooks and upstream
 reports are outside this work. Production enabling requires operator approval.
+
+## Amendment 2026-10-14: authenticated HTTP MCP
+
+The tool transport above is no longer a stdio bridge. Under the `read-only`
+sandbox profile Grok's seccomp filter denies `connect(2)` on `AF_UNIX` for its
+child processes, so the bridge (a child) could not reach the ToolHost's unix
+socket and a read-only peer started without kaoiro tools and without any
+report ([issue #604](https://github.com/sakuraiyuta/kaoiro/issues/604)).
+Grok reaches a `127.0.0.1` HTTP MCP server from its own process under every
+profile, so `ToolHost` now serves HTTP with a per-run bearer token, a strict
+`Host` and `Origin` check, and a startup that fails closed. The stdio bridge
+and the unix socket are removed. See
+[Tool transport](../reference/engines/grok-acp.md#tool-transport).

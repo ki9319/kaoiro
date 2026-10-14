@@ -8,7 +8,6 @@
   "types": "./dist/index.d.ts",
   "kaoiro": {
     "runtimeAssets": [
-      "dist/bridge.js",
       "dist/build-info.json"
     ]
   },

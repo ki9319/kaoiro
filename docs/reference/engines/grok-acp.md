@@ -17,9 +17,52 @@ whose sandbox environment it sets and whose process group it terminates.
 Connecting to a shared leader would break those ownership assumptions.
 
 The server-composed persona and common footer are sent in `session/new`
-`_meta.rules`. The kaoiro stdio MCP bridge is passed as `mcpServers` and
-forwards calls to wrapper-owned ToolHost handlers. Grok discovers tools
+`_meta.rules`. The kaoiro tools are served by the wrapper's ToolHost as an
+HTTP MCP server on `127.0.0.1` and passed as `mcpServers` with a per-run
+bearer token (see [Tool transport](#tool-transport)). Grok discovers tools
 through its `search_tool` and `use_tool` interfaces.
+
+## Tool transport
+
+`ToolHost` listens on `127.0.0.1` at a free port, one host per `run()`, and
+serves the MCP Streamable HTTP protocol statelessly (a fresh MCP server per
+request, JSON responses). The `mcpServers` entry is
+`{ type: "http", name: "kaoiro", url: "http://127.0.0.1:<port>/mcp",
+headers: [{ name: "Authorization", value: "Bearer <token>" }] }`. Grok
+connects from its own process, so a sandbox profile that blocks `connect(2)`
+on `AF_UNIX` for its child processes (`read-only`) does not stop it; the
+earlier stdio bridge was such a child and could not reach the ToolHost under
+that profile.
+
+Every request passes these checks in order, using only its request line and
+headers, so a rejected request has its body unread. The first failing check
+decides the response:
+
+1. `Host` must equal the listener's authority, `127.0.0.1:<port>`, exactly
+   (so `localhost` and any other port are refused): 403.
+2. A request that carries an `Origin` header, with any value including `null`,
+   gets 403. Grok's MCP client sends none.
+3. `Authorization: Bearer <token>` must match the token of this ToolHost,
+   compared as a constant-time comparison of SHA-256 digests: 401, with
+   `WWW-Authenticate: Bearer`.
+4. Only `POST /mcp`: 404 for another path, 405 for another method.
+5. A `Content-Length` over 1 MiB gets 413 before the body is read; a body
+   that passes 1 MiB while it is read (chunked) also gets 413.
+
+The token is 32 random bytes (base64url), created when the ToolHost starts,
+held in memory, and used only for that host. It travels in the ACP request's
+`headers`, never in the URL: Grok stores MCP server URLs in its session files
+(measured), so the URL must not carry a secret. The token is not in the
+child's argv or environment, the diagnostic records, status or envelopes.
+Closing the ToolHost stops listening, severs every connection and aborts every
+call in flight.
+
+Startup fails closed with a reason. After `initialize` the agent must report
+`mcpCapabilities.http` ("grok does not support HTTP MCP servers" otherwise).
+After `session/new` the host waits until Grok has made one authenticated
+`tools/list` call, because on a transport or token fault Grok carries on
+without the server and reports nothing ("kaoiro MCP server did not
+connect" after 15 s). `waiting_input` is reported only after both.
 
 ## ACP module boundary
 
@@ -59,7 +102,7 @@ Work unit 1 supports text turns, conversation continuity while the wrapper
 is resident, cancellation, operator permission requests, user questions,
 normal peer messages and dispatch confirmation. Early and yield delivery
 are explicitly `none`. Reply-basis v1 is not negotiated: Grok MCP calls do
-not carry turn-origin identity, so the bridge cannot prove it.
+not carry turn-origin identity, so the MCP server cannot prove it.
 
 The launch catalog contains only `default` (account default). Model and
 effort switching, attachments, cold resume, history replay, context usage

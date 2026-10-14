@@ -3,7 +3,7 @@ import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import * as stdio from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 if (process.argv.includes("--version")) {
   console.log("grok fixture 1.0.52");
   process.exit(0);
@@ -57,6 +57,8 @@ if (process.env.KAOIRO_TEST_GROK_IGNORE_TERM === "1") {
 }
 let client;
 let transport;
+// Settles when the MCP connection attempt has ended, whatever its outcome.
+let connecting = Promise.resolve();
 let prompt;
 let memory = "";
 let rules = "";
@@ -120,21 +122,55 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         }
         reply(msg.id, {
           protocolVersion: 1,
-          agentCapabilities: {},
+          agentCapabilities:
+            process.env.KAOIRO_TEST_GROK_MCP_MODE === "no-http"
+              ? {}
+              : { mcpCapabilities: { http: true, sse: true } },
           authMethods: [],
         });
         break;
       case "session/new": {
         rules = msg.params._meta.rules;
         const mcp = msg.params.mcpServers[0];
-        transport = new stdio.StdioClientTransport({
-          command: mcp.command,
-          args: mcp.args,
-          env: Object.fromEntries(mcp.env.map((e) => [e.name, e.value])),
-        });
-        client = new Client({ name: "grok-fixture", version: "0" });
-        await client.connect(transport);
+        const mode = process.env.KAOIRO_TEST_GROK_MCP_MODE ?? "ok";
+        const headers = Object.fromEntries(
+          (mcp.headers ?? []).map((h) => [h.name, h.value]),
+        );
+        const token = /^Bearer (.+)$/.exec(headers.Authorization ?? "")?.[1];
+        // Test-only side channels: the token this process received, and whether
+        // it can be found in this process's argv or environment.
+        if (token && process.env.KAOIRO_TEST_GROK_TOKEN_FILE)
+          writeFileSync(process.env.KAOIRO_TEST_GROK_TOKEN_FILE, token);
+        if (token && process.env.KAOIRO_TEST_GROK_SCAN_FILE)
+          writeFileSync(
+            process.env.KAOIRO_TEST_GROK_SCAN_FILE,
+            JSON.stringify({
+              type: mcp.type,
+              url: mcp.url,
+              tokenInArgv: JSON.stringify(process.argv).includes(token),
+              tokenInEnv: JSON.stringify(process.env).includes(token),
+              tokenInUrl: String(mcp.url).includes(token),
+            }),
+          );
+        // Like Grok, reply first and connect afterwards, and carry on without
+        // the server when the connection fails.
         reply(msg.id, { sessionId: sid });
+        if (mode !== "never-connect") {
+          const sent =
+            mode === "drop-headers"
+              ? {}
+              : mode === "wrong-token"
+                ? { Authorization: `Bearer ${"x".repeat(token?.length ?? 43)}` }
+                : headers;
+          transport = new StreamableHTTPClientTransport(new URL(mcp.url), {
+            requestInit: { headers: sent },
+          });
+          client = new Client({ name: "grok-fixture", version: "0" });
+          connecting = (async () => {
+            await client.connect(transport);
+            await client.listTools();
+          })().catch(() => {});
+        }
         break;
       }
       case "session/prompt": {
@@ -173,6 +209,18 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         }
         if (text === "exit") {
           process.exit(9);
+        }
+        if (text === "canary") {
+          // A value the test planted, carried through the real paths: the
+          // assistant text (an envelope) and a notification's prompt_id (a
+          // metadata-tee record).
+          const canary = process.env.KAOIRO_TEST_GROK_CANARY;
+          notification("_x.ai/session_notification", {
+            sessionId: sid,
+            update: { sessionUpdate: "turn_completed", prompt_id: canary },
+          });
+          finish(msg.id, canary);
+          break;
         }
         if (text === "sleep" || text === "stubborn") {
           const child = spawn(process.execPath, [
@@ -281,6 +329,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             status: "in_progress",
             kind: "other",
           });
+          await connecting;
           const result = await client.callTool({
             name: "probe",
             arguments: { value: 7 },
@@ -296,6 +345,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         if (text.startsWith("[Inter-agent message")) {
           if (process.env.KAOIRO_TEST_GROK_FAIL_PEER === "1") process.exit(9);
           const match = /conversation_id="([^"]+)"/.exec(text);
+          await connecting;
           const result = await client.callTool({
             name: "send_to_agent",
             arguments: {

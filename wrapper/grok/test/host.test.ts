@@ -189,7 +189,7 @@ describe("resident ACP host", () => {
     });
     expect(envelopes.some((e) => e.state === "thinking")).toBe(true);
   });
-  it("round-trips a tool through the production stdio bridge", async () => {
+  it("round-trips a tool through the HTTP MCP server", async () => {
     const calls: unknown[] = [];
     const { host, envelopes } = await started({
       toolDescriptors: [
@@ -429,7 +429,7 @@ describe("resident ACP host", () => {
       await exited;
     }
   });
-  it("bounds an unanswered bridge call", async () => {
+  it("bounds an unanswered tool call", async () => {
     const { host } = await started({
       toolDescriptors: [
         {
@@ -450,5 +450,165 @@ describe("resident ACP host", () => {
       vi.useRealTimers();
     }
     await host.closed;
+  });
+});
+
+describe("kaoiro MCP over HTTP (issue #604)", () => {
+  const descriptors = [
+    {
+      name: "probe",
+      description: "Return a probe value",
+      inputSchema: { type: "object" },
+      handler: async () => ({
+        content: [{ type: "text" as const, text: "TOOL_RESULT_MARKER" }],
+      }),
+    },
+  ];
+  function build(mode: string, extra: Partial<GrokHostOptions> = {}) {
+    const envelopes: Envelope[] = [];
+    const host = new GrokHost({
+      config: { ...config },
+      cwd: process.cwd(),
+      personaPrompt: "PERSONA_AND_FOOTER",
+      send: (e) => envelopes.push(e),
+      decidePermission: async () => ({ allow: false }),
+      executable,
+      toolDescriptors: descriptors,
+      env: { ...process.env, KAOIRO_TEST_GROK_MCP_MODE: mode },
+      mcpReadyTimeoutMs: 400,
+      ...extra,
+    });
+    hosts.push(host);
+    return { host, envelopes };
+  }
+
+  it("reaches waiting_input only after an authenticated tools/list", async () => {
+    const listsAtWaiting: (number | undefined)[] = [];
+    let host!: GrokHost;
+    const built = build("ok", {
+      send: (e) => {
+        if (e.type === "state_change" && e.state === "waiting_input") {
+          listsAtWaiting.push(host.toolHostStats()?.authenticatedLists);
+        }
+      },
+      mcpReadyTimeoutMs: 5_000,
+    });
+    host = built.host;
+    void host.run().catch(() => {});
+    await vi.waitFor(() => expect(host.state).toBe("waiting_input"), {
+      timeout: 5_000,
+    });
+    expect(listsAtWaiting[0]).toBeGreaterThanOrEqual(1);
+  });
+
+  it.each(["never-connect", "drop-headers", "wrong-token"])(
+    "fails startup with its reason when Grok never lists the tools: %s",
+    async (mode) => {
+      const { host, envelopes } = build(mode);
+      await expect(host.run()).rejects.toThrow(
+        "kaoiro MCP server did not connect",
+      );
+      expect(host.state).toBe("error");
+      expect(
+        envelopes.filter((e) => e.type === "log").map((e) => e.payload),
+      ).toContainEqual({
+        kind: "system",
+        text: "kaoiro MCP server did not connect",
+      });
+    },
+  );
+
+  it("fails startup when Grok does not support HTTP MCP servers", async () => {
+    const { host, envelopes } = build("no-http");
+    await expect(host.run()).rejects.toThrow(
+      "grok does not support HTTP MCP servers",
+    );
+    expect(host.state).toBe("error");
+    expect(
+      envelopes.filter((e) => e.type === "log").map((e) => e.payload),
+    ).toContainEqual({
+      kind: "system",
+      text: "grok does not support HTTP MCP servers",
+    });
+  });
+
+  it("keeps the token out of every surface the wrapper writes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kaoiro-grok-token-"));
+    scratch.push(dir);
+    const tokenFile = join(dir, "token");
+    const scanFile = join(dir, "scan.json");
+    // A value with no secret in it, planted through each surface's real path.
+    const canary = "CANARY_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
+    const stderrChunks: Buffer[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation(((
+      chunk: string | Uint8Array,
+    ) => {
+      stderrChunks.push(Buffer.from(chunk));
+      return true;
+    }) as never);
+    const envelopes: Envelope[] = [];
+    const statuses: string[] = [];
+    const metadata: unknown[] = [];
+    let host!: GrokHost;
+    const built = build("ok", {
+      mcpReadyTimeoutMs: 5_000,
+      send: (e) => {
+        envelopes.push(e);
+        if (e.type === "state_change") {
+          statuses.push(JSON.stringify(host.statusExtSnapshot()));
+        }
+      },
+      onMetadata: (m) => metadata.push(m),
+      env: {
+        ...process.env,
+        KAOIRO_TEST_GROK_TOKEN_FILE: tokenFile,
+        KAOIRO_TEST_GROK_SCAN_FILE: scanFile,
+        KAOIRO_TEST_GROK_CANARY: canary,
+      },
+    });
+    host = built.host;
+    void host.run().catch(() => {});
+    await vi.waitFor(() => expect(host.state).toBe("waiting_input"), {
+      timeout: 5_000,
+    });
+    await host.send("tool");
+    // The controls: a canary through stderr in two chunks split inside it,
+    // through the assistant text and a notification's prompt_id, and through a
+    // pending question in the status.
+    process.stderr.write(canary.slice(0, 20));
+    process.stderr.write(canary.slice(20));
+    await host.send("canary");
+    host.setPendingQuestion({
+      request_id: "q-1",
+      ts: "2026-10-14T00:00:00Z",
+      questions: [
+        { question: canary, header: "h", multiSelect: false, options: [] },
+      ],
+    });
+    statuses.push(JSON.stringify(host.statusExtSnapshot()));
+    host.setPendingQuestion(null);
+
+    const token = readFileSync(tokenFile, "utf8");
+    expect(token.length).toBeGreaterThanOrEqual(43);
+    const surfaces = {
+      stderr: Buffer.concat(stderrChunks).toString("utf8"),
+      envelopes: JSON.stringify(envelopes),
+      status: statuses.join("\n"),
+      metadata: JSON.stringify(metadata),
+    };
+    const occurrences = (text: string, needle: string) =>
+      text.split(needle).length - 1;
+    for (const [name, text] of Object.entries(surfaces)) {
+      expect(occurrences(text, canary), `${name} carries the canary`)
+        .toBeGreaterThanOrEqual(1);
+      expect(occurrences(text, token), `${name} carries the token`).toBe(0);
+    }
+    // And not the places a process can be read from.
+    expect(JSON.parse(readFileSync(scanFile, "utf8"))).toMatchObject({
+      type: "http",
+      tokenInArgv: false,
+      tokenInEnv: false,
+      tokenInUrl: false,
+    });
   });
 });

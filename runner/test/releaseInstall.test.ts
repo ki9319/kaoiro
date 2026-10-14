@@ -338,7 +338,7 @@ describe("kaoiro-runner-install.sh (issue #219)", () => {
 
   it.each([
     ["codex", "node_modules/@kaoiro/codex/dist/bridge.js"],
-    ["grok", "node_modules/@kaoiro/grok/dist/bridge.js"],
+    ["grok", "node_modules/@kaoiro/grok/dist/build-info.json"],
     ["claude-code", "node_modules/@kaoiro/claude-code/dist/probe.js"],
     ["antigravity(bridge.js)", "node_modules/@kaoiro/antigravity/dist/bridge.js"],
     ["antigravity(hook.js)", "node_modules/@kaoiro/antigravity/dist/hook.js"],

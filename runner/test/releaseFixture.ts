@@ -231,12 +231,16 @@ export function writeReleaseTree(
     // — ADR-0053). A fixture that modelled only one of the two `new URL`
     // sites would let the other's deletion survive review, the same class
     // of gap that missed probe.js in round 2.
+    // grok declares only its build info: its tools are served over HTTP, so
+    // it composes no asset path of its own.
     const asset: string[] =
-      (wrapper === "codex" || wrapper === "grok")
+      wrapper === "codex"
         ? ["dist/bridge.js"]
-        : wrapper === "claude-code"
-          ? ["dist/probe.js"]
-          : ["dist/bridge.js", "dist/hook.js", "dist/build-info.json"];
+        : wrapper === "grok"
+          ? ["dist/build-info.json"]
+          : wrapper === "claude-code"
+            ? ["dist/probe.js"]
+            : ["dist/bridge.js", "dist/hook.js", "dist/build-info.json"];
     const runtime = { kaoiro: { runtimeAssets: asset } };
     put(
       `node_modules/@kaoiro/${wrapper}/package.json`,
@@ -263,7 +267,7 @@ export function writeReleaseTree(
     // they are what proves the verifier no longer reads edges out of call
     // text.
     const bridgeEdge =
-      (wrapper === "codex" || wrapper === "grok")
+      wrapper === "codex"
         ? 'const b = new URL("../dist/bridge.js", import.meta.url);\n'
         : wrapper === "antigravity"
           ? 'const b = new URL("../dist/bridge.js", import.meta.url);\n' +
@@ -275,7 +279,6 @@ export function writeReleaseTree(
     );
   }
   put("node_modules/@kaoiro/codex/dist/bridge.js", "// stub bridge\n");
-  put("node_modules/@kaoiro/grok/dist/bridge.js", "// stub bridge\n");
   put("node_modules/@kaoiro/claude-code/dist/probe.js", "// stub probe\n");
   put("node_modules/@kaoiro/antigravity/dist/bridge.js", "// stub bridge\n");
   put("node_modules/@kaoiro/antigravity/dist/hook.js", "// stub hook\n");

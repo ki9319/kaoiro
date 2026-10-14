@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
 import type * as acp from "@agentclientprotocol/sdk";
 import {
   initialMachineState,
@@ -42,7 +41,7 @@ import {
 import { formatTurnWatchdogLine } from "@kaoiro/wrapper-core";
 import { resolveTurnWatchdogSettings } from "./settings.js";
 import { GrokLaunchError } from "./grok/errors.js";
-import { ToolHost } from "./toolhost.js";
+import { MCP_NOT_CONNECTED, ToolHost, type ToolHostStats } from "./toolhost.js";
 
 export interface GrokHostOptions {
   config: WrapperConfig;
@@ -57,6 +56,9 @@ export interface GrokHostOptions {
   ) => Promise<{ allow: boolean }>;
   executable?: string;
   env?: NodeJS.ProcessEnv;
+  /** How long to wait, after the session exists, for Grok to list the kaoiro
+   *  tools. Startup fails with the reason when it does not. */
+  mcpReadyTimeoutMs?: number;
   onSessionId?: (id: string) => void;
   onMetadata?: (metadata: GrokWireMetadata) => void;
   onTurnStart?: (turn: { turnToken: string }) => void;
@@ -66,6 +68,10 @@ export interface GrokHostOptions {
     error?: { detail: string };
   }) => void;
 }
+/** Grok connects to the MCP server within about a second of session/new
+ *  (measured at most 1.1 s); this is far past that and inside the 30 s startup
+ *  deadline, so a missing connection reports its own reason first. */
+const MCP_READY_TIMEOUT_MS = 15_000;
 interface Turn {
   text: string;
   token: string;
@@ -124,6 +130,10 @@ export class GrokHost implements EngineAdapter {
   }
   get processId() {
     return this.#process?.child.pid;
+  }
+  /** For tests: what the tool server has seen. It never holds the token. */
+  toolHostStats(): ToolHostStats | undefined {
+    return this.#toolHost?.stats();
   }
   activeInterAgentTurnToken() {
     return this.#active?.token ?? null;
@@ -275,26 +285,31 @@ export class GrokHost implements EngineAdapter {
         const failed = this.#process.exited.then(() => {
           throw new Error("grok child exited before session initialization");
         });
+        const toolHost = this.#toolHost;
+        const session = this.#session;
         await Promise.race([
-          this.#session.open(
-            this.#options.cwd,
-            [
-              {
-                name: "kaoiro",
-                command: process.execPath,
-                args: [
-                  fileURLToPath(new URL("../dist/bridge.js", import.meta.url)),
-                ],
-                env: [
-                  {
-                    name: "KAOIRO_BRIDGE_SOCKET",
-                    value: this.#toolHost.socketPath,
-                  },
-                ],
-              },
-            ],
-            grokSessionMeta(this.#options.personaPrompt),
-          ),
+          (async () => {
+            const initialized = await session.initialize();
+            // Without HTTP MCP support the tools could not reach Grok, and Grok
+            // would start without them and say nothing.
+            if (initialized.agentCapabilities?.mcpCapabilities?.http !== true) {
+              throw new GrokLaunchError(
+                "grok does not support HTTP MCP servers",
+              );
+            }
+            await session.newSession(
+              this.#options.cwd,
+              [toolHost.mcpServer()],
+              grokSessionMeta(this.#options.personaPrompt),
+            );
+            // Grok degrades silently on a transport or token fault, so only the
+            // listener can tell that it connected.
+            await toolHost
+              .listed(this.#options.mcpReadyTimeoutMs ?? MCP_READY_TIMEOUT_MS)
+              .catch(() => {
+                throw new GrokLaunchError(MCP_NOT_CONNECTED);
+              });
+          })(),
           failed,
           new Promise<never>((_, reject) => {
             this.#timer = setTimeout(
