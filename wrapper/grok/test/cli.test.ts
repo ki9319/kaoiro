@@ -56,6 +56,7 @@ describe("runGrokCli composition", () => {
   it("logs an operator instruction received before readiness only at turn start", async () => {
     const envelopes: Envelope[] = [];
     let probe!: Promise<void>;
+    let beforeReadyLogs: number | undefined;
     const work = runGrokCli({
       parseCliArgs: () => ({ configPath: "fixture" }),
       loadConfig: () => ({ ...config }),
@@ -64,12 +65,16 @@ describe("runGrokCli composition", () => {
         executable: fileURLToPath(new URL("./fixtures/grok.mjs", import.meta.url)),
       }),
       createServerLink: (_url, _id, callbacks) => {
-        callbacks.onInstruction?.("BEFORE_READY");
-        expect(envelopes.filter(e => e.type === "log")).toHaveLength(0);
-        return recordingLink(callbacks, envelopes, [], []);
+        const link = recordingLink(callbacks, envelopes, [], []);
+        queueMicrotask(() => {
+          callbacks.onInstruction?.("BEFORE_READY");
+          beforeReadyLogs = envelopes.filter(e => e.type === "log").length;
+        });
+        return link;
       },
       onHostCreated: host => {
         probe = (async () => {
+          expect(beforeReadyLogs).toBe(0);
           await vi.waitFor(() => expect(envelopes.filter(e => e.type === "result"))
             .toHaveLength(1), { timeout: 5000 });
           expect(envelopes.filter(e => e.type === "log").map(e => e.payload)).toEqual([

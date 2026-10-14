@@ -32,9 +32,9 @@ describe("ACP update projection", () => {
   });
   it.each(["completed", "failed"] as const)(
     "projects a %s tool update without text or a log", status => {
-    expect(updateEvents(notification({
-      sessionUpdate: "tool_call_update", toolCallId: "tool", status,
-    }))).toEqual({ events: [{ kind: "tool_result", toolUseIds: ["tool"] }] });
+      expect(updateEvents(notification({
+        sessionUpdate: "tool_call_update", toolCallId: "tool", status,
+      }))).toEqual({ events: [{ kind: "tool_result", toolUseIds: ["tool"] }] });
     },
   );
   it("does not project a log from an in-progress tool update", () => {
