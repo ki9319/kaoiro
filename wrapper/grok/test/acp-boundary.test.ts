@@ -239,6 +239,11 @@ describe("the detector itself", () => {
     ["a dynamic import in a template", ".", "const m = await import(`../host.js`);"],
     ["a require call", ".", 'const m = require("../host.js");'],
     ["an import type", ".", 'type T = import("../host.js").X;'],
+    [
+      "an outside import after an inside one",
+      ".",
+      'import { a } from "./connection.js";\nimport "../host.js";',
+    ],
     ["a computed dynamic import", ".", "const m = await import(name);"],
     [
       "a dynamic import with a template substitution",
@@ -269,6 +274,11 @@ describe("the detector itself", () => {
       "a dynamic import that stays in acp/",
       "deep",
       'const m = await import("../connection.js");',
+    ],
+    [
+      "a template dynamic import that stays in acp/",
+      "deep",
+      "const m = await import(`../connection.js`);",
     ],
     ["a re-export that stays in acp/", "deep", 'export * from "../connection.js";'],
     [
