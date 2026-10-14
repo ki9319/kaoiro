@@ -5,6 +5,8 @@ import * as grok from "../src/permission_state.js";
 import { applyPermissionSyncState as codexSync, createPermissionState as codexInitial } from "../../codex/src/permission_state.js";
 import { pairs, type Row, type Report } from "./differential/scenarios.js";
 const directory = new URL("../../../protocol/fixtures/permission-differential/", import.meta.url);
+// Rejoin input and expected output both come from the server fixture. These
+// rows check adoption; the Elixir drift test independently validates the input.
 const scenarios = JSON.parse(readFileSync(new URL("scenarios.json", directory), "utf8")) as {
   rows: Row[]; reports: Report[]; rejoin_report: string;
 };
@@ -68,6 +70,7 @@ it("agrees with actual server transitions for every bounded event sequence", () 
       reports.push(report(state.latest!));
       submission = null;
     } else {
+      expect(server[1], `rejoin server next ${id}`).toEqual(expected.rows[parent]![1]);
       if (event === 8) ceiling = pick(0, 3);
       const message: PermissionSyncMessage = { version: "0", control: expected.controls[server[2]]!,
         next: pick(...server[1]) };

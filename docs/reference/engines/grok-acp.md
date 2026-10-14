@@ -167,6 +167,9 @@ A pre-prompt lane failure leaves the head turn queued and unsent. If its
 selection is still `next`, the adapter stops until a valid server relay or
 sync supplies `next`; it never guesses a fallback or originates `rolled_back_to`.
 It may echo that field as part of a server control adopted through sync.
+A persisted unsupported pair is rejected before stopping the resident child,
+with `unsupported_permission_pair`. Dispatch waits for an authoritative next
+selection while the existing child remains alive.
 A refused relay changes `latest` without replacing the previous `next`.
 `ext.permission_gate` makes the stop visible. Blocked queued input expires
 after 30 seconds with `permission_gate_blocked` and is not resent. A missing
@@ -177,6 +180,11 @@ Every Linux control, including an `off` baseline, has fixed constraints
 `{approval: "on-request", enforcement: "os"}`. These constraints describe the
 adapter, not an observed execution's badge. Off Linux, the adapter requests
 no permission sync and retains its legacy permission/effective display.
+Before the first observation, the running generation's profile supplies the
+same permission/effective projection as at launch, including after sync
+negotiation. This projection does not mark the control applied or create an
+observation. After an observation is lost, it does not replace the unknown
+execution with a launch projection.
 
 The restart deadline is 30 seconds; authenticated MCP readiness also retains
 its 15-second limit. Grok's stored session summary still names the creation

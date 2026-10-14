@@ -1,8 +1,14 @@
 import { fileURLToPath } from "node:url";
-import { expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { afterEach, expect, it, vi } from "vitest";
 import { runGrokCli } from "../src/cli.js";
 import { GrokHost } from "../src/host.js";
 import { phoenixLoopback } from "./fixtures/phoenix_loopback.js";
+const scratch: string[] = [];
+const cwd = () => { const path = mkdtempSync(join(homedir(), ".kaoiro-grok-composition-")); scratch.push(path); return path; };
+afterEach(() => { for (const path of scratch.splice(0)) rmSync(path, { recursive: true, force: true }); });
 
 it("negotiates, switches and publishes observations and stops on the actual ServerLink wire", async () => {
   const server = await phoenixLoopback(() => ({ permission_sync: true,
@@ -16,6 +22,7 @@ it("negotiates, switches and publishes observations and stops on the actual Serv
   const pushSelection = (revision: number, sandbox: string, network_access: boolean) =>
     server.push("set_permission", { version: "0", revision, sandbox, network_access });
   const work = runGrokCli({
+    cwd: cwd(),
     parseCliArgs: () => ({ configPath: "fixture" }),
     loadConfig: () => ({ agent_id: "composition.grok", display_name: "Grok",
       server_url: server.url, sandbox: "danger-full-access", network_access: true,
@@ -83,7 +90,7 @@ it("negotiates, switches and publishes observations and stops on the actual Serv
 it.each(["darwin", "linux"] as const)("keeps the %s join and raw launch ceiling on the wire", async platform => {
   const server = await phoenixLoopback(() => ({ permission_sync: platform === "linux" }));
   let host: GrokHost | undefined;
-  const work = runGrokCli({ platform,
+  const work = runGrokCli({ platform, cwd: cwd(),
     parseCliArgs: () => ({ configPath: "fixture" }),
     loadConfig: () => ({ agent_id: "composition.ceiling", display_name: "Fixture", server_url: server.url,
       sandbox: "danger-full-access", network_access: false,
@@ -98,7 +105,7 @@ it.each(["darwin", "linux"] as const)("keeps the %s join and raw launch ceiling 
     if (platform === "linux") {
       expect(join.permission_sync).toEqual({ engine: "grok" });
       server.push("permission_sync", { version: "0", control: null, next: null });
-    }
+    } else server.push("set_permission", { version: "0", revision: 1, sandbox: "read-only", network_access: false });
     server.push("persona_prompt", { prompt: "Fixture" });
     await vi.waitFor(() => expect(host?.state).toBe("waiting_input"), { timeout: 5000 });
     const pid = host!.processId;
@@ -111,6 +118,11 @@ it.each(["darwin", "linux"] as const)("keeps the %s join and raw launch ceiling 
     } else {
       expect(host!.statusExtSnapshot()).not.toHaveProperty("permission_control");
       await expect(host!.setPermission({ revision: 1, requested: { sandbox: "read-only", network_access: false } })).rejects.toThrow("fixed");
+      const failures = () => server.received.filter(x => x.event === "envelope" && x.payload.type === "log" &&
+        (x.payload.payload as any).text === "grok permission switching failed");
+      await vi.waitFor(() => expect(failures()).toHaveLength(1));
+      server.push("set_permission", { version: "0", revision: 2, sandbox: "read-only", network_access: false });
+      await vi.waitFor(() => expect(failures()).toHaveLength(2));
     }
     expect(host!.processId).toBe(pid);
   } finally { host?.close(); await work; await server.close(); }

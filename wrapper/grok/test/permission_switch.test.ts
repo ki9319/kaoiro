@@ -1,5 +1,6 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Envelope, WrapperConfig } from "@kaoiro/agent-common";
@@ -21,7 +22,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 async function started(extra: Partial<GrokHostOptions> = {}) {
-  const root = mkdtempSync(join(process.cwd(), ".switch-test-")); scratch.push(root);
+  const root = mkdtempSync(join(homedir(), ".kaoiro-grok-switch-")); scratch.push(root);
   const path = join(root, "events.jsonl");
   const envelopes: Envelope[] = [];
   const lifecycle: WrapperPermissionLifecycleMessage[] = [];
@@ -37,6 +38,43 @@ async function started(extra: Partial<GrokHostOptions> = {}) {
   return { host, run, envelopes, lifecycle, events, root };
 }
 describe("permission switch at the queued head boundary", () => {
+  it.each([
+    ["workspace-write", true, "workspace", true],
+    ["read-only", true, "read-only", false],
+    ["danger-full-access", false, "off", true],
+  ] as const)("projects the %s profile before its first observation after negotiation", async (sandbox, network, profile, effective) => {
+    const { host } = await started({ config: { ...config, sandbox, network_access: network }, permissionSyncSupported: false });
+    host.setPermissionSyncSupported(true);
+    const projection = () => {
+      expect(host.statusExtSnapshot()).toMatchObject({
+        permission: { sandbox, approval: "on-request" },
+        effective: { sandbox, network_access: effective },
+        permission_policy: { grok_sandbox_env: profile },
+      });
+      if (profile === "off") expect(host.statusExtSnapshot().permission).not.toHaveProperty("enforcement");
+      else expect(host.statusExtSnapshot().permission).toHaveProperty("enforcement", "os");
+    };
+    projection();
+    expect(host.statusExtSnapshot().permission_control).toMatchObject({ status: "pending" });
+    const turn = host.send("sleep"); void turn.catch(() => {});
+    await vi.waitFor(() => expect(host.state).toBe("tool_running"), { timeout: 5000 });
+    projection();
+    expect(host.statusExtSnapshot().permission_control).toMatchObject({ status: "applying" });
+    await host.interrupt(); await turn;
+  });
+  it("projects the current generation when the first prompt changes profile", async () => {
+    const { host } = await started();
+    await host.setPermission(choose(1));
+    expect(host.statusExtSnapshot().permission).toMatchObject({ sandbox: "workspace-write" });
+    const turn = host.send("sleep"); void turn.catch(() => {});
+    await vi.waitFor(() => expect(host.state).toBe("tool_running"), { timeout: 5000 });
+    expect(host.statusExtSnapshot()).toMatchObject({ permission: { sandbox: "read-only" },
+      effective: { sandbox: "read-only", network_access: false } });
+    await host.interrupt(); await turn;
+    await host.send("no-prompt-id");
+    expect(host.statusExtSnapshot().permission_control).toMatchObject({ status: "unknown" });
+    expect(host.statusExtSnapshot()).not.toHaveProperty("permission");
+  });
   it("retires the old group before load, drops replay and sends one observed turn", async () => {
     const decide = vi.fn(async () => ({ allow: false }));
     const starts: string[] = [], ends: string[] = [];
@@ -158,12 +196,31 @@ describe("permission switch at the queued head boundary", () => {
 });
 
 describe("lane cancellation and failure boundaries", () => {
+  it("omits the wire step when stopping fails before retirement", async () => {
+    let armed = false;
+    const { host, events, envelopes } = await started({ onLaneStep: step => {
+      if (armed && step === "stopping") throw new Error("fixture stopping failure");
+    } });
+    const old = host.processId!;
+    armed = true;
+    await host.setPermission(choose(1));
+    await expect(host.send("unsent")).rejects.toThrow("permission_gate_blocked");
+    expect(host.processId).toBe(old);
+    expect(() => process.kill(old, 0)).not.toThrow();
+    expect(events().filter(r => r.event === "session/prompt")).toHaveLength(0);
+    const gate = host.statusExtSnapshot().permission_gate;
+    expect(gate).toMatchObject({ status: "blocked", reason: "awaiting_server_next", revision: 1 });
+    expect(gate).not.toHaveProperty("step");
+    const sent = envelopes.filter(e => e.type === "state_change" && e.ext?.permission_gate).at(-1);
+    expect(sent?.ext?.permission_gate).toEqual(gate);
+    expect(host.statusExtSnapshot().permission_control).toMatchObject({ status: "failed", reason: "restart_failed" });
+  });
   for (const target of ["stopping", "inspect", "spawn", "initialize", "load", "readiness", "promotion"] as const) {
     it(`close wins at ${target} and waits for every owned group`, async () => {
       let host: GrokHost | undefined;
       const pids: number[] = [];
       let closedAt = false;
-      const { host: built, run, events } = await started({ onLaneStep: async (step, pid) => {
+      const { host: built, run, events, lifecycle } = await started({ onLaneStep: async (step, pid) => {
         if (pid && !pids.includes(pid)) pids.push(pid);
         if (host && step === target) { closedAt = true; host.close(); }
         if (closedAt && step === "spawn" && target !== "spawn") throw new Error("spawn after close");
@@ -174,6 +231,7 @@ describe("lane cancellation and failure boundaries", () => {
       await expect(host.send("must-not-start")).rejects.toThrow("closed");
       await host.closed; await run;
       expect(closedAt).toBe(true);
+      expect(lifecycle.filter(e => e.kind === "permission_failed")).toHaveLength(0);
       expect(connections).toHaveBeenCalledTimes(["stopping", "inspect", "spawn"].includes(target) ? 0 : 1);
       for (const pid of new Set(pids)) expect(() => process.kill(pid, 0)).toThrow();
       expect(events().filter(r => r.event === "session/prompt")).toHaveLength(0);
@@ -184,7 +242,7 @@ describe("lane cancellation and failure boundaries", () => {
       it(`loading ${fault} at ${expectedStep} fails only its lane`, async () => {
         let host: GrokHost | undefined;
         const env = { ...process.env };
-        const root = mkdtempSync(join(process.cwd(), ".switch-fault-")); scratch.push(root);
+        const root = mkdtempSync(join(homedir(), ".kaoiro-grok-switch-fault-")); scratch.push(root);
         const eventPath = join(root, "events");
         env.KAOIRO_TEST_GROK_EVENTS = eventPath;
         if (expectedStep !== "readiness") env.KAOIRO_TEST_GROK_SWITCH_FAULT = `${method}:${fault}`;
@@ -228,17 +286,26 @@ describe("lane cancellation and failure boundaries", () => {
     release(); await turn;
     expect(events().filter(r => r.event === "session/prompt")).toHaveLength(1);
   });
-  it("retires the old child when persisted sync contains an unsupported pair", async () => {
-    const { host, events } = await started();
+  it("refuses unsupported persisted sync before stopping the resident child", async () => {
+    const steps: string[] = [];
+    const { host, events, lifecycle } = await started({ onLaneStep: step => { steps.push(step); } });
+    steps.length = 0;
     const old = host.processId!;
     const selection = choose(1, "workspace-write", false);
     host.applyPermissionSync({ version: "0", next: selection,
       control: { ...selection, status: "pending", constraints: { approval: "on-request", enforcement: "os" } } });
     await expect(host.send("unsent")).rejects.toThrow("permission_gate_blocked");
-    expect(() => process.kill(old, 0)).toThrow();
-    expect(host.processId).toBeUndefined();
+    expect(() => process.kill(old, 0)).not.toThrow();
+    expect(host.processId).toBe(old);
+    expect(steps).toEqual([]);
     expect(events().filter(r => r.event === "session/prompt")).toHaveLength(0);
-    expect(host.statusExtSnapshot().permission_gate).toMatchObject({ revision: 1, step: "inspect" });
+    expect(host.statusExtSnapshot().permission_gate).toMatchObject({ revision: 1, reason: "awaiting_server_next" });
+    expect(host.statusExtSnapshot().permission_control).toMatchObject({ revision: 1, status: "failed", reason: "unsupported_permission_pair" });
+    expect(host.statusExtSnapshot().permission_control).not.toHaveProperty("submitted");
+    expect(lifecycle.at(-1)?.details).toMatchObject({ revision: 1, reason: "unsupported_permission_pair" });
+    await host.setPermission(choose(2, "workspace-write", true));
+    await host.send("authorized-recovery");
+    expect(host.processId).toBe(old);
   });
   it("fails a prompt without observation closed to later dispatch", async () => {
     const { host } = await started();

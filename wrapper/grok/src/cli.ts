@@ -126,11 +126,11 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
   const persona = new Promise<string>((resolve) => {
     resolvePersona = resolve;
   });
-  const controlFailure = (operation: string) => {
+  const controlFailure = (operation: string, detail = "is unsupported in work unit 1") => {
     send(
       makeLog(config, host?.state ?? "idle", new Date().toISOString(), {
         kind: "system",
-        text: `grok ${operation} is unsupported in work unit 1`,
+        text: `grok ${operation} ${detail}`,
       }),
     );
   };
@@ -184,7 +184,7 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
     onSetModel: () => controlFailure("model switching"),
     onSetEffort: () => controlFailure("effort switching"),
     onSetPermission: (value: PermissionSelection) => {
-      if (host) void host.setPermission(value).catch(() => controlFailure("permission switching"));
+      if (host) void host.setPermission(value).catch(() => controlFailure("permission switching", "failed"));
       else pendingPermissions.push({ kind: "relay", value });
     },
     onSetPermissionMode: () => controlFailure("permission mode switching"),
@@ -302,7 +302,7 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
     );
     for (const pending of pendingPermissions) {
       if (pending.kind === "sync") host.applyPermissionSync(pending.value);
-      else await host.setPermission(pending.value).catch(() => controlFailure("permission switching"));
+      else await host.setPermission(pending.value).catch(() => controlFailure("permission switching", "failed"));
     }
     if (pendingName)
       host.renameDisplayName(pendingName.displayName, pendingName.revision);

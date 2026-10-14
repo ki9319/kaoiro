@@ -103,11 +103,11 @@ export function beginPermissionExecution(state: PermissionState, submission: Per
       ? { ...base(submission, history), status: "applying", submitted: submission } : state.latest };
 }
 export function permissionLaneFailed(state: PermissionState, submission: PermissionSubmission,
-  step: PermissionGateExt["step"], now: string): PermissionState {
+  step: PermissionGateExt["step"], now: string, reason = "restart_failed"): PermissionState {
   const isNext = sameSelection(state.next, submission);
   return { ...state,
     latest: sameSelection(state.latest, submission)
-      ? { ...base(submission, state.lastEffective), status: "failed", reason: "restart_failed" } : state.latest,
+      ? { ...base(submission, state.lastEffective), status: "failed", reason } : state.latest,
     next: isNext ? null : state.next,
     gate: isNext ? { status: "blocked", reason: "awaiting_server_next",
       revision: submission.revision, ...(step ? { step } : {}), since: now } : state.gate };

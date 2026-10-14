@@ -99,7 +99,7 @@ interface Generation {
   fail: (error: Error) => void;
 }
 class LaneFailure extends Error {
-  constructor(readonly step: PermissionGateExt["step"]) { super("grok restart failed"); }
+  constructor(readonly step: PermissionGateExt["step"] | "stopping") { super("grok restart failed"); }
 }
 interface Turn {
   text: string;
@@ -177,14 +177,15 @@ export class GrokHost implements EngineAdapter {
   statusExtSnapshot(): Record<string, unknown> {
     const profile = this.#current?.profile;
     const observed = this.#permissions.current?.observation;
-    const legacy = !this.#permissions.latest;
+    const projectProfile = !this.#permissions.latest || !this.#permissions.lastEffective;
     const pair = this.#ceiling.requested;
-    const permission = observed?.permission ?? (legacy && profile ? {
-      sandbox: pair.sandbox, approval: "on-request",
+    const projectedSandbox = profile === "off" ? "danger-full-access" : profile === "workspace" ? "workspace-write" : "read-only";
+    const permission = observed?.permission ?? (projectProfile && profile ? {
+      sandbox: projectedSandbox, approval: "on-request",
       ...(profile === "off" ? {} : { enforcement: "os" }),
     } : undefined);
     const effective = observed ? { sandbox: observed.permission.sandbox, network_access: observed.network_access }
-      : legacy && profile ? { sandbox: pair.sandbox, network_access: effectiveNetworkAccess(pair) } : undefined;
+      : projectProfile && profile ? { sandbox: projectedSandbox, network_access: profile !== "read-only" } : undefined;
     const switching = this.#platform === "linux" && this.#permissions.syncSupported;
     return {
       engine: "grok",
@@ -421,7 +422,7 @@ export class GrokHost implements EngineAdapter {
     } catch (error) {
       if (!this.#sessionId) throw error;
       throw error instanceof LaneFailure ? error : new LaneFailure(expired ? "deadline" :
-        (step as LaneStep) === "promotion" ? "loading_exit" : (step as LaneStep) === "stopping" ? "spawn" : step as PermissionGateExt["step"]);
+        (step as LaneStep) === "promotion" ? "loading_exit" : step as Exclude<LaneStep, "promotion">);
     } finally {
       clearTimeout(timer);
       if (generation && generation.role !== "current") await this.#retire(generation);
@@ -500,15 +501,20 @@ export class GrokHost implements EngineAdapter {
           profile = sandboxProfile(submission.requested, this.#options.cwd,
             this.#options.env ?? process.env, this.#platform);
         } catch {
-          // A persisted sync may contain an unsupported pair. The lane must
-          // retire the child and report its pre-application failure as usual.
+          this.#permissions = permissionLaneFailed(this.#permissions, submission,
+            undefined, new Date().toISOString(), "unsupported_permission_pair");
+          this.#reportFailed(submission, "unsupported_permission_pair");
+          this.#state(this.state);
+          continue;
         }
-        if (profile === undefined || profile !== this.#current?.profile) {
+        if (profile !== this.#current?.profile) {
           try { await this.#inLane(() => this.#replace(submission)); }
           catch (error) {
             if (this.#closing) return;
+            const failedStep = error instanceof LaneFailure ? error.step : "spawn";
+            // The wire has no stopping step; omit it instead of reporting a different phase.
             this.#permissions = permissionLaneFailed(this.#permissions, submission,
-              error instanceof LaneFailure ? error.step : "spawn", new Date().toISOString());
+              failedStep === "stopping" ? undefined : failedStep, new Date().toISOString());
             this.#reportFailed(submission, "restart_failed");
             this.#state(this.state);
             continue;
