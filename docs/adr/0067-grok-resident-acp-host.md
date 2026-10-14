@@ -45,4 +45,5 @@ Grok reaches a `127.0.0.1` HTTP MCP server from its own process under every
 profile, so `ToolHost` now serves HTTP with a per-run bearer token, a strict
 `Host` and `Origin` check, and a startup that fails closed. The stdio bridge
 and the unix socket are removed. See
-[Tool transport](../reference/engines/grok-acp.md#tool-transport).
+[Tool transport](../reference/engines/grok-acp.md#tool-transport) and the plan,
+[issue-604-grok-http-mcp-transport](../plans/issue-604-grok-http-mcp-transport.md).
