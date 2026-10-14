@@ -222,6 +222,15 @@ Per-task cancellation through `_x.ai/task/kill` is tracked in
 [issue #594](https://github.com/sakuraiyuta/kaoiro/issues/594).
 See the [dated evidence](../../evidence/grok/2026-10-14-premises.md).
 
+## Result text
+
+The turn's `result.text` is all message text of the turn, clipped to 16,384
+bytes (`MAX_LOG_BYTES`), as Claude Code and Codex clip theirs. The result
+payload has no `truncated` field, so the clip is silent. The server rejects an
+envelope over 65,536 bytes without a reply the wrapper reads, which would lose
+the whole result envelope. Nothing reads `result.text`; the reply text reaches
+the dashboard through the assistant logs.
+
 ## Diagnostics and shutdown
 
 ACP diagnostic records contain bounded method, variant and identifier
