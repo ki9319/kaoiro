@@ -8,7 +8,7 @@ import type { Envelope, WrapperConfig } from "@kaoiro/agent-common";
 import { runGrokCli } from "../src/cli.js";
 import { GrokHost } from "../src/host.js";
 import { childEnvironment, parsePermissionPolicy } from "../src/grok/policy.js";
-import type { WireMetadata } from "../src/acp/connection.js";
+import type { GrokWireMetadata as WireMetadata } from "../src/grok/wire.js";
 import { checkToolRoundTrip, type ToolEvidence } from "./acceptance.js";
 const live = process.env.KAOIRO_LIVE_GROK === "1";
 const config: WrapperConfig = {

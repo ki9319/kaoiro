@@ -23,7 +23,7 @@ import {
   ServerLink,
 } from "@kaoiro/wrapper-core";
 import { GrokHost, type GrokHostOptions } from "./host.js";
-import type { WireMetadata } from "./acp/connection.js";
+import type { GrokWireMetadata } from "./grok/wire.js";
 import { GrokLaunchError } from "./grok/errors.js";
 
 export interface GrokCliDependencies {
@@ -35,7 +35,7 @@ export interface GrokCliDependencies {
   ) => ServerLink;
   createHost?: (options: GrokHostOptions) => GrokHost;
   onHostCreated?: (host: GrokHost) => void;
-  onMetadata?: (metadata: WireMetadata) => void;
+  onMetadata?: (metadata: GrokWireMetadata) => void;
   additionalTools?: ToolDescriptor[];
   cwd?: string;
 }
@@ -249,7 +249,7 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
           signal?: AbortSignal,
         ) => permission.decide(name, input, signal),
         onSessionId: (id: string) => link?.setSessionId(id),
-        onMetadata: (metadata: WireMetadata) => {
+        onMetadata: (metadata: GrokWireMetadata) => {
           writeRedactedStderr(
             `[kaoiro] grok ACP ${JSON.stringify(metadata)}\n`,
           );

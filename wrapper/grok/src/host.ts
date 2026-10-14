@@ -20,9 +20,19 @@ import {
   type WrapperConfig,
 } from "@kaoiro/agent-common";
 import { AcpSession } from "./acp/session.js";
-import { connectAcp, type WireMetadata } from "./acp/connection.js";
+import { connectAcp } from "./acp/connection.js";
 import { GrokProcess } from "./grok/process.js";
-import { cancellationKind, updateEvents } from "./grok/events.js";
+import {
+  cancellationKind,
+  promptIdOf,
+  turnCompletion,
+  updateEvents,
+} from "./grok/events.js";
+import {
+  grokExtension,
+  grokSessionMeta,
+  type GrokWireMetadata,
+} from "./grok/wire.js";
 import {
   childEnvironment,
   inspectPolicy,
@@ -48,7 +58,7 @@ export interface GrokHostOptions {
   executable?: string;
   env?: NodeJS.ProcessEnv;
   onSessionId?: (id: string) => void;
-  onMetadata?: (metadata: WireMetadata) => void;
+  onMetadata?: (metadata: GrokWireMetadata) => void;
   onTurnStart?: (turn: { turnToken: string }) => void;
   onTurnEnd?: (turn: {
     turnToken: string;
@@ -244,12 +254,15 @@ export class GrokHost implements EngineAdapter {
           return;
         }
         this.#process = new GrokProcess(executable, this.#options.cwd, env);
-        const connection = connectAcp(this.#process.child, {
-          update: (notification) => this.#update(notification),
-          vendor: (notification) => this.#vendor(notification),
-          permission: (request, signal) => this.#permission(request, signal),
-          metadata: (metadata) => this.#options.onMetadata?.(metadata),
-        });
+        const connection = connectAcp<GrokWireMetadata>(
+          this.#process.child,
+          {
+            update: (notification) => this.#update(notification),
+            permission: (request, signal) => this.#permission(request, signal),
+            metadata: (metadata) => this.#options.onMetadata?.(metadata),
+          },
+          grokExtension((notification) => this.#vendor(notification)),
+        );
         this.#session = new AcpSession(connection);
         void connection.closed.then(() => {
           if (!this.#closing) {
@@ -280,7 +293,7 @@ export class GrokHost implements EngineAdapter {
                 ],
               },
             ],
-            this.#options.personaPrompt,
+            grokSessionMeta(this.#options.personaPrompt),
           ),
           failed,
           new Promise<never>((_, reject) => {
@@ -364,7 +377,7 @@ export class GrokHost implements EngineAdapter {
       const response = await this.#session!.prompt(turn.text);
       const completed =
         this.#completion?.sessionId === this.#session?.sessionId &&
-        this.#completion?.promptId === response._meta?.promptId;
+        this.#completion?.promptId === promptIdOf(response._meta);
       const rejected =
         response.stopReason === "cancelled" &&
         cancellationKind(response._meta) === "rejected";
@@ -452,16 +465,8 @@ export class GrokHost implements EngineAdapter {
       );
   }
   #vendor(notification: Record<string, unknown>) {
-    const update = notification.update as Record<string, unknown> | undefined;
-    const sessionId = notification.sessionId ?? notification.session_id;
-    if (
-      update?.sessionUpdate === "turn_completed" &&
-      sessionId === this.#session?.sessionId &&
-      typeof sessionId === "string" &&
-      typeof update.prompt_id === "string"
-    ) {
-      this.#completion = { sessionId, promptId: update.prompt_id };
-    }
+    const completion = turnCompletion(notification, this.#session?.sessionId);
+    if (completion) this.#completion = completion;
   }
   async #permission(
     request: acp.RequestPermissionRequest,

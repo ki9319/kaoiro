@@ -2,22 +2,54 @@ import { Readable, Writable } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import * as acp from "@agentclientprotocol/sdk";
 
+/** ACP-only wire metadata; an engine adds fields through AcpExtension. */
 export interface WireMetadata {
   direction: "in" | "out";
   method?: string;
   variant?: string;
-  vendor_kind?: string;
-  prompt_id?: string;
-  request_id?: string;
-  hook_event?: string;
   sdk_diagnostic?: boolean;
   oversized_lines?: number;
 }
 type Observer = (metadata: WireMetadata) => void;
+type VendorFields<M extends WireMetadata> = Partial<
+  Omit<M, keyof WireMetadata>
+>;
+
+/**
+ * An extra notification beyond the ACP client methods. ACP names extension
+ * methods with a leading underscore; connectAcp rejects any other name.
+ */
+export interface AcpNotification<P = unknown> {
+  method: string;
+  parse: (params: unknown) => P;
+  handle: (params: P) => void;
+}
+
+export function notification<P>(
+  method: string,
+  parse: (params: unknown) => P,
+  handle: (params: P) => void,
+): AcpNotification {
+  return { method, parse, handle } as AcpNotification;
+}
+
+/**
+ * Everything an engine injects into the ACP client. The default (no
+ * extension) registers ACP methods only and adds no vendor metadata.
+ */
+export interface AcpExtension<M extends WireMetadata = WireMetadata> {
+  notifications?: readonly AcpNotification[];
+  /**
+   * Vendor fields for one parsed JSON-RPC line, merged after `variant`. A
+   * throw drops that line's metadata and never interrupts the transport.
+   */
+  wireFields?: (message: Record<string, unknown>) => VendorFields<M>;
+}
+
 const observers = new Set<Observer>();
 let restoreConsole: (() => void) | undefined;
 
-function safeName(value: unknown): string | undefined {
+export function safeName(value: unknown): string | undefined {
   return typeof value === "string" && /^[\w./-]{1,120}$/.test(value)
     ? value
     : undefined;
@@ -68,7 +100,11 @@ function filterSdkConsole(observer: Observer): () => void {
   };
 }
 
-export function metadataTee(direction: "in" | "out", observer: Observer) {
+export function metadataTee<M extends WireMetadata = WireMetadata>(
+  direction: "in" | "out",
+  observer: (metadata: M) => void,
+  wireFields?: AcpExtension<M>["wireFields"],
+) {
   let buffer = "";
   let bytes = 0;
   let oversized = false;
@@ -87,7 +123,7 @@ export function metadataTee(direction: "in" | "out", observer: Observer) {
             buffer = "";
             oversized = true;
             try {
-              observer({ direction, oversized_lines: 1 });
+              observer({ direction, oversized_lines: 1 } as M);
             } catch {
               /* Diagnostics must not interrupt the protocol transport. */
             }
@@ -102,31 +138,14 @@ export function metadataTee(direction: "in" | "out", observer: Observer) {
         try {
           const msg = JSON.parse(line);
           if (!msg || typeof msg !== "object") continue;
-          const note = msg.params?.notification;
-          const update = msg.params?.update;
-          const vendorKind = msg.method?.startsWith("_x.ai/")
-            ? (update?.sessionUpdate ?? note?.type)
-            : undefined;
-          const hookEvent =
-            update?.event_name ?? note?.event ?? note?.hook_event;
-          const promptId = msg.result?._meta?.promptId ?? update?.prompt_id;
           observer({
             direction,
             ...(safeName(msg.method) ? { method: safeName(msg.method)! } : {}),
             ...(safeName(msg.params?.update?.sessionUpdate)
               ? { variant: safeName(msg.params.update.sessionUpdate)! }
               : {}),
-            ...(safeName(vendorKind)
-              ? { vendor_kind: safeName(vendorKind)! }
-              : {}),
-            ...(safeName(promptId) ? { prompt_id: safeName(promptId)! } : {}),
-            ...(safeName(msg.result?._meta?.requestId)
-              ? { request_id: safeName(msg.result._meta.requestId)! }
-              : {}),
-            ...(safeName(hookEvent)
-              ? { hook_event: safeName(hookEvent)! }
-              : {}),
-          });
+            ...(wireFields?.(msg) ?? {}),
+          } as M);
         } catch {
           /* Invalid JSON is handled by the SDK, without body logging. */
         }
@@ -136,38 +155,49 @@ export function metadataTee(direction: "in" | "out", observer: Observer) {
   });
 }
 
-export interface AcpHandlers {
+export interface AcpHandlers<M extends WireMetadata = WireMetadata> {
   update: (notification: acp.SessionNotification) => void;
-  vendor: (notification: Record<string, unknown>) => void;
   permission: (
     request: acp.RequestPermissionRequest,
     signal: AbortSignal,
   ) => Promise<acp.RequestPermissionResponse>;
-  metadata: Observer;
+  metadata: (metadata: M) => void;
 }
 
-export function connectAcp(
+export function connectAcp<M extends WireMetadata = WireMetadata>(
   child: ChildProcessWithoutNullStreams,
-  handlers: AcpHandlers,
+  handlers: AcpHandlers<M>,
+  extension: AcpExtension<M> = {},
 ) {
-  const release = filterSdkConsole(handlers.metadata);
+  for (const { method } of extension.notifications ?? []) {
+    if (!method.startsWith("_")) {
+      throw new Error(
+        `ACP extension notification "${method}" must start with "_"`,
+      );
+    }
+  }
+  const observer = handlers.metadata as Observer;
+  const release = filterSdkConsole(observer);
   const input = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
-  const output = metadataTee("out", handlers.metadata);
+  const output = metadataTee("out", handlers.metadata, extension.wireFields);
   void output.readable.pipeTo(Writable.toWeb(child.stdin)).catch(() => {});
   const stream = acp.ndJsonStream(
     output.writable,
-    input.pipeThrough(metadataTee("in", handlers.metadata)),
+    input.pipeThrough(
+      metadataTee("in", handlers.metadata, extension.wireFields),
+    ),
   );
-  const connection = acp
+  const app = acp
     .client({ name: "kaoiro" })
     .onNotification(acp.methods.client.session.update, (ctx) =>
       handlers.update(ctx.params),
-    )
-    .onNotification(
-      "_x.ai/session_notification",
-      (p) => p as Record<string, unknown>,
-      (ctx) => handlers.vendor(ctx.params),
-    )
+    );
+  for (const extra of extension.notifications ?? []) {
+    app.onNotification(extra.method, extra.parse, (ctx) =>
+      extra.handle(ctx.params),
+    );
+  }
+  const connection = app
     .onRequest(acp.methods.client.session.requestPermission, (ctx) =>
       handlers.permission(ctx.params, ctx.signal),
     )

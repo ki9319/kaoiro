@@ -41,6 +41,29 @@ export function updateEvents(notification: SessionNotification): {
   return { events: [] };
 }
 
+/** The turn a `_x.ai/session_notification` `turn_completed` closes, if any. */
+export function turnCompletion(
+  notification: Record<string, unknown>,
+  currentSessionId: string | undefined,
+): { sessionId: string; promptId: string } | undefined {
+  const update = notification.update as Record<string, unknown> | undefined;
+  const sessionId = notification.sessionId ?? notification.session_id;
+  if (
+    update?.sessionUpdate === "turn_completed" &&
+    sessionId === currentSessionId &&
+    typeof sessionId === "string" &&
+    typeof update.prompt_id === "string"
+  ) {
+    return { sessionId, promptId: update.prompt_id };
+  }
+  return undefined;
+}
+
+/** The prompt id Grok puts in a `session/prompt` result `_meta`. */
+export function promptIdOf(meta: unknown): unknown {
+  return (meta as Record<string, unknown> | null | undefined)?.promptId;
+}
+
 export function cancellationKind(meta: unknown): "rejected" | "interrupted" {
   const value = meta as Record<string, unknown> | undefined;
   return value?.cancellationCategory === "PermissionRejected"

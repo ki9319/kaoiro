@@ -5,7 +5,7 @@ import type { ServerLink, ServerLinkOptions } from "@kaoiro/wrapper-core";
 import type { Envelope, WrapperConfig } from "@kaoiro/agent-common";
 import { runGrokCli } from "../src/cli.js";
 import { GrokHost } from "../src/host.js";
-import type { WireMetadata } from "../src/acp/connection.js";
+import type { GrokWireMetadata as WireMetadata } from "../src/grok/wire.js";
 export async function nativeRun(
   config: WrapperConfig,
   cwd: string,

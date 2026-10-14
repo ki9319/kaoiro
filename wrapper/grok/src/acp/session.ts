@@ -5,7 +5,11 @@ export class AcpSession {
   newSessionResponse: acp.NewSessionResponse | undefined;
   constructor(readonly connection: acp.ClientConnection) {}
 
-  async open(cwd: string, mcpServers: acp.McpServer[], rules: string) {
+  async open(
+    cwd: string,
+    mcpServers: acp.McpServer[],
+    newSessionMeta?: Record<string, unknown>,
+  ) {
     await this.connection.agent.request(acp.methods.agent.initialize, {
       protocolVersion: acp.PROTOCOL_VERSION,
       clientInfo: { name: "kaoiro", version: "0.0.0" },
@@ -13,7 +17,7 @@ export class AcpSession {
     });
     this.newSessionResponse = await this.connection.agent.request(
       acp.methods.agent.session.new,
-      { cwd, mcpServers, _meta: { rules } },
+      { cwd, mcpServers, ...(newSessionMeta ? { _meta: newSessionMeta } : {}) },
     );
     this.sessionId = this.newSessionResponse.sessionId;
     return this.newSessionResponse;
