@@ -74,6 +74,7 @@ describe("permission switch at the queued head boundary", () => {
     await host.send("no-prompt-id");
     expect(host.statusExtSnapshot().permission_control).toMatchObject({ status: "unknown" });
     expect(host.statusExtSnapshot()).not.toHaveProperty("permission");
+    expect(host.statusExtSnapshot()).not.toHaveProperty("effective");
   });
   it("retires the old group before load, drops replay and sends one observed turn", async () => {
     const decide = vi.fn(async () => ({ allow: false }));
@@ -126,6 +127,39 @@ describe("permission switch at the queued head boundary", () => {
     expect(host.statusExtSnapshot().permission_gate).toMatchObject({ reason: "observation_unavailable" });
     expect(host.statusExtSnapshot()).not.toHaveProperty("permission");
     expect(host.statusExtSnapshot()).not.toHaveProperty("effective");
+  });
+  it("keeps the launch projection off across a refused successor after a first loss", async () => {
+    const { host } = await started();
+    expect(host.statusExtSnapshot()).toHaveProperty("permission");
+    await host.send("no-prompt-id");
+    await host.setPermission(choose(1, "workspace-write", false));
+    expect(host.statusExtSnapshot().permission_control).toMatchObject({ revision: 1, status: "failed" });
+    expect(host.statusExtSnapshot().permission_gate).toMatchObject({ revision: 0, reason: "observation_unavailable" });
+    expect(host.statusExtSnapshot()).not.toHaveProperty("permission");
+    expect(host.statusExtSnapshot()).not.toHaveProperty("effective");
+  });
+  it("keeps the launch projection off across a refused successor after a later loss", async () => {
+    const { host } = await started();
+    await host.send("observed-baseline");
+    await host.send("no-prompt-id");
+    await host.setPermission(choose(1, "workspace-write", false));
+    expect(host.statusExtSnapshot().permission_control).toMatchObject({ revision: 1, status: "failed" });
+    expect(host.statusExtSnapshot().permission_gate).toMatchObject({ revision: 0, reason: "observation_unavailable" });
+    expect(host.statusExtSnapshot()).not.toHaveProperty("permission");
+    expect(host.statusExtSnapshot()).not.toHaveProperty("effective");
+  });
+  it("restores both display fields once a later observation is confirmed after a refused successor", async () => {
+    const { host } = await started();
+    await host.send("no-prompt-id");
+    await host.setPermission(choose(1, "workspace-write", false));
+    await host.setPermission(choose(2, "workspace-write", true));
+    await host.send("recovered");
+    expect(host.statusExtSnapshot()).toMatchObject({
+      permission: { sandbox: "workspace-write", approval: "on-request" },
+      effective: { sandbox: "workspace-write", network_access: true },
+      permission_control: { revision: 2, status: "applied" },
+    });
+    expect(host.statusExtSnapshot()).not.toHaveProperty("permission_gate");
   });
   it("retains next after a refused raw toggle instead of capturing latest", async () => {
     const { host } = await started({ config: { ...config, sandbox: "danger-full-access", network_access: false } });
