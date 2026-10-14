@@ -10,6 +10,14 @@ import { GrokHost } from "../src/host.js";
 import { childEnvironment, parsePermissionPolicy } from "../src/grok/policy.js";
 import type { GrokWireMetadata as WireMetadata } from "../src/grok/wire.js";
 import { checkToolRoundTrip, type ToolEvidence } from "./acceptance.js";
+import {
+  answerPermissions,
+  allowedByRule,
+  liveEnv,
+  liveExecutable,
+  type PermissionDecisionRecord,
+  type PermissionRule,
+} from "./native-support.js";
 const live = process.env.KAOIRO_LIVE_GROK === "1";
 const config: WrapperConfig = {
   agent_id: "native.grok",
@@ -40,6 +48,12 @@ it.skipIf(!live)(
     const outbound: Envelope[] = [];
     const ack: number[] = [];
     const calls: ToolEvidence["calls"] = [];
+    // Grok asks for exactly these calls on any host (issue 615).
+    const rule: PermissionRule = {
+      marker: "KAOIRO_HOOK_PROBE",
+      tools: ["list_agents", "send_to_agent"],
+    };
+    const decisions: PermissionDecisionRecord[] = [];
     let callbacks!: ServerLinkOptions;
     let probe!: Promise<void>;
     const startedAt = Date.now();
@@ -61,7 +75,11 @@ it.skipIf(!live)(
             });
           });
           return {
-            send: (e: Envelope) => envelopes.push(e),
+            send: (e: Envelope) => {
+              envelopes.push(e);
+              answerPermissions(e, options,
+                (payload) => allowedByRule(payload, rule), decisions);
+            },
             setSessionId: () => {},
             requestDirectory: async () => ({
               agents: [
@@ -95,6 +113,8 @@ it.skipIf(!live)(
         createHost: (options) =>
           new GrokHost({
             ...options,
+            executable: liveExecutable,
+            env: liveEnv(rule),
             toolDescriptors: (options.toolDescriptors ?? []).map((d) => ({
               ...d,
               handler: async (input, context) => {
@@ -144,7 +164,7 @@ it.skipIf(!live)(
                 ),
               ).toBe(false);
               await host.send(
-                "Run printf KAOIRO_HOOK_PROBE via run_terminal_command. " +
+                "Run exactly printf KAOIRO_HOOK_PROBE with run_terminal_command, once. " +
                   "Then call kaoiro list_agents with empty arguments. " +
                   "Reply with only native-peer display_name. Remember it.",
               );
@@ -197,6 +217,15 @@ it.skipIf(!live)(
                 kind: "response",
               });
               expect(ack).toEqual([1]);
+              const allowed = (tool: string) =>
+                decisions.some((d) => d.allow && d.tool.replace(/^kaoiro__/, "") === tool);
+              expect(
+                ["run_terminal_command", "list_agents", "send_to_agent"].filter(
+                  (tool) => !allowed(tool),
+                ),
+                `decisions: ${JSON.stringify(decisions)}`,
+              ).toEqual([]);
+              expect(decisions.filter((d) => !d.allow)).toEqual([]);
               expect(
                 metadata.some((m) => m.hook_event === "session_start"),
               ).toBe(true);

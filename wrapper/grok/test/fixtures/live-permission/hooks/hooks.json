@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$GROK_PLUGIN_ROOT/hooks/policy.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

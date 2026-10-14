@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import type { PermissionControlExt } from "@kaoiro/protocol";
-import { nativeRun } from "./native-support.js";
+import { nativeRun, type PermissionDecisionRecord } from "./native-support.js";
 const live = process.env.KAOIRO_LIVE_GROK === "1";
 const config = { agent_id: "native.permission-switch", display_name: "Permission fixture",
   server_url: "ws://127.0.0.1:1/agent", sandbox: "workspace-write" as const, network_access: true,
@@ -16,6 +16,7 @@ it.skipIf(!live)("native switch enforces the new profile and reconnects HTTP too
   const cwd = join(root, "work"); mkdirSync(cwd);
   const inside = join(cwd, "inside"), outside = join(root, "outside"), report = join(reports, "result.json");
   let connections = 0;
+  const decisions: PermissionDecisionRecord[] = [];
   const server = createServer(socket => { connections++; socket.end(); });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as { port: number }).port;
@@ -54,8 +55,12 @@ it.skipIf(!live)("native switch enforces the new profile and reconnects HTTP too
       callbacks.onSetPermission?.({ revision: 3, requested: { sandbox: "danger-full-access", network_access: true } });
       expect((host.statusExtSnapshot().permission_control as PermissionControlExt).status).toBe("failed");
       expect(host.processId).toBe(pid);
+      // Every expected call was asked and answered by the test (issue 615).
+      expect(decisions.some(d => d.tool === "run_terminal_command" && d.allow)).toBe(true);
+      expect(decisions.some(d => d.tool.endsWith("whoami") && d.allow)).toBe(true);
+      expect(decisions.filter(d => !d.allow)).toEqual([]);
       console.log(JSON.stringify({ native_switch_turns: 3, listener_connections: counts, session_preserved: true, widening_refused: true }));
-    }, undefined, input => JSON.stringify(input).includes(script));
+    }, undefined, { rule: { marker: script, tools: ["whoami"] }, decisions });
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()));
     rmSync(root, { recursive: true, force: true }); rmSync(reports, { recursive: true, force: true });
@@ -81,7 +86,7 @@ it.skipIf(!live)("native long tool history records load readiness latency", asyn
       await host.send("Call kaoiro whoami once. Do not print the output.");
       expect(elapsed > 0).toBe(true);
       console.log(JSON.stringify({ native_history_turns: 30, spawn_to_readiness_ms: elapsed, deadline_review_needed: elapsed > 10_000 }));
-    }, undefined, () => true, { onLaneStep: step => {
+    }, undefined, { rule: { marker: script, tools: ["whoami"] } }, { onLaneStep: step => {
       if (!switching) return;
       if (step === "spawn") spawnedAt = performance.now();
       if (step === "promotion") elapsed = Math.round(performance.now() - spawnedAt);
