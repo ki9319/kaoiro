@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import fs, {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -27,6 +28,7 @@ import {
   DeployError,
   deploymentLockKey,
   hasPriorTransactions,
+  listArchiveVerbose,
   OLD_IMAGE_BUILD_INFO_PATH,
   parseArgs,
   parseTarEntries,
@@ -3071,6 +3073,175 @@ test("parseTarEntries refuses a listing line with an unsupported entry type", ()
   assert.ok(!caught.message.includes("archive verification failed"));
 });
 
+// Tar listing locale (issue #552). Test A is always run: a `tar` shim
+// records the LC_ALL that each listing receives. B is the premise for C: it
+// checks that this host's ja locale really localizes tar's hardlink line.
+// C runs the hardlink case under that locale, and is skipped with the
+// reason when B does not hold.
+const REAL_TAR = execFileSync("which", ["tar"], { encoding: "utf8" }).trim();
+const JA_LOCALE = "ja_JP.UTF-8";
+
+// Runs fn with a `tar` shim first on PATH. Each shim call appends one line:
+// the LC_ALL it received, a tab, then its arguments. It then execs the real
+// tar. Returns fn's result and the recorded calls.
+function withTarShim(fn) {
+  const shimDir = mkdtempSync(join(tmpdir(), "kaoiro-552-tar-shim-"));
+  const logPath = join(shimDir, "calls.log");
+  writeFileSync(
+    join(shimDir, "tar"),
+    `#!/bin/sh\nprintf '%s\\t%s\\n' "\${LC_ALL-<unset>}" "$*" >> '${logPath}'\nexec '${REAL_TAR}' "$@"\n`,
+    { mode: 0o755 },
+  );
+  const priorPath = process.env.PATH;
+  process.env.PATH = `${shimDir}:${priorPath}`;
+  try {
+    const result = fn();
+    return { result, calls: readTarShimCalls(logPath) };
+  } finally {
+    process.env.PATH = priorPath;
+    rmSync(shimDir, { recursive: true, force: true });
+  }
+}
+
+function readTarShimCalls(logPath) {
+  if (!existsSync(logPath)) return [];
+  return readFileSync(logPath, "utf8")
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => {
+      const [lcAll, args] = line.split("\t");
+      return { lcAll, argv: args.split(" ") };
+    });
+}
+
+// Runs fn with LC_ALL set to locale and LANGUAGE removed, then restores both.
+function withLocaleEnv(locale, fn) {
+  const prior = { LC_ALL: process.env.LC_ALL, LANGUAGE: process.env.LANGUAGE };
+  process.env.LC_ALL = locale;
+  delete process.env.LANGUAGE;
+  try {
+    return fn();
+  } finally {
+    for (const [key, value] of Object.entries(prior)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+// Premise for C: under JA_LOCALE with LANGUAGE removed, the real tar must
+// exit 0 and print its hardlink line without " link to ".
+function probeJaLocalization() {
+  const dir = mkdtempSync(join(tmpdir(), "kaoiro-552-probe-"));
+  try {
+    writeFileSync(join(dir, "real.txt"), "x");
+    linkSync(join(dir, "real.txt"), join(dir, "hard.txt"));
+    const archive = join(dir, "probe.tar.gz");
+    execFileSync("tar", ["-czf", archive, "-C", dir, "real.txt", "hard.txt"]);
+    const env = { ...process.env, LC_ALL: JA_LOCALE };
+    delete env.LANGUAGE;
+    const run = spawnSync("tar", ["tvzf", archive], { encoding: "utf8", env });
+    const hardLine = (run.stdout ?? "").split("\n").find((line) => line.includes("hard.txt")) ?? "";
+    const holds = run.status === 0 && hardLine !== "" && !hardLine.includes(" link to ");
+    return {
+      holds,
+      reason: holds ? "" : `tar under ${JA_LOCALE} (LANGUAGE unset) printed: ${hardLine || run.stderr}`,
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+const JA_PROBE = probeJaLocalization();
+
+test("tar listing for the backup verification runs under LC_ALL=C, whatever the caller's locale", () => {
+  const { result, calls } = withLocaleEnv(JA_LOCALE, () =>
+    withTarShim(() =>
+      withScenario("running-clean-stop-torture", () =>
+        runUpdate({ repo: workDir, target: headSha, maintenanceApproved: true }, configWithCleanStopMeasured()),
+      ),
+    ),
+  );
+  assert.equal(result.phase, "done");
+  const backup = calls.filter((c) => c.argv[0] === "tvzf" && c.argv[1].endsWith("/archive.tar.gz"));
+  assert.equal(backup.length, 1, "expected exactly one backup verification listing");
+  assert.equal(backup[0].lcAll, "C");
+});
+
+test("tar listing for the rollback restore verification runs under LC_ALL=C, whatever the caller's locale", () => {
+  const { result, calls } = withLocaleEnv(JA_LOCALE, () =>
+    withTarShim(() => {
+      const update = withScenario("running-clean-stop", () =>
+        runUpdate({ repo: workDir, target: headSha, maintenanceApproved: true }, configWithCleanStopMeasured()),
+      );
+      assert.equal(update.phase, "done");
+      return withScenario("running-clean-stop", () =>
+        runRollback(
+          { repo: workDir, transaction: update.transactionId, confirmRestore: true },
+          configWithCleanStopMeasured(),
+        ),
+      );
+    }),
+  );
+  assert.equal(result.phase, "rolled_back");
+  const restore = calls.filter((c) => c.argv[0] === "tvzf" && c.argv[1].endsWith("/rollback-restore-verify.tar.gz"));
+  assert.equal(restore.length, 1, "expected exactly one rollback restore-verification listing");
+  assert.equal(restore[0].lcAll, "C");
+});
+
+// A reporter, not a check: it records the probe result as a skip (premise
+// false) or a diagnostic (premise true). The premise itself is measured by
+// probeJaLocalization above, and C is the test that depends on it.
+test("premise for the ja-locale case: ja_JP.UTF-8 with LANGUAGE unset localizes tar's hardlink line", (t) => {
+  if (!JA_PROBE.holds) t.skip(JA_PROBE.reason);
+  else t.diagnostic(`premise holds under ${JA_LOCALE}`);
+});
+
+test("runUpdate parses the hardlink listing under LC_ALL=ja_JP.UTF-8 with LANGUAGE unset", { skip: JA_PROBE.holds ? false : JA_PROBE.reason }, () => {
+  const result = withLocaleEnv(JA_LOCALE, () =>
+    withScenario("running-clean-stop-torture", () =>
+      runUpdate({ repo: workDir, target: headSha, maintenanceApproved: true }, configWithCleanStopMeasured()),
+    ),
+  );
+  assert.equal(result.phase, "done");
+  const byPath = Object.fromEntries(result.requiredEntries.map((e) => [e.path, e]));
+  assert.deepEqual(Object.keys(byPath).sort(), ["hard.txt", "real.txt", "sym.txt"]);
+  assert.deepEqual(byPath["hard.txt"], { path: "hard.txt", owner: "1000:1000", mode: "0664" });
+});
+
+// issue #552 trade-off: under the forced C listing a non-ASCII entry name is
+// octal-escaped, but a manifest recorded after the change and a restore
+// listed after the change use the same escaping, so they must match.
+test("a non-ASCII entry name recorded after the change matches its own restored listing", (t) => {
+  const recordSrc = mkdtempSync(join(tmpdir(), "kaoiro-552-utf8-record-"));
+  const restoreSrc = mkdtempSync(join(tmpdir(), "kaoiro-552-utf8-restore-"));
+  const archiveDir = mkdtempSync(join(tmpdir(), "kaoiro-552-utf8-out-"));
+  try {
+    writeFileSync(join(recordSrc, "日本.txt"), "x");
+    writeFileSync(join(restoreSrc, "日本.txt"), "x");
+    const recordArchive = join(archiveDir, "record.tar.gz");
+    const restoreArchive = join(archiveDir, "restore.tar.gz");
+    execFileSync("tar", ["-czf", recordArchive, "-C", recordSrc, "."]);
+    execFileSync("tar", ["-czf", restoreArchive, "-C", restoreSrc, "."]);
+    // Pin the ambient locale to a UTF-8 one, so that the escape below can only
+    // come from the forced C listing. Premise: that locale keeps the raw name.
+    const raw = withLocaleEnv("C.UTF-8", () =>
+      spawnSync("tar", ["tvzf", recordArchive, "--numeric-owner"], { encoding: "utf8" }).stdout,
+    );
+    if (!raw.includes("日本.txt")) {
+      t.skip("C.UTF-8 does not keep the raw name on this host");
+      return;
+    }
+    const recorded = withLocaleEnv("C.UTF-8", () => parseTarEntries(listArchiveVerbose(recordArchive)));
+    const restored = withLocaleEnv("C.UTF-8", () => parseTarEntries(listArchiveVerbose(restoreArchive)));
+    assert.deepEqual(recorded.map((e) => e.path), ["\\346\\227\\245\\346\\234\\254.txt"]);
+    assert.ok(requiredEntriesMatch(restored, recorded));
+  } finally {
+    rmSync(recordSrc, { recursive: true, force: true });
+    rmSync(restoreSrc, { recursive: true, force: true });
+    rmSync(archiveDir, { recursive: true, force: true });
+  }
+});
+
 // クロエ round 2 review SF-8 supplement: a FIFO needs no root (`mkfifo`
 // — measured; the earlier assumption that device/fifo/socket entries
 // need it was wrong), so this feeds parseTarEntries a REAL archive
@@ -3089,8 +3260,10 @@ test("parseTarEntries rejects a real archive containing a FIFO, even alongside o
     execFileSync("mkfifo", [join(src, "a.fifo")]);
     const archivePath = join(archiveDir, "archive.tar.gz");
     execFileSync("tar", ["--owner=1000", "--group=1000", "-czf", archivePath, "-C", src, "."]);
-    const listing = execFileSync("tar", ["tvzf", archivePath, "--numeric-owner"], { encoding: "utf8" });
+    const listing = listArchiveVerbose(archivePath);
     assert.ok(listing.includes("a.fifo"), "sanity: the fixture actually contains the FIFO entry");
+    // Fails if the listing came out in a localized form (issue #552).
+    assert.ok(listing.includes(" link to "), "sanity: the listing uses tar's English hardlink marker");
     assert.throws(() => parseTarEntries(listing), DeployError);
   } finally {
     rmSync(src, { recursive: true, force: true });

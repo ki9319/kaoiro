@@ -2416,7 +2416,7 @@ export function runUpdate(flags, config) {
     // thing.
     let tarOutput;
     try {
-      tarOutput = execFileSync("tar", ["tvzf", archivePath, "--numeric-owner"], { encoding: "utf8" });
+      tarOutput = listArchiveVerbose(archivePath);
     } catch (err) {
       fail(`archive verification failed (tar tvzf ${archivePath}): ${err.message}`);
     }
@@ -3016,7 +3016,7 @@ export function runRollback(flags, config) {
     ]);
     let restoreVerifyOutput;
     try {
-      restoreVerifyOutput = execFileSync("tar", ["tvzf", restoreVerifyPath, "--numeric-owner"], { encoding: "utf8" });
+      restoreVerifyOutput = listArchiveVerbose(restoreVerifyPath);
     } catch (err) {
       fail(`could not verify the restored volume's contents: ${err.message}`);
     }
@@ -3331,6 +3331,22 @@ function splitTarEntryName(typeChar, rawName) {
   fail(
     `archive contains an unsupported entry type '${typeChar}' for ${rawName} — only regular files, directories, symlinks, and hardlinks are expected in this volume`,
   );
+}
+
+/** Lists an archive with `tar tvzf --numeric-owner` for parseTarEntries.
+ *  LC_ALL=C is forced for this child process only: under a ja_JP.UTF-8
+ *  locale tar prints a hardlink as "... へのリンク" instead of " link to ",
+ *  which parseTarEntries cannot read. Other variables are inherited.
+ *  Trade-off: under LC_ALL=C tar escapes non-ASCII entry names as octal
+ *  (e.g. \346\227\245.txt). A manifest recorded under a UTF-8 locale before
+ *  this change can therefore differ from a listing taken now for such
+ *  names, and rollback then fails closed. Manifests recorded after this
+ *  change match, and ASCII names are unaffected. */
+export function listArchiveVerbose(archivePath) {
+  return execFileSync("tar", ["tvzf", archivePath, "--numeric-owner"], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C" },
+  });
 }
 
 /** Parses `tar tv*f --numeric-owner`'s own output text into
