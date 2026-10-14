@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { ServerLink, ServerLinkOptions } from "@kaoiro/wrapper-core";
 import type { Envelope, WrapperConfig } from "@kaoiro/agent-common";
 import { runGrokCli } from "../src/cli.js";
-import { GrokHost } from "../src/host.js";
+import { GrokHost, type GrokHostOptions } from "../src/host.js";
 import type { GrokWireMetadata as WireMetadata } from "../src/grok/wire.js";
 export async function nativeRun(
   config: WrapperConfig,
@@ -17,6 +17,7 @@ export async function nativeRun(
   ) => Promise<void>,
   env?: NodeJS.ProcessEnv,
   allowPermission?: (input: Record<string, unknown>) => boolean,
+  hostOptions?: Pick<GrokHostOptions, "onLaneStep">,
 ) {
   const folder = mkdtempSync(join(tmpdir(), "kaoiro-grok-native-config-"));
   const file = join(folder, "agent.json");
@@ -33,11 +34,13 @@ export async function nativeRun(
       onMetadata: (m) => metadata.push(m),
       createServerLink: (_url, _id, options) => {
         callbacks = options;
-        queueMicrotask(() =>
+        queueMicrotask(() => {
+          options.permissionSync?.onNegotiated?.(true);
+          options.permissionSync?.onSync?.({ version: "0", control: null, next: null }, 1);
           options.onPersonaPrompt?.(
             "Use the requested tools and report only their results.",
-          ),
-        );
+          );
+        });
         return {
           send: (e: Envelope) => {
             envelopes.push(e);
@@ -50,6 +53,9 @@ export async function nativeRun(
               );
           },
           setSessionId: () => {},
+          waitForPermissionSyncNegotiation: async () => true,
+          waitForPermissionSync: async () => {},
+          reportPermissionLifecycle: () => {},
           noticeAttributionMode: () => "legacy",
           reportDisconnectIntent: async () => {},
           close: () => {},
@@ -58,10 +64,10 @@ export async function nativeRun(
           requestDirectory: async () => ({ agents: [], users: [] }),
         } as unknown as ServerLink;
       },
-      ...(env
+      ...(env || hostOptions
         ? {
             createHost: (options: ConstructorParameters<typeof GrokHost>[0]) =>
-              new GrokHost({ ...options, env }),
+              new GrokHost({ ...options, ...(env ? { env } : {}), ...hostOptions }),
           }
         : {}),
       onHostCreated: (host) => {

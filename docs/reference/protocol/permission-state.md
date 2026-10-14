@@ -304,8 +304,18 @@ full topic index.
 ## Grok permission projection
 
 Grok's launch-fixed approval axis is projected as `on-request`. The Linux
-restrictive profiles report enforcement `os`; the `off` profile omits it.
-`ext.permission_policy` contains only the launch observations from inspect
-and the selected profile. It is displayed to the operator and is not used
-to decide permissions. Unknown inspect output remains explicitly unknown.
-See the [engine reference](../engines/grok-acp.md).
+restrictive profiles report observation enforcement `os`; the `off` profile
+omits it. After Linux permission-sync negotiation, every control carries
+`constraints: {approval: "on-request", enforcement: "os"}`, including an
+`off` baseline. The constraints describe the adapter contract, not the
+per-execution observation's enforcement badge.
+
+`permission_applied.turn_id` must carry the native `promptId` from Grok's
+`session/prompt` response. An execution without that id is not an applied
+observation.
+
+`ext.permission_policy` contains the current generation's startup inspect
+observations and selected profile. Inspect runs again when a permission
+change starts a new generation. The field is displayed to the operator and
+is not used to decide permissions. Unknown inspect output remains explicitly
+unknown. See the [engine reference](../engines/grok-acp.md).

@@ -42,14 +42,14 @@ export function sandboxProfile(
   if (config.approval !== undefined && config.approval !== "on-request") {
     throw new GrokLaunchError("grok approval is fixed at on-request");
   }
-  if (sandbox === "danger-full-access" && network) return "off";
+  if (sandbox === "danger-full-access") return "off";
   if (platform !== "linux") {
     throw new GrokLaunchError(
       "grok OS sandbox profiles require Linux in work unit 1",
     );
   }
   if (sandbox === "workspace-write" && network) return "workspace";
-  if (sandbox === "read-only" && !network) {
+  if (sandbox === "read-only") {
     const canonical = realpathSync(cwd);
     const home = env.GROK_HOME ?? join(env.HOME ?? homedir(), ".grok");
     for (const root of ["/tmp", "/var/tmp", home]) {

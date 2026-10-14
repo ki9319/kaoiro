@@ -114,9 +114,9 @@ it.skipIf(!live)(
   },
   180_000,
 );
-it.skipIf(!live)(
-  "native broker rejection leaves no target file",
-  async () => {
+it.skipIf(!live).each([false, true])(
+  "native broker allow=%s controls the target file",
+  async allow => {
     const root = mkdtempSync(join(homedir(), ".kaoiro-grok-permission-"));
     const fixtureHome = join(root, "home");
     const cwd = join(root, "work");
@@ -142,7 +142,8 @@ it.skipIf(!live)(
               "Do not retry after rejection.",
           );
           void turn.catch(() => {});
-          await expect(turn).rejects.toThrow("permission rejected");
+          if (allow) await turn;
+          else await expect(turn).rejects.toThrow("permission rejected");
           expect(envelopes.some((e) => e.type === "permission_request")).toBe(
             true,
           );
@@ -152,11 +153,12 @@ it.skipIf(!live)(
           expect(
             envelopes.filter((e) => e.type === "result").at(-1)?.payload
               .error_code,
-          ).toBe("permission_rejected");
+          ).toBe(allow ? undefined : "permission_rejected");
           expect(host.state).toBe("waiting_input");
-          expect(existsSync(target)).toBe(false);
+          expect(existsSync(target)).toBe(allow);
         },
         env,
+        () => allow,
       );
     } finally {
       rmSync(root, { recursive: true, force: true });

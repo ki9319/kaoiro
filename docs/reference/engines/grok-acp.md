@@ -98,7 +98,7 @@ directory, and one that is not a string literal counts as outside.
 
 ## Capabilities
 
-Work unit 1 supports text turns, conversation continuity while the wrapper
+The adapter supports text turns, conversation continuity while the wrapper
 is resident, cancellation, operator permission requests, user questions,
 normal peer messages and dispatch confirmation. Early and yield delivery
 are explicitly `none`. Reply-basis v1 is not negotiated: Grok MCP calls do
@@ -115,12 +115,12 @@ kaoiro receives the requests grok sends. The launch-fixed approval axis is
 projected as `on-request`, as with Claude Code auto mode. This is a declared
 projection, not a promise that every call asks the operator.
 
-On Linux the supported pairs are read-only with network off (`read-only`)
-and workspace-write with network on (`workspace`). They report enforcement
-`os`. Danger-full-access with network on (`off`) is accepted on every
-platform; no OS enforcement is claimed for that profile. Other pairs reject.
-OS sandbox pairs reject on non-Linux platforms. macOS is unmeasured; extend
-support only after measurement in work unit 2 or later.
+On Linux, read-only maps to `read-only` and always has effective network
+access false, regardless of the raw toggle. Workspace-write with network on
+maps to `workspace`; network off is unsupported. Danger-full-access maps to
+`off` with effective network true, regardless of the raw toggle. Restrictive
+profiles report enforcement `os`; `off` omits the observation's enforcement.
+Only `off` is accepted off Linux, where permission switching is unavailable.
 
 Grok's profiles grant temporary directories and Grok state storage writes;
 read-only launch rejects a cwd under `/tmp`, `/var/tmp` or the Grok home,
@@ -139,6 +139,50 @@ change HOME or Grok config files. The user's Grok configuration owns Claude
 compatibility, including hooks. Hooks can block tools or turn completion;
 individual hook verification belongs to the settings repository.
 
+## Permission switching
+
+After the server accepts permission-sync negotiation, the Linux adapter
+advertises sandbox and network axes bounded by its initial **raw** launch
+pair. Approval remains `on-request`, and permission-mode switching rejects.
+The raw ceiling is not widened by normalization: an `off` launch with the
+network toggle false cannot switch to workspace-write with the toggle true.
+
+`latest` is the newest operator control; `next` is the server-authorized
+selection for the next execution. A turn captures `next` before any restart,
+and publishes `applying` only immediately before sending its prompt. A newer
+selection cannot relabel a captured execution. The result's native `promptId`
+is the `permission_applied.turn_id`; a missing id yields `unknown` and blocks
+later dispatch when that submission is still `next`.
+
+When the profile changes, a serialized lane retires the current generation,
+closes its ACP connection and HTTP ToolHost, and awaits its owned process
+group's exit. It inspects the new policy, starts a loading generation, calls
+`initialize` and `session/load` with the same session id and a fresh MCP URL
+and bearer token, and waits for authenticated `tools/list`. The new generation
+becomes current only after a synchronous failure/abort check. Load replay and
+retired-generation callbacks cannot affect turns or permission observations.
+Close aborts the lane and waits for every generation it created.
+
+A pre-prompt lane failure leaves the head turn queued and unsent. If its
+selection is still `next`, the adapter stops until a valid server relay or
+sync supplies `next`; it never guesses a fallback or originates `rolled_back_to`.
+It may echo that field as part of a server control adopted through sync.
+A refused relay changes `latest` without replacing the previous `next`.
+`ext.permission_gate` makes the stop visible. Blocked queued input expires
+after 30 seconds with `permission_gate_blocked` and is not resent. A missing
+observation requires a newer revision; rejoining with the same revision does
+not lift that block.
+
+Every Linux control, including an `off` baseline, has fixed constraints
+`{approval: "on-request", enforcement: "os"}`. These constraints describe the
+adapter, not an observed execution's badge. Off Linux, the adapter requests
+no permission sync and retains its legacy permission/effective display.
+
+The restart deadline is 30 seconds; authenticated MCP readiness also retains
+its 15-second limit. Grok's stored session summary still names the creation
+profile after load. The wrapper reports the current generation's profile
+instead. Session rules are retained by load and are not resent.
+
 ## Upstream gaps and limits
 
 - Claude permission import has no compat switch. Command-text deny matching
@@ -146,7 +190,8 @@ individual hook verification belongs to the settings repository.
 - Generic ACP clients cannot declare permission-prompt capability. Grok's
   classifier can return a denial without asking the client. Escalation
   thresholds seen in older source are not verified against this CLI version.
-- ACP does not provide a per-session permission mode override.
+- `session/set_mode` returned success for an unknown mode in the measured CLI;
+  it cannot verify a permission-mode change and is never sent by the adapter.
 - Rules supplied on session/load did not replace the original session rules.
 - Rate and quota data are not exposed in ACP output.
 

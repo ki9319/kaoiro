@@ -79,13 +79,12 @@ Mapping:
 | model / effort | default model from `session/new` `configOptions`; live switching is work unit 4 | measured: plain string value accepted; effect on the next turn unmeasured |
 | context, rate limits, attachments, history replay, cold resume | capability false or field omitted in work unit 1 | — |
 
-### Unsupported operations in work unit 1
+### Unsupported operations
 
 Each is declared, not silently defaulted, and has a negative control:
 
-- `setPermission` and `setPermissionMode` reject: the permission pair is fixed
-  at spawn. No `permission_applied` observation is emitted, so no turn id is
-  needed for it yet.
+- `setPermissionMode` rejects. Unit 2 applies `setPermission` through a child
+  restart and `session/load`; the result supplies the observed turn id.
 - `setModel` and `setEffort` reject until work unit 4.
 - `send(text, attachmentIds)` with attachments rejects.
 - `delivery_modes`: `early: "none"`, `yield: "none"`, stated explicitly
@@ -209,7 +208,7 @@ fields. A `requested` permission payload that carries it is not rejected; the
 existing parsers rebuild the configuration from known keys and drop the extra
 field (`dashboard/src/lib/protocol.ts:399-420`,
 `wrapper/core/src/transport.ts:616-643`). A top-level unknown key in
-`set_permission` is still rejected by the server
+Before unit 2 permission-sync negotiation, `set_permission` is rejected by the server
 (`agents_channel.ex:2673-2707`).
 
 ### Sandbox and network
@@ -393,6 +392,37 @@ permission pages, the runner configuration page, and an ADR for the engine
 |---|---|---|
 | 1. Registration, launch and minimal ACP host | [#590](https://github.com/sakuraiyuta/kaoiro/issues/590) | ✅ landed 3364c0e8 |
 | 1b. Keep vendor extensions out of `acp/` (before unit 2) | [#597](https://github.com/sakuraiyuta/kaoiro/issues/597) | ✅ landed 0ad1ee5b |
-| 2. Permission and sandbox enforcement | [#591](https://github.com/sakuraiyuta/kaoiro/issues/591) | ⏳ |
+| 2. Permission and sandbox enforcement | [#591](https://github.com/sakuraiyuta/kaoiro/issues/591) | Implemented; implementation review pending |
 | 3. Resume, history replay and catalog probe | [#592](https://github.com/sakuraiyuta/kaoiro/issues/592) | ⏳ |
 | 4. Context usage, live model and effort switching | [#593](https://github.com/sakuraiyuta/kaoiro/issues/593) | ⏳ |
+
+### Unit 2 verification
+
+The resident adapter keeps separate current/loading/retired generations and
+server-owned next selections. Its state transitions are compared with the
+actual server `PermissionSettings.State` through committed fixtures under
+`protocol/fixtures/permission-differential/`. Generate scenarios with
+`KAOIRO_GENERATE_DIFFERENTIAL=1 pnpm -C wrapper/grok exec vitest run test/differential/generate.test.ts`,
+then run `MIX_ENV=test mix permission.differential` in `server/`. The Elixir
+drift test and the Grok differential test verify both halves.
+
+The wrapper never originates `rolled_back_to`. A control adopted through
+sync is reported intact, including a server-derived `rolled_back_to`.
+The differential tests compare the whole adopted control and reject rollback
+fields invented during final-gate refusal or lane failure.
+Rejoin rows carry an adopted-control marker, resolved by the real server
+state. Echo idempotency is checked for failed controls with `rolled_back_to`
+and for unknown controls. Pending controls are excluded and counted because
+the server can restore `submitted` after its sync projection removed it
+([issue #618](https://github.com/sakuraiyuta/kaoiro/issues/618)). Removing
+`rolled_back_to` and adding `submitted` is the server-side negative control.
+
+The bounded prefix tree covers all valid sequences through five events and
+at most three operator selections for both launch pairs. Six events exceed
+the 2 MB fixture limit. The fixtures use parent references and compact arrays;
+rows are scenarios, including intermediate prefixes. Codex's sync function is
+compared from the same translated pre-state at each sync. A sync beyond Grok's
+ceiling is excluded and counted because Codex does not enforce that ceiling.
+Native tests measure writes, literal-IP connectivity, HTTP MCP after load,
+and readiness after a history of 30 shell-and-MCP turns. Model text and
+credentials are not evidence outputs.

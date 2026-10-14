@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, appendFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 if (process.argv.includes("--version")) {
@@ -43,6 +43,12 @@ if (process.argv.includes("inspect")) {
   process.exit(0);
 }
 const sid = "fixture-session";
+const record = (event, extra = {}) => {
+  if (process.env.KAOIRO_TEST_GROK_EVENTS)
+    appendFileSync(process.env.KAOIRO_TEST_GROK_EVENTS, JSON.stringify({ event, pid: process.pid,
+      profile: process.env.GROK_SANDBOX, ...extra }) + "\n");
+};
+record("spawn");
 if (process.env.KAOIRO_TEST_GROK_IGNORE_TERM === "1") {
   setInterval(() => {}, 1000);
   const child = spawn(process.execPath, [
@@ -96,7 +102,7 @@ const finish = (id, text, stopReason = "end_turn", category) => {
   reply(id, {
     stopReason,
     _meta: {
-      promptId: String(id),
+      ...(text === "no-prompt-id" ? {} : { promptId: String(id) }),
       requestId: String(id),
       ...(category ? { cancellationCategory: category } : {}),
     },
@@ -105,12 +111,25 @@ const finish = (id, text, stopReason = "end_turn", category) => {
 };
 process.on("SIGTERM", () => {
   if (process.env.KAOIRO_TEST_GROK_IGNORE_TERM === "1") return;
+  record("exit");
   void client?.close().finally(() => process.exit(0));
   if (!client) process.exit(0);
 });
 createInterface({ input: process.stdin }).on("line", (line) => {
   void (async () => {
     const msg = JSON.parse(line);
+    record(msg.method ?? "response", { ...(msg.params?.sessionId ? { sessionId: msg.params.sessionId } : {}) });
+    const fault = process.env.KAOIRO_TEST_GROK_SWITCH_FAULT;
+    if (fault && process.env.GROK_SANDBOX === "read-only") {
+      if (fault === `${msg.method}:exit`) process.exit(13);
+      if (fault === `${msg.method}:close`) { process.stdout.end(); return; }
+      if (fault === `${msg.method}:hang`) return;
+      if (fault === `${msg.method}:fail`) {
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id,
+          error: { code: -32603, message: "fixture fault" } }) + "\n");
+        return;
+      }
+    }
     switch (msg.method) {
       case "initialize":
         if (process.env.KAOIRO_TEST_GROK_INITIALIZE_FAIL === "1") {
@@ -125,12 +144,24 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           agentCapabilities:
             process.env.KAOIRO_TEST_GROK_MCP_MODE === "no-http"
               ? {}
-              : { mcpCapabilities: { http: true, sse: true } },
+              : { loadSession: true, mcpCapabilities: { http: true, sse: true } },
           authMethods: [],
         });
         break;
+      case "session/load":
       case "session/new": {
-        rules = msg.params._meta.rules;
+        const loading = msg.method === "session/load";
+        if (!loading) rules = msg.params._meta.rules;
+        if (loading) {
+          update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "REPLAY_ONLY" } });
+          notification("_x.ai/session_notification", {
+            sessionId: sid, update: { sessionUpdate: "turn_completed", prompt_id: "replayed-id" },
+          });
+          process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: "replay-permission",
+            method: "session/request_permission", params: { sessionId: sid,
+              toolCall: { toolCallId: "replayed-tool", title: "replay" },
+              options: [{ optionId: "yes", name: "Allow", kind: "allow_once" }] } }) + "\n");
+        }
         const mcp = msg.params.mcpServers[0];
         const mode = process.env.KAOIRO_TEST_GROK_MCP_MODE ?? "ok";
         const headers = Object.fromEntries(
@@ -154,7 +185,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           );
         // Like Grok, reply first and connect afterwards, and carry on without
         // the server when the connection fails.
-        reply(msg.id, { sessionId: sid });
+        reply(msg.id, loading ? {} : { sessionId: sid });
+        if (loading && process.env.GROK_SANDBOX === "read-only" && fault?.startsWith("readiness:")) {
+          if (fault.endsWith(":exit")) setTimeout(() => process.exit(13), 30);
+          if (fault.endsWith(":close")) setTimeout(() => process.stdout.end(), 30);
+          break;
+        }
         if (mode !== "never-connect") {
           const sent =
             mode === "drop-headers"
@@ -372,6 +408,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           finish(prompt, "", "cancelled", "MidTurnAbort");
         break;
       default:
+        if (msg.id === "replay-permission") record("replay-permission-response", { outcome: msg.result?.outcome?.outcome });
         if (msg.id === "permission" && msg.result && prompt !== undefined) {
           finish(prompt, "", "cancelled", "PermissionRejected");
         }

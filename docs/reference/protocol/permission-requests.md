@@ -109,3 +109,14 @@ full topic index.
 - [Envelope contract](envelope.md).
 - [Permission state](permission-state.md).
 - [Permission synchronization and audit](permission-sync-audit.md).
+
+## Grok adapter
+
+On Linux, Grok implements `set_permission` after permission-sync negotiation.
+Its sandbox and raw network axes are bounded by the launch pair; approval is
+fixed at `on-request`. It applies a selection at an execution boundary by
+restarting the child and loading the existing ACP session. Workspace-write
+with network disabled is rejected as `unsupported_permission_pair`.
+An application observation requires the native `promptId` as `turn_id`.
+See [Grok ACP](../engines/grok-acp.md#permission-switching) for failure and
+recovery behavior. `set_permission_mode` remains unsupported.

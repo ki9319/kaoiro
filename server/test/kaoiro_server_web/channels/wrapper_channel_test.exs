@@ -9202,4 +9202,167 @@ defmodule KaoiroServerWeb.WrapperChannelTest do
     assert AgentStates.snapshot()[id]["ext"]["permission_policy"] == policy
     assert SessionPointers.get(id).engine == "grok"
   end
+
+  describe "grok permission switching contract" do
+    test "accepts permission sync and stores the off-profile OS constraints" do
+      id = "test.grok-permission-sync"
+
+      {reply, socket} =
+        join_wrapper_with_reply(id, "default", %{"permission_sync" => %{"engine" => "grok"}})
+
+      assert reply["permission_sync"] == true
+      assert_push "permission_sync", %{control: nil, next: nil}
+
+      control = %{
+        "revision" => 0,
+        "requested" => %{"sandbox" => "danger-full-access", "network_access" => true},
+        "status" => "pending",
+        "constraints" => %{"approval" => "on-request", "enforcement" => "os"}
+      }
+
+      ref =
+        push(
+          socket,
+          "envelope",
+          envelope(id, "idle")
+          |> Map.put("ext", %{"engine" => "grok", "permission_control" => control})
+        )
+
+      assert_reply ref, :ok
+      assert :ok == wait_until(fn -> KaoiroServer.PermissionSettings.get(id) != nil end)
+
+      assert KaoiroServer.PermissionSettings.get(id).control.constraints == %{
+               approval: "on-request",
+               enforcement: "os"
+             }
+
+      invalid = put_in(control, ["constraints"], %{"approval" => "on-request"})
+      assert KaoiroServer.PermissionSettings.State.sanitize_control(invalid) == nil
+    end
+
+    test "requires an engine-observed turn id for grok applied audit" do
+      id = "test.grok-permission-turn-id"
+      socket = seed_known_with_engine(id, "grok")
+
+      details = %{
+        "revision" => 0,
+        "requested" => %{"sandbox" => "read-only", "network_access" => false},
+        "execution_id" => "execution",
+        "session_id" => "session",
+        "network_access" => false,
+        "permission" => %{
+          "sandbox" => "read-only",
+          "approval" => "on-request",
+          "enforcement" => "os"
+        }
+      }
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        ref =
+          push(socket, "session_lifecycle", %{
+            "kind" => "permission_applied",
+            "at" => "2026-01-01T00:00:00Z",
+            "details" => details
+          })
+
+        assert_reply ref, :ok
+      end)
+
+      assert SessionLifecycleEvents.list_for_agent(id) == []
+
+      ref =
+        push(socket, "session_lifecycle", %{
+          "kind" => "permission_applied",
+          "at" => "2026-01-01T00:00:00Z",
+          "details" => Map.put(details, "turn_id", "grok-prompt")
+        })
+
+      assert_reply ref, :ok
+
+      assert [%{kind: "permission_applied", details: %{"turn_id" => "grok-prompt"}}] =
+               SessionLifecycleEvents.list_for_agent(id)
+    end
+
+    test "a grok pre-application failure falls back on the server and a stale failure preserves the successor" do
+      id = "test.grok-permission-fallback"
+      socket = join_wrapper(id)
+
+      initial = %{
+        "revision" => 0,
+        "requested" => %{"sandbox" => "workspace-write", "network_access" => true},
+        "status" => "pending",
+        "constraints" => %{"approval" => "on-request", "enforcement" => "os"}
+      }
+
+      ref =
+        push(
+          socket,
+          "envelope",
+          envelope(id, "idle")
+          |> Map.put("ext", %{"engine" => "grok", "permission_control" => initial})
+        )
+
+      assert_reply ref, :ok
+      assert :ok == wait_until(fn -> KaoiroServer.PermissionSettings.get(id) != nil end)
+
+      {:ok, 1, _} =
+        KaoiroServer.PermissionSettings.submit_request(
+          id,
+          "grok",
+          %{sandbox: "read-only", network_access: false},
+          %{kind: "user", id: "fixture"},
+          "T"
+        )
+
+      failure =
+        Map.merge(initial, %{
+          "revision" => 1,
+          "requested" => %{"sandbox" => "read-only", "network_access" => false},
+          "status" => "failed",
+          "reason" => "restart_failed"
+        })
+
+      refute Map.has_key?(failure, "submitted")
+      refute Map.has_key?(failure, "rolled_back_to")
+
+      ref =
+        push(
+          socket,
+          "envelope",
+          envelope(id, "idle")
+          |> Map.put("ext", %{"engine" => "grok", "permission_control" => failure})
+        )
+
+      assert_reply ref, :ok
+
+      assert :ok ==
+               wait_until(fn ->
+                 KaoiroServer.PermissionSettings.get(id).control.status == :failed
+               end)
+
+      assert KaoiroServer.PermissionSettings.get(id).next.revision == 0
+
+      {:ok, 2, _} =
+        KaoiroServer.PermissionSettings.submit_request(
+          id,
+          "grok",
+          %{sandbox: "workspace-write", network_access: true},
+          %{kind: "user", id: "fixture"},
+          "T"
+        )
+
+      ref =
+        push(
+          socket,
+          "envelope",
+          envelope(id, "idle")
+          |> Map.put("ext", %{"engine" => "grok", "permission_control" => failure})
+        )
+
+      assert_reply ref, :ok
+      entry = KaoiroServer.PermissionSettings.get(id)
+      assert entry.next.revision == 2
+      assert entry.control.status == :pending
+    end
+  end
 end

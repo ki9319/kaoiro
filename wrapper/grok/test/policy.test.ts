@@ -136,19 +136,11 @@ describe("supported permission pairs", () => {
       }
     },
   );
-  it.each(["read-only", "workspace-write", "danger-full-access"] as const)(
-    "rejects the unsupported network choice for %s",
-    (sandbox) => {
-      expect(() =>
-        sandboxProfile(
-          { sandbox, network_access: sandbox === "read-only" },
-          cwd,
-          {},
-          "linux",
-        ),
-      ).toThrow("unsupported");
-    },
-  );
+  it("normalizes full-access and read-only network toggles but rejects workspace offline", () => {
+    expect(sandboxProfile({ sandbox: "danger-full-access", network_access: false }, cwd, {}, "linux")).toBe("off");
+    expect(sandboxProfile({ sandbox: "read-only", network_access: true }, "/usr", {}, "linux")).toBe("read-only");
+    expect(() => sandboxProfile({ sandbox: "workspace-write", network_access: false }, cwd, {}, "linux")).toThrow("unsupported");
+  });
   it("rejects always-writable directories including symlink aliases", () => {
     const scratch = mkdtempSync(join(tmpdir(), "kaoiro-grok-policy-"));
     try {

@@ -9301,4 +9301,44 @@ defmodule KaoiroServerWeb.AgentsChannelTest do
       :sys.resume(accept_pid)
     end
   end
+
+  test "grok selection relays the raw pair and enforces its advertised ceiling" do
+    id = "test.grok-selection-relay"
+
+    put_permission_agent(id,
+      engine: "grok",
+      permission_switch_axes: %{
+        "sandbox" => %{"max" => "workspace-write"},
+        "network_access" => %{"max" => true}
+      }
+    )
+
+    seed_permission_baseline(id, engine: "grok", sandbox: "workspace-write", network_access: true)
+    @endpoint.subscribe("wrapper:" <> id)
+    socket = join_as(:operator)
+
+    ref =
+      push(socket, "set_permission", %{
+        "agent_id" => id,
+        "sandbox" => "read-only",
+        "network_access" => true
+      })
+
+    assert_reply ref, :ok, %{
+      "revision" => 1,
+      "requested" => %{"sandbox" => "read-only", "network_access" => true}
+    }
+
+    assert_broadcast "set_permission", payload
+
+    assert payload == %{
+             "version" => "0",
+             "revision" => 1,
+             "sandbox" => "read-only",
+             "network_access" => true
+           }
+
+    ref = push(socket, "set_permission", %{"agent_id" => id, "sandbox" => "danger-full-access"})
+    assert_reply ref, :error, %{reason: "exceeds_launch_ceiling"}
+  end
 end

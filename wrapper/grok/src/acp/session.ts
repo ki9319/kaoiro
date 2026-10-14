@@ -31,6 +31,14 @@ export class AcpSession {
     return this.newSessionResponse;
   }
 
+  async load(sessionId: string, cwd: string, mcpServers: acp.McpServer[]) {
+    const response = await this.connection.agent.request(acp.methods.agent.session.load, {
+      sessionId, cwd, mcpServers,
+    });
+    this.sessionId = sessionId;
+    return response;
+  }
+
   async open(
     cwd: string,
     mcpServers: acp.McpServer[],

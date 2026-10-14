@@ -47,3 +47,22 @@ profile, so `ToolHost` now serves HTTP with a per-run bearer token, a strict
 and the unix socket are removed. See
 [Tool transport](../reference/engines/grok-acp.md#tool-transport) and the plan,
 [issue-604-grok-http-mcp-transport](../plans/issue-604-grok-http-mcp-transport.md).
+
+## Amendment 2026-10-14: permission switching at the execution boundary
+
+On Linux, negotiated permission sync allows sandbox and network changes
+within the raw launch ceiling ([issue #591](https://github.com/sakuraiyuta/kaoiro/issues/591)).
+One serialized lane retires the old process group, creates a new process
+and HTTP ToolHost, loads the same session, and waits for authenticated tool
+readiness before promoting the new generation. Replay callbacks cannot
+produce live events or permission requests. Same-profile changes retain the
+process and take effect at the next prompt boundary.
+
+The server owns the next selection. A pre-application lane failure never
+invents a rollback: when the failed selection was next, dispatch stops until
+a valid server relay or sync restores it. The wrapper publishes the stop as
+`ext.permission_gate`. A prompt result needs a native `promptId` to count as
+an observation; without it, that selection is blocked. Approval remains
+`on-request`, and mode switching remains unsupported. See the
+[engine reference](../reference/engines/grok-acp.md) and
+[dated measurements](../evidence/grok/2026-10-14-permission-switch.md).

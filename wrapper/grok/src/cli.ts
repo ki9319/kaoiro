@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { PermissionSelection, PermissionSyncMessage, WrapperPermissionLifecycleMessage } from "@kaoiro/protocol";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -38,6 +39,7 @@ export interface GrokCliDependencies {
   onMetadata?: (metadata: GrokWireMetadata) => void;
   additionalTools?: ToolDescriptor[];
   cwd?: string;
+  platform?: NodeJS.Platform;
 }
 
 export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
@@ -51,6 +53,10 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
   );
   let host: GrokHost | undefined;
   let link: ServerLink | undefined;
+  const platform = dependencies.platform ?? process.platform;
+  let permissionSyncSupported = false;
+  const pendingPermissions: ({ kind: "sync"; value: PermissionSyncMessage } |
+    { kind: "relay"; value: PermissionSelection })[] = [];
   let pendingName: { displayName: string; revision: number } | undefined;
   let chain: Promise<void> = Promise.resolve();
   let ready!: () => void;
@@ -144,6 +150,17 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
       yield: "none" as const,
       stage_reports: false,
     },
+    ...(platform === "linux" ? { permissionSync: {
+      engine: "grok" as const,
+      onNegotiated: (supported: boolean) => {
+        permissionSyncSupported = supported;
+        host?.setPermissionSyncSupported(supported);
+      },
+      onSync: (value: PermissionSyncMessage) => {
+        if (host) host.applyPermissionSync(value);
+        else pendingPermissions.push({ kind: "sync", value });
+      },
+    } } : {}),
     onPersonaPrompt: resolvePersona,
     onInstruction: (text: string, attachments?: string[]) => {
       chain = chain
@@ -166,7 +183,10 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
     },
     onSetModel: () => controlFailure("model switching"),
     onSetEffort: () => controlFailure("effort switching"),
-    onSetPermission: () => controlFailure("permission switching"),
+    onSetPermission: (value: PermissionSelection) => {
+      if (host) void host.setPermission(value).catch(() => controlFailure("permission switching"));
+      else pendingPermissions.push({ kind: "relay", value });
+    },
     onSetPermissionMode: () => controlFailure("permission mode switching"),
     onDisplayNameSync: (name: string, revision: number) => {
       if (host) host.renameDisplayName(name, revision);
@@ -232,9 +252,15 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
       }),
     ]);
     clearTimeout(timer);
+    if (platform === "linux" && typeof link.waitForPermissionSyncNegotiation === "function")
+      permissionSyncSupported = await link.waitForPermissionSyncNegotiation();
     host = (dependencies.createHost ?? ((opts) => new GrokHost(opts)))(
       acknowledgements.withHostOptions({
         config,
+        platform,
+        permissionSyncSupported,
+        waitForPermissionSync: () => link?.waitForPermissionSync?.() ?? Promise.resolve(),
+        onPermissionLifecycle: (event: WrapperPermissionLifecycleMessage) => link?.reportPermissionLifecycle(event),
         cwd: dependencies.cwd ?? process.cwd(),
         personaPrompt: rules,
         send,
@@ -262,7 +288,7 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
         }: {
           turnToken: string;
           conversationIds: string[];
-          error?: { detail: string };
+          error?: { detail: string; reason?: string };
         }) => {
           question.close();
           for (const notice of interAgent.resolveTurnEnd(
@@ -274,6 +300,10 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
         },
       }),
     );
+    for (const pending of pendingPermissions) {
+      if (pending.kind === "sync") host.applyPermissionSync(pending.value);
+      else await host.setPermission(pending.value).catch(() => controlFailure("permission switching"));
+    }
     if (pendingName)
       host.renameDisplayName(pendingName.displayName, pendingName.revision);
     ready();
