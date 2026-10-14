@@ -1026,6 +1026,9 @@ export interface DisconnectExt {
 export interface EnvelopeExt extends Record<string, unknown> {
   disconnect?: DisconnectExt;
   permission_control?: PermissionControlExt;
+  /** Operator-only; present only while a permission gate blocks dispatch
+   *  (issue #612). See {@link PermissionGateExt}. */
+  permission_gate?: PermissionGateExt;
   delivery_policy?: DeliveryPolicyView;
   context_budget?: ContextBudgetExt;
   pending_model?: string;
@@ -1041,6 +1044,35 @@ export interface EnvelopeExt extends Record<string, unknown> {
    *  late-connecting operator also sees the degraded state. Cleared by
    *  `refresh_models` (phase-18-5), which resets the retry counter. */
   models_error?: boolean;
+}
+
+/** `ext.permission_gate` (issue #612; design: issue #591 r5.1). Optional and
+ *  operator-only. A wrapper publishes it while an agent's dispatch is blocked
+ *  by a permission gate, and omits it otherwise. Grok is the only producer
+ *  for now; Codex does not emit it. */
+export type PermissionGateReason =
+  | "awaiting_server_next"
+  | "observation_unavailable";
+
+/** The step of the permission switch at which the gate was raised. */
+export type PermissionGateStep =
+  | "inspect"
+  | "spawn"
+  | "initialize"
+  | "load"
+  | "readiness"
+  | "loading_exit"
+  | "deadline"
+  | "next_over_ceiling";
+
+export interface PermissionGateExt {
+  status: "blocked";
+  reason: PermissionGateReason;
+  /** The revision whose outcome caused the stop. */
+  revision: number;
+  step?: PermissionGateStep;
+  /** ISO time at which the stop began. */
+  since: string;
 }
 
 /**
