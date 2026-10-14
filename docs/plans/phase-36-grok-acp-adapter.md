@@ -4,7 +4,7 @@ description: Add Grok Build as engine `grok` — wrapper/grok package hosting a 
 status: in_progress
 phase: 36
 depends_on: [phase-34-antigravity-adapter]
-related: [issue-589, issue-590, issue-591, issue-592, issue-593, issue-594]
+related: [issue-589, issue-590, issue-591, issue-592, issue-593, issue-594, issue-597]
 last_updated: 2026-10-14
 ---
 
@@ -390,7 +390,8 @@ permission pages, the runner configuration page, and an ADR for the engine
 
 | Unit | Issue | Status |
 |---|---|---|
-| 1. Registration, launch and minimal ACP host | [#590](https://github.com/sakuraiyuta/kaoiro/issues/590) | In progress |
+| 1. Registration, launch and minimal ACP host | [#590](https://github.com/sakuraiyuta/kaoiro/issues/590) | ✅ landed 3364c0e8 |
+| 1b. Keep vendor extensions out of `acp/` (before unit 2) | [#597](https://github.com/sakuraiyuta/kaoiro/issues/597) | ⏳ |
 | 2. Permission and sandbox enforcement | [#591](https://github.com/sakuraiyuta/kaoiro/issues/591) | ⏳ |
 | 3. Resume, history replay and catalog probe | [#592](https://github.com/sakuraiyuta/kaoiro/issues/592) | ⏳ |
 | 4. Context usage, live model and effort switching | [#593](https://github.com/sakuraiyuta/kaoiro/issues/593) | ⏳ |
