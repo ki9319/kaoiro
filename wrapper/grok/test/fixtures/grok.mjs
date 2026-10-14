@@ -304,10 +304,15 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           effort = value;
         } else return invalidParams(msg.id);
         persist();
+        const announce = () => {
+          update({ sessionUpdate: "config_option_update", configOptions: configOptions() });
+          notification("_x.ai/session_notification", { sessionId: sid, update: {
+            sessionUpdate: "model_changed", model_id: model, reasoning_effort: effort } });
+        };
+        // Real Grok answers first; this knob puts the notifications ahead.
+        if (process.env.KAOIRO_TEST_GROK_NOTIFY_FIRST === "1") announce();
         reply(msg.id, { configOptions: configOptions() });
-        update({ sessionUpdate: "config_option_update", configOptions: configOptions() });
-        notification("_x.ai/session_notification", { sessionId: sid, update: {
-          sessionUpdate: "model_changed", model_id: model, reasoning_effort: effort } });
+        if (process.env.KAOIRO_TEST_GROK_NOTIFY_FIRST !== "1") announce();
         break;
       }
       case "session/prompt": {
@@ -327,6 +332,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         }
         if (text === "no-calls") {
           finish(msg.id, "", "end_turn", undefined, true);
+          break;
+        }
+        if (text === "rogue-config-update") {
+          const rogue = configOptions();
+          rogue[0] = { ...rogue[0], currentValue: "grok-4.5" };
+          update({ sessionUpdate: "config_option_update", configOptions: rogue });
+          finish(msg.id, "");
           break;
         }
         if (text === "rogue-model-changed") {

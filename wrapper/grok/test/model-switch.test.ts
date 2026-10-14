@@ -290,6 +290,25 @@ describe("switch outcomes", () => {
   });
 });
 
+describe("confirmations", () => {
+  it("logs a config_option_update that disagrees with the last returned value", async () => {
+    const t = await started();
+    const written = vi.spyOn(process.stderr, "write");
+    await t.host.send("rogue-config-update");
+    expect(written.mock.calls.map(([chunk]) => String(chunk)).join(""))
+      .toContain("other than the one it last returned");
+    expect(t.ext()).toMatchObject({ model: "grok-4.7" });
+  });
+
+  it("does not report the notifications of its own request, even ahead of the answer", async () => {
+    const t = await started({ KAOIRO_TEST_GROK_NOTIFY_FIRST: "1" });
+    const written = vi.spyOn(process.stderr, "write");
+    await t.host.setModel("grok-4.6");
+    await modelIs(t, "grok-4.6");
+    expect(written.mock.calls.map(([chunk]) => String(chunk)).join("")).not.toContain("other than the one");
+  });
+});
+
 describe("generations", () => {
   it("adopts the selection a loaded session reports and does not send it again", async () => {
     const t = await started();
