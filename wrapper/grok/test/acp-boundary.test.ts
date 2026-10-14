@@ -114,7 +114,7 @@ function leavesAcp(specifier: string | undefined, dir: string): boolean {
   if (specifier === undefined) return true;
   if (specifier.startsWith("/") || specifier.startsWith("file:")) return true;
   if (!/^\.\.?(\/|$)/.test(specifier)) return false;
-  const resolved = posix.normalize(posix.join(dir, specifier));
+  const resolved = posix.join(dir, specifier);
   return resolved === ".." || resolved.startsWith("../");
 }
 
@@ -197,10 +197,12 @@ describe("the detector itself", () => {
   });
 
   it("lets prose use the word rules in a comment", () => {
-    expect(scanSource("// the persona rules are injected\nconst a = 1;")).toEqual(
-      [],
-    );
-    expect(scanSource("/* the rules,\n more rules */\nconst a = 1;")).toEqual([]);
+    expect(
+      scanSource("// the persona rules are injected\nconst a = 1;"),
+    ).toEqual([]);
+    expect(
+      scanSource("/* the rules,\n more rules */\nconst a = 1;"),
+    ).toEqual([]);
   });
 
   it("still sees rules in code after a comment or a URL string", () => {
@@ -236,7 +238,11 @@ describe("the detector itself", () => {
     ["a namespace re-export", ".", 'export * as host from "../host.js";'],
     ["an import-equals require", ".", 'import host = require("../host.js");'],
     ["a dynamic import", ".", 'const m = await import("../host.js");'],
-    ["a dynamic import in a template", ".", "const m = await import(`../host.js`);"],
+    [
+      "a dynamic import in a template",
+      ".",
+      "const m = await import(`../host.js`);",
+    ],
     ["a require call", ".", 'const m = require("../host.js");'],
     ["an import type", ".", 'type T = import("../host.js").X;'],
     [
@@ -262,7 +268,13 @@ describe("the detector itself", () => {
       "deep",
       'import { x } from "../connection.js";',
     ],
-    ["a side-effect import that stays in acp/", "deep", 'import "../connection.js";'],
+    [
+      "a side-effect import that stays in acp/",
+      "deep",
+      'import "../connection.js";',
+    ],
+    ["acp/ itself from a subdirectory", "deep", 'import x from "..";'],
+    ["the current directory", ".", 'import x from ".";'],
     ["a sibling in a subdirectory", "deep", 'import { x } from "./other.js";'],
     [
       "a path that leaves a subdirectory and returns",
@@ -280,7 +292,11 @@ describe("the detector itself", () => {
       "deep",
       "const m = await import(`../connection.js`);",
     ],
-    ["a re-export that stays in acp/", "deep", 'export * from "../connection.js";'],
+    [
+      "a re-export that stays in acp/",
+      "deep",
+      'export * from "../connection.js";',
+    ],
     [
       "a package",
       ".",
