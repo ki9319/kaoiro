@@ -116,6 +116,17 @@ describe("permission switch at the queued head boundary", () => {
       .map(e => e.payload.text)).toEqual(["no-prompt-id", "recovered"]);
     expect(host.statusExtSnapshot().permission_control).toMatchObject({ status: "applied", revision: 1 });
   });
+  it("publishes no launch projection once the first observation is lost", async () => {
+    const { host } = await started();
+    // Sanity: before any observation the launch profile is projected, so the
+    // absence checked below is not vacuous.
+    expect(host.statusExtSnapshot()).toHaveProperty("permission");
+    await host.send("no-prompt-id");
+    expect(host.statusExtSnapshot().permission_control).toMatchObject({ status: "unknown" });
+    expect(host.statusExtSnapshot().permission_gate).toMatchObject({ reason: "observation_unavailable" });
+    expect(host.statusExtSnapshot()).not.toHaveProperty("permission");
+    expect(host.statusExtSnapshot()).not.toHaveProperty("effective");
+  });
   it("retains next after a refused raw toggle instead of capturing latest", async () => {
     const { host } = await started({ config: { ...config, sandbox: "danger-full-access", network_access: false } });
     await host.setPermission(choose(1, "danger-full-access", true));
@@ -306,9 +317,12 @@ describe("lane cancellation and failure boundaries", () => {
     expect(host.statusExtSnapshot().permission_control).toMatchObject({ revision: 1, status: "failed", reason: "unsupported_permission_pair" });
     expect(host.statusExtSnapshot().permission_control).not.toHaveProperty("submitted");
     expect(lifecycle.at(-1)?.details).toMatchObject({ revision: 1, reason: "unsupported_permission_pair" });
-    await host.setPermission(choose(2, "workspace-write", true));
+    // Recover to read-only, not to the launch pair: the launch pair needs no
+    // restart, so recovering to it would leave the restart path untested.
+    await host.setPermission(choose(2, "read-only", false));
     await host.send("authorized-recovery");
-    expect(host.processId).toBe(old);
+    expect(host.processId).not.toBe(old);
+    expect(() => process.kill(old, 0)).toThrow();
   });
   it("fails a prompt without observation closed to later dispatch", async () => {
     const { host } = await started();

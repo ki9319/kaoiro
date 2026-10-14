@@ -182,7 +182,11 @@ export class GrokHost implements EngineAdapter {
   statusExtSnapshot(): Record<string, unknown> {
     const profile = this.#current?.profile;
     const observed = this.#permissions.current?.observation;
-    const projectProfile = !this.#permissions.latest || !this.#permissions.lastEffective;
+    // issue #620: while the current control is unknown (its observation was
+    // lost), the launch profile is not projected, so an unknown first
+    // execution is not shown as already applied.
+    const projectProfile = (!this.#permissions.latest || !this.#permissions.lastEffective)
+      && this.#permissions.latest?.status !== "unknown";
     const pair = this.#ceiling.requested;
     const projectedSandbox = profile === "off" ? "danger-full-access" : profile === "workspace" ? "workspace-write" : "read-only";
     const permission = observed?.permission ?? (projectProfile && profile ? {
