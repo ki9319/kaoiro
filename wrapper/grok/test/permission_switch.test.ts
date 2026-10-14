@@ -161,6 +161,20 @@ describe("permission switch at the queued head boundary", () => {
     });
     expect(host.statusExtSnapshot()).not.toHaveProperty("permission_gate");
   });
+  it("publishes no launch projection over a synced unknown control", async () => {
+    // A fresh host has no captured execution, so only the newest control can
+    // suppress the projection here. The sanity check keeps the absence honest.
+    const { host } = await started();
+    expect(host.statusExtSnapshot()).toHaveProperty("permission");
+    const selection = choose(1, "workspace-write", true);
+    host.applyPermissionSync({ version: "0", next: selection,
+      control: { ...selection, status: "unknown", reason: "observation_unavailable",
+        submitted: { ...selection, execution_id: "exec-sync" },
+        constraints: { approval: "on-request", enforcement: "os" } } });
+    expect(host.statusExtSnapshot().permission_control).toMatchObject({ revision: 1, status: "unknown" });
+    expect(host.statusExtSnapshot()).not.toHaveProperty("permission");
+    expect(host.statusExtSnapshot()).not.toHaveProperty("effective");
+  });
   it("retains next after a refused raw toggle instead of capturing latest", async () => {
     const { host } = await started({ config: { ...config, sandbox: "danger-full-access", network_access: false } });
     await host.setPermission(choose(1, "danger-full-access", true));
