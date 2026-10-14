@@ -260,6 +260,22 @@ describe("switch outcomes", () => {
     expect(t.requests()).toEqual([["model", "grok-4.5"]]);
   });
 
+  it("checks an effort against a newer pick made while another model is in flight", async () => {
+    const t = await started();
+    const hold = holdModelRequest("grok-4.5");
+    try {
+      await t.host.setModel("grok-4.5");
+      await hold.entered;
+      await t.host.setModel("grok-4.6");
+      await t.host.setEffort("xhigh");
+      expect(t.ext()).toMatchObject({ pending_model: "grok-4.6", pending_effort: "xhigh" });
+      expect(t.states().some((e) => e.ext?.switch_error)).toBe(false);
+    } finally { hold.open(); }
+    await vi.waitFor(() => expect(t.ext().effort).toBe("xhigh"), { timeout: 10_000 });
+    expect(t.ext()).toMatchObject({ model: "grok-4.6", effort: "xhigh" });
+    expect(t.requests()).toEqual([["model", "grok-4.5"], ["model", "grok-4.6"], ["reasoning_effort", "xhigh"]]);
+  });
+
   it("publishes a repeated identical error again", async () => {
     const t = await started();
     await t.host.setModel("not-a-model");
