@@ -2,7 +2,7 @@
 title: Grok Build ACP engine
 description: Resident ACP host, tools, permissions and unsupported operations.
 status: accepted
-last_updated: 2026-10-14
+last_updated: 2026-10-15
 ---
 
 # Grok Build ACP engine
@@ -76,7 +76,7 @@ and `src/grok/events.ts`.
 |---|---|---|
 | `session/new` `_meta` | third argument of `AcpSession.open`, passed by value (the host already holds everything it needs; no builder function) | `grokSessionMeta(rules)`, that is `{ rules }` |
 | Extra notifications | `AcpExtension.notifications` of `connectAcp`: method, parser and handler per entry. The method must start with `_` (ACP's extension-name convention); any other name, including every ACP method, makes `connectAcp` throw | `_x.ai/session_notification`, handled by the host's turn-completion match |
-| Wire-metadata fields | `AcpExtension.wireFields` of `connectAcp` and `metadataTee`: a function from one parsed JSON-RPC line to extra fields, merged after `variant` | `grokWireFields`: `vendor_kind`, `prompt_id`, `request_id`, `hook_event` |
+| Wire-metadata fields | `AcpExtension.wireFields` of `connectAcp` and `metadataTee`: a function from one parsed JSON-RPC line to extra fields, merged after `variant` | `grokWireFields`: `vendor_kind`, `prompt_id`, `request_id`, `hook_event`; the host adds `loading_lines_dropped` |
 
 `acp/` itself records `direction`, `method`, `variant`, `sdk_diagnostic` and
 `oversized_lines`. With no extension it registers ACP methods only and adds
@@ -162,6 +162,16 @@ and bearer token, and waits for authenticated `tools/list`. The new generation
 becomes current only after a synchronous failure/abort check. Load replay and
 retired-generation callbacks cannot affect turns or permission observations.
 Close aborts the lane and waits for every generation it created.
+
+Grok sends the `session_start` hook execution after the `session/new` or
+`session/load` response, so it arrives while the generation is loading
+([evidence](../../evidence/grok/2026-10-15-session-start-hook.md)). A loading
+generation's wire metadata is therefore held, without its `session/update`
+replay lines and up to 256 records, and published in order when the
+generation is promoted. Records beyond the bound are reported as one
+`loading_lines_dropped` count. A generation that is never promoted is retired
+with its held metadata dropped, so nothing it saw is attributed to the
+session.
 
 A pre-prompt lane failure leaves the head turn queued and unsent. If its
 selection is still `next`, the adapter stops until a valid server relay or

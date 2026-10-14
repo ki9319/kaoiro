@@ -12,6 +12,8 @@ export interface GrokWireMetadata extends WireMetadata {
   prompt_id?: string;
   request_id?: string;
   hook_event?: string;
+  /** Lines a loading generation could not hold before its promotion. */
+  loading_lines_dropped?: number;
 }
 
 interface RawLine {

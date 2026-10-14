@@ -188,6 +188,16 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         // Like Grok, reply first and connect afterwards, and carry on without
         // the server when the connection fails.
         reply(msg.id, loading ? {} : { sessionId: sid });
+        // Like Grok 1.0.52: the session_start hook follows the response on
+        // both session/new and session/load (issue 633).
+        notification("_x.ai/session_notification", {
+          sessionId: sid,
+          update: { sessionUpdate: "hook_execution", event_name: "session_start", runs: [] },
+        });
+        for (let i = 0; i < Number(process.env.KAOIRO_TEST_GROK_LOADING_FLOOD ?? 0); i++)
+          notification("_x.ai/session_notification", {
+            sessionId: sid, update: { sessionUpdate: "loading_flood" },
+          });
         if (loading && process.env.GROK_SANDBOX === "read-only" && fault?.startsWith("readiness:")) {
           if (fault.endsWith(":exit")) setTimeout(() => process.exit(13), 30);
           if (fault.endsWith(":close")) setTimeout(() => process.stdout.end(), 30);

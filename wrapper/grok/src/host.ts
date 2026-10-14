@@ -89,6 +89,9 @@ export interface GrokHostOptions {
  *  (measured at most 1.1 s); this is far past that and inside the 30 s startup
  *  deadline, so a missing connection reports its own reason first. */
 const MCP_READY_TIMEOUT_MS = 15_000;
+// Metadata held per loading generation until promotion; a memory bound, well
+// above the few dozen lines a start-up sends.
+const LOADING_METADATA_LIMIT = 256;
 type LaneStep = "stopping" | "inspect" | "spawn" | "initialize" | "load" | "readiness" | "promotion";
 interface Generation {
   role: "current" | "loading" | "retired";
@@ -100,6 +103,8 @@ interface Generation {
   failure?: Error;
   failed: Promise<never>;
   fail: (error: Error) => void;
+  held: GrokWireMetadata[];
+  heldDropped: number;
 }
 class LaneFailure extends Error {
   constructor(readonly step: PermissionGateExt["step"] | "stopping") { super("grok restart failed"); }
@@ -326,6 +331,8 @@ export class GrokHost implements EngineAdapter {
   async #retire(generation: Generation | undefined) {
     if (!generation) return;
     generation.role = "retired";
+    generation.held = [];
+    generation.heldDropped = 0;
     if (this.#current === generation) this.#current = undefined;
     if (this.#loading === generation) this.#loading = undefined;
     generation.session.connection.close();
@@ -400,10 +407,13 @@ export class GrokHost implements EngineAdapter {
         permission: (request, requestSignal) => generation?.role === "current"
           ? this.#permission(request, requestSignal)
           : Promise.resolve({ outcome: { outcome: "cancelled" as const } }),
-        metadata: (metadata) => { if (generation?.role === "current") this.#options.onMetadata?.(metadata); },
+        metadata: (metadata) => {
+          if (generation?.role === "current") this.#options.onMetadata?.(metadata);
+          else if (generation?.role === "loading") this.#hold(generation, metadata);
+        },
       }, grokExtension((notification) => { if (generation?.role === "current") this.#vendor(notification); }));
       generation = { role: "loading", process: childProcess, session: new AcpSession(connection), toolHost,
-        profile, policy, failed, fail };
+        profile, policy, failed, fail, held: [], heldDropped: 0 };
       this.#loading = generation;
       const owned = generation;
       void connection.closed.then(() => this.#generationFailed(owned, new Error("grok ACP connection closed unexpectedly")));
@@ -432,6 +442,7 @@ export class GrokHost implements EngineAdapter {
       this.#loading = undefined;
       this.#sessionId = generation.session.sessionId;
       this.#completion = undefined;
+      this.#flushHeld(generation);
       this.#options.onSessionId?.(this.#sessionId!);
     } catch (error) {
       if (!this.#sessionId) throw error;
@@ -670,6 +681,29 @@ export class GrokHost implements EngineAdapter {
         logEntryToPayload({ kind: "assistant", text }, new Map()),
       ),
     );
+  }
+  // Grok sends the session_start hook after the session/new or session/load
+  // response, while the generation is still loading (issue #633). Its
+  // metadata is held and published only if the generation is promoted. The
+  // load replay (session/update) is not held.
+  #hold(generation: Generation, metadata: GrokWireMetadata) {
+    if (metadata.method === "session/update") return;
+    if (generation.held.length < LOADING_METADATA_LIMIT) generation.held.push(metadata);
+    else generation.heldDropped += 1;
+  }
+  #flushHeld(generation: Generation) {
+    const held = generation.held;
+    const dropped = generation.heldDropped;
+    generation.held = [];
+    generation.heldDropped = 0;
+    if (dropped > 0) held.push({ direction: "in", loading_lines_dropped: dropped });
+    for (const metadata of held) {
+      try {
+        this.#options.onMetadata?.(metadata);
+      } catch {
+        /* Diagnostics must not fail the promotion. */
+      }
+    }
   }
   #vendor(notification: Record<string, unknown>) {
     const completion = turnCompletion(notification, this.#sessionId);

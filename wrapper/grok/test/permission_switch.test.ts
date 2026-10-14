@@ -9,6 +9,7 @@ import { GrokProcess } from "../src/grok/process.js";
 import * as grokEvents from "../src/grok/events.js";
 import * as acpConnection from "../src/acp/connection.js";
 import { GrokHost, type GrokHostOptions } from "../src/host.js";
+import type { GrokWireMetadata } from "../src/grok/wire.js";
 const executable = fileURLToPath(new URL("./fixtures/grok.mjs", import.meta.url));
 const config: WrapperConfig = { agent_id: "switch-fixture", display_name: "Switch", server_url: "ws://127.0.0.1:1/agent",
   persona: { id: "default", name: "Default", sprite_set: "default" }, sandbox: "workspace-write", network_access: true };
@@ -406,6 +407,53 @@ describe("lane cancellation and failure boundaries", () => {
     expect(host.statusExtSnapshot().permission).not.toHaveProperty("enforcement");
     expect(host.statusExtSnapshot()).not.toHaveProperty("permission_control");
     await expect(host.setPermission(choose(1))).rejects.toThrow("fixed");
+  });
+});
+
+describe("metadata of a loading generation (issue #633)", () => {
+  const isStart = (m: GrokWireMetadata) => m.hook_event === "session_start";
+  const isOut = (method: string) => (m: GrokWireMetadata) => m.direction === "out" && m.method === method;
+  it("publishes a promoted load's session_start and never the load replay", async () => {
+    const metadata: GrokWireMetadata[] = [];
+    const { host } = await started({ onMetadata: m => metadata.push(m) });
+    await host.setPermission(choose(1));
+    await host.send("fresh");
+    expect(metadata.filter(isStart)).toHaveLength(2);
+    const load = metadata.findIndex(isOut("session/load"));
+    const prompt = metadata.findIndex((m, i) => i > load && isOut("session/prompt")(m));
+    expect(load).toBeGreaterThan(-1);
+    const window = metadata.slice(load, prompt);
+    expect(window.some(isStart)).toBe(true);
+    expect(window.some(m => m.method === "session/update")).toBe(false);
+  });
+  for (const fault of ["exit", "close"]) {
+    it(`drops the metadata of a generation that fails at readiness (${fault})`, async () => {
+      const metadata: GrokWireMetadata[] = [];
+      const root = mkdtempSync(join(homedir(), ".kaoiro-grok-switch-fault-")); scratch.push(root);
+      const env = { ...process.env, KAOIRO_TEST_GROK_EVENTS: join(root, "events"),
+        KAOIRO_TEST_GROK_SWITCH_FAULT: `readiness:${fault}` };
+      const { host } = await started({ env, mcpReadyTimeoutMs: 500, onMetadata: m => metadata.push(m) });
+      await host.setPermission(choose(1));
+      await expect(host.send("unsent")).rejects.toThrow("permission_gate_blocked");
+      expect(metadata.filter(isStart)).toHaveLength(1);
+      expect(metadata.some(isOut("session/load"))).toBe(false);
+      await host.setPermission(choose(2, "workspace-write", true));
+      await host.send("recovered");
+      expect(metadata.filter(isStart)).toHaveLength(2);
+      expect(metadata.filter(isOut("session/load"))).toHaveLength(1);
+    });
+  }
+  it("drops held metadata when close wins while loading", async () => {
+    const metadata: GrokWireMetadata[] = [];
+    let host: GrokHost | undefined;
+    const { host: built, run } = await started({ onMetadata: m => metadata.push(m),
+      onLaneStep: step => { if (host && step === "readiness") host.close(); } });
+    host = built;
+    await host.setPermission(choose(1));
+    await expect(host.send("must-not-start")).rejects.toThrow("closed");
+    await host.closed; await run;
+    expect(metadata.filter(isStart)).toHaveLength(1);
+    expect(metadata.some(isOut("session/load"))).toBe(false);
   });
 });
 

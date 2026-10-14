@@ -22,7 +22,7 @@ it.skipIf(!live)("native switch enforces the new profile and reconnects HTTP too
   const script = join(cwd, "probe.py");
   writeFileSync(script, `import pathlib,socket,json\nr={}\nfor name,path in [('inside',${JSON.stringify(inside)}),('outside',${JSON.stringify(outside)})]:\n try:\n  pathlib.Path(path).write_text('fixture')\n  r[name]=True\n except OSError: r[name]=False\ntry:\n socket.create_connection(('127.0.0.1',${port}),timeout=2).close()\n r['network']=True\nexcept OSError: r['network']=False\npathlib.Path(${JSON.stringify(report)}).write_text(json.dumps(r))\n`);
   try {
-    await nativeRun(config, cwd, async (host, callbacks) => {
+    await nativeRun(config, cwd, async (host, callbacks, _envelopes, metadata) => {
       await vi.waitFor(() => expect(host.state).toBe("waiting_input"), { timeout: 40_000 });
       let session: string | undefined;
       const counts: number[] = [];
@@ -46,6 +46,9 @@ it.skipIf(!live)("native switch enforces the new profile and reconnects HTTP too
         session ??= control.effective.session_id;
         expect(control.effective.session_id === session).toBe(true);
         expect(host.toolHostStats()!.calls > 0).toBe(true);
+        // Grok sends session_start on session/new and on every session/load
+        // (issue 633), and the wrapper publishes it once promoted.
+        expect(metadata.filter(m => m.hook_event === "session_start")).toHaveLength(turn + 1);
       }
       const pid = host.processId;
       callbacks.onSetPermission?.({ revision: 3, requested: { sandbox: "danger-full-access", network_access: true } });

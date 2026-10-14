@@ -14,6 +14,7 @@ import {
 import { GrokHost, type GrokHostOptions } from "../src/host.js";
 import { GrokProcess } from "../src/grok/process.js";
 import * as events from "../src/grok/events.js";
+import type { GrokWireMetadata } from "../src/grok/wire.js";
 const executable = fileURLToPath(
   new URL("./fixtures/grok.mjs", import.meta.url),
 );
@@ -674,6 +675,52 @@ describe("resident ACP host", () => {
       vi.useRealTimers();
     }
     await host.closed;
+  });
+});
+
+describe("metadata of a loading generation (issue #633)", () => {
+  const isStart = (m: GrokWireMetadata) => m.hook_event === "session_start";
+  it("publishes the start-up session_start at promotion, before any prompt", async () => {
+    const metadata: GrokWireMetadata[] = [];
+    const { host } = await started({ onMetadata: (m) => metadata.push(m) });
+    expect(metadata.filter(isStart)).toHaveLength(1);
+    await host.send("hello");
+    expect(metadata.filter(isStart)).toHaveLength(1);
+    const prompt = metadata.findIndex(
+      (m) => m.direction === "out" && m.method === "session/prompt",
+    );
+    expect(prompt).toBeGreaterThan(metadata.findIndex(isStart));
+  });
+  it("bounds what a loading generation holds and reports the rest", async () => {
+    const metadata: GrokWireMetadata[] = [];
+    await started({
+      onMetadata: (m) => metadata.push(m),
+      env: { ...process.env, KAOIRO_TEST_GROK_LOADING_FLOOD: "300" },
+    });
+    const marker = metadata.findIndex((m) => m.loading_lines_dropped !== undefined);
+    expect(marker).toBe(256);
+    const held = metadata.slice(0, marker);
+    const flood = held.filter((m) => m.vendor_kind === "loading_flood").length;
+    expect(flood + metadata[marker]!.loading_lines_dropped!).toBe(300);
+    expect(held.some(isStart)).toBe(true);
+  });
+  it("neither fails the promotion nor repeats records when the observer throws", async () => {
+    const seen: GrokWireMetadata[] = [];
+    let thrown = false;
+    const { host } = await started({
+      onMetadata: (m) => {
+        seen.push(m);
+        if (!thrown && isStart(m)) {
+          thrown = true;
+          throw new Error("observer failure");
+        }
+      },
+    });
+    expect(thrown).toBe(true);
+    expect(seen.filter(isStart)).toHaveLength(1);
+    expect(new Set(seen).size).toBe(seen.length);
+    await host.send("after");
+    expect(host.state).toBe("waiting_input");
   });
 });
 
