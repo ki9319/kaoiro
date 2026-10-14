@@ -337,6 +337,13 @@ describe("AgentHost — Workflow notifications", () => {
     expectAdmitted(outcome, "idle");
   });
 
+  it("rejects a Workflow whose SDK frame has no output file", async () => {
+    const outcome = await admit({
+      mode: "idle", frames: workflowLaunch(), late: workflowDone(WORKFLOW, { output_file: "" }), prompt: workflowPrompt({ output: null }),
+    });
+    expectRejected(outcome);
+  });
+
   it.each([
     { name: "with is_backgrounded false", extra: { is_backgrounded: false } },
     { name: "launched by a subagent", extra: { parent_task_id: "agent-task" } },

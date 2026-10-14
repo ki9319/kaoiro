@@ -2378,7 +2378,7 @@ export class AgentHost implements EngineAdapter {
               notificationTextMatches(candidate.summary, notifications[index]!.result) && notifications[index]!.summary !== undefined
             // A workflow's <result> is its script's return value with no SDK
             // counterpart, so it is never compared.
-            : candidate.taskType === "local_workflow" && notifications[index]!.outputFilePresent &&
+            : candidate.taskType === "local_workflow" &&
               candidate.outputFile !== undefined && candidate.outputFile === notifications[index]!.outputFile &&
               notificationTextMatches(candidate.summary, notifications[index]!.summary)
       ));
