@@ -165,8 +165,9 @@ async function admit(scenario: {
       for (let index = 0; index < (scenario.hooks ?? 1); index += 1) {
         await hook("UserPromptSubmit", { session_id: scenario.promptSession ?? S, prompt_id: promptId, prompt: scenario.prompt });
       }
-      await hook("PreToolUse", { session_id: S, prompt_id: promptId, tool_name: INTER_AGENT_TOOL_FQN, tool_use_id: "send" });
-      await hook("PreToolUse", { session_id: S, prompt_id: promptId, agent_id: "child", tool_name: INTER_AGENT_TOOL_FQN, tool_use_id: "child-send" });
+      const session = scenario.promptSession ?? S;
+      await hook("PreToolUse", { session_id: session, prompt_id: promptId, tool_name: INTER_AGENT_TOOL_FQN, tool_use_id: "send" });
+      await hook("PreToolUse", { session_id: session, prompt_id: promptId, agent_id: "child", tool_name: INTER_AGENT_TOOL_FQN, tool_use_id: "child-send" });
       bound = host.toolOrigins.resolveBound("send");
       child = host.toolOrigins.resolveBound("child-send");
       yield result(scenario.mode === "idle" ? { result: "sent", origin: { kind: "task-notification" } } : { result: "done" });
@@ -267,6 +268,15 @@ describe("AgentHost — Bash moved to the background by its timeout", () => {
     expectAdmitted(outcome, "fold");
   });
 
+  it("ignores a start without a run id once the run is known", async () => {
+    const outcome = await admit({
+      mode: "fold",
+      frames: [bashStarted(BASH, true), bashStarted({ ...BASH, run: undefined }, false), notified(BASH)],
+      prompt: notePrompt(BASH),
+    });
+    expectAdmitted(outcome, "fold");
+  });
+
   it("ignores a start for an earlier run", async () => {
     const outcome = await admit({
       mode: "fold",
@@ -287,8 +297,8 @@ describe("AgentHost — Bash moved to the background by its timeout", () => {
   });
 
   it.each([
-    { name: "an earlier run", stray: { ...BASH, run: "0mv7eh1qq-00000000" } },
-    { name: "no run id", stray: { ...BASH, run: undefined } },
+    { name: "an earlier run", stray: { ...BASH, run: "0mv7eh1qq-00000000", summary: "Background command \"earlier\" completed (exit code 0)" } },
+    { name: "no run id", stray: { ...BASH, run: undefined, summary: "Background command \"earlier\" completed (exit code 0)" } },
   ])("keeps the current run after a notification from $name", async ({ stray }) => {
     const outcome = await admit({
       mode: "fold",
@@ -296,6 +306,17 @@ describe("AgentHost — Bash moved to the background by its timeout", () => {
       prompt: notePrompt(BASH),
     });
     expectAdmitted(outcome, "fold");
+  });
+
+  it("does not carry a record across a session change", async () => {
+    const moved: Task = { ...BASH, session: "s2" };
+    const outcome = await admit({
+      mode: "idle", frames: [bashStarted(BASH, true)],
+      late: [msg({ type: "system", subtype: "init", session_id: "s2" }), notified(moved)],
+      prompt: notePrompt(moved), promptSession: "s2",
+    });
+    expect(outcome.starts).toHaveLength(1);
+    expect(outcome.bound).toBeUndefined();
   });
 
   it("drops the records when a frame names another session", async () => {
