@@ -190,6 +190,22 @@ describe("switch outcomes", () => {
     expect(t.requests()).toEqual([]);
   });
 
+  it("checks an effort against the model that is pending, not the one that is running", async () => {
+    const t = await started();
+    const turn = t.host.send("calls-2");
+    await firstCall(t);
+    await t.host.setModel("grok-4.5");
+    await t.host.setEffort("xhigh");
+    expect(t.states().filter((e) => e.ext?.switch_error).map((e) => e.ext!.switch_error)).toEqual([
+      { kind: "effort", requested: "xhigh", reason: "control_rejected", rolled_back_to: "high" },
+    ]);
+    expect(t.ext()).not.toHaveProperty("pending_effort");
+    t.release();
+    await turn;
+    await modelIs(t, "grok-4.5");
+    expect(t.requests()).toEqual([["model", "grok-4.5"]]);
+  });
+
   it("publishes a repeated identical error again", async () => {
     const t = await started();
     await t.host.setModel("not-a-model");
