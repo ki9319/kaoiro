@@ -75,8 +75,11 @@ they lack evidence for two native task shapes.
 ## Scope
 
 1. Replace `#backgroundTaskIds: Set<string>` with a bounded task record map
-   keyed by `task_id`. Each record holds `sessionId`, `runId` (optional),
-   `taskType`, `toolUseId` (optional) and `background: boolean`.
+   keyed by `task_id`. Each record holds `runId` (optional), `taskType` and
+   `background: boolean`. Records need no session field: a frame naming
+   another session clears them (the existing session-change path) before
+   any task frame is applied, so every record belongs to the host's current
+   session.
 2. Create records from `task_started`. Apply
    `task_updated.patch.is_backgrounded` to `local_bash` records under the
    rules below. Create notification candidates only from records with
@@ -117,11 +120,11 @@ Out of scope:
 | `task_started`, `local_bash` or `local_agent` | Create a record. `background = (is_backgrounded === true)`. |
 | `task_started`, `local_workflow` | Create a record when `is_backgrounded !== false` and `parent_task_id` is absent. `background = true`. Measured: the field is absent and the tool launches in the background. If the SDK ever sends `false`, the workflow is treated as foreground. |
 | `task_started`, other types | No record. These types have no matcher. |
-| `task_started` for a `task_id` that already has a record, same `run_id` (both present and equal, or both absent) | Keep the record. `background` becomes `old || new`; a repeated start never undoes a promotion. |
+| `task_started` for a `task_id` that already has a record, same `run_id` (both present and equal, or both absent) | Keep the record. `background` stays true if either the record or the new start says background; a repeated start never undoes a promotion. |
 | `task_started` for a `task_id` that already has a record, newer `run_id` | Replace the record. The SDK keeps `task_id` and gives a resumed task a new `run_id`, and run ids of one task sort by plain string comparison in opening order. |
 | `task_started` for a `task_id` that already has a record, older `run_id` or `run_id` on one side only | Ignore the frame and keep the record. |
 | Record cap reached (64) | Do not record. Warn once per overflow. This fails closed to today's behaviour. |
-| `task_notification` that matches its record | Matching means the record exists and `session_id` and `run_id` both match it. For `run_id`, both must be absent or both present and equal. Remove the record. Create a candidate only when `background` is true. The existing candidate cap (16) still applies. |
+| `task_notification` that matches its record | Matching means the record exists and `run_id` matches it: both absent, or both present and equal. Remove the record. Create a candidate only when `background` is true. The existing candidate cap (16) still applies. |
 | `task_notification` that does not match | Ignore the frame. Keep the record, so a later notification for the current run still matches. |
 | Clear points | Clear all records wherever `#clearNotificationCandidates` runs today: close, interrupt, fail-stop, session change, a notification result under a wrapper turn, and stream EOF. |
 
@@ -132,7 +135,6 @@ hold:
 
 - a record with the same `task_id` exists;
 - the record's `taskType` is `local_bash`;
-- the frame's `session_id` equals the record's `sessionId`;
 - the frame's `run_id` equals the record's `runId`, or both are absent.
 
 Any other `task_updated` is ignored by the registry, with no buffering:
@@ -143,7 +145,7 @@ Any other `task_updated` is ignored by the registry, with no buffering:
 | `is_backgrounded: false` on a matching record | Set `background` to false. The latest fact for the same run wins, and the effect fails closed. |
 | Update before `task_started` (unknown task) | Ignored. A later `task_started` creates a foreground record. Not observed natively. |
 | Update after `task_notification` (record removed) | Ignored. It never re-creates a record or a candidate. |
-| Different `session_id` | Ignored. |
+| Different `session_id` | The frame first clears every record (session change), so nothing is promoted. |
 | `run_id` mismatch, or present on only one side | Ignored. This includes a late frame from an earlier run. |
 | Status-only patch | Ignored by the registry. The existing warning stays. |
 | `local_agent` or `local_workflow` record | Ignored (see Out of scope). |
@@ -300,12 +302,13 @@ Rejecting a bad input is a passing test, not a red result.
 | Promotion handling disabled | Acceptance 1 is red (`unbound_tool_call`) |
 | Workflow registration disabled | Acceptance 2 and 3 are red |
 | Workflow type branch disabled, registration kept | Acceptance 2 and 3 are red |
-| `session_id` mismatch on `task_updated` | No promotion; same-ID fold taints |
+| `session_id` change on `task_updated` | Records cleared; no promotion |
 | `run_id` mismatch on `task_updated` (earlier run, present on one side only) | No promotion |
 | `task_updated` before `task_started` | No promotion |
 | `task_updated` after `task_notification` | No record or candidate re-created |
 | `is_backgrounded: false` after `true` | No candidate |
-| Notification `run_id` or `session_id` differs from the record, then the correct notification for the current run arrives | No candidate from the first; the second is admitted |
+| Notification `run_id` differs from the record (with a different summary), then the correct notification for the current run arrives | No candidate from the first; the second is admitted |
+| A record from before a session change, then a notification for the same task in the new session | Not admitted |
 | Notification `run_id` present on one side only, then the correct notification | Same as above |
 | Repeated `task_started` for the same run after `updated(true)` | `background` stays true; the notification is admitted |
 | `task_started` for an older run after the current run's start | Ignored; the current run's notification is admitted |

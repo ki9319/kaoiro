@@ -83,7 +83,7 @@ into subagent/workflow notifications ([tasks](../protocol/tasks.md),
 | task_started | task_id, description, subagent_type, task_type, workflow_name, tool_use_id, skip_transcript, **prompt** (undocumented; unwired) |
 | task_progress | subagent_type, usage{total_tokens,tool_uses,duration_ms}, last_tool_name, summary |
 | task_notification | status(completed/failed/stopped), summary, usage, **output_file** (undocumented; used for origin correlation, not emitted on the task envelope) |
-| task_updated (**undocumented; out of scope**) | task_id, status(pending/running/completed/failed/killed/paused — broader than F3's four values) |
+| task_updated | task_id, run_id, patch{status(pending/running/completed/failed/killed/paused — broader than F3's four values), is_backgrounded, …}; read only for notification admission (below), not for the task envelope |
 
 `task_started.prompt` (the complete instruction to the started subagent) and
 `task_notification.output_file` (a local file path) are undocumented fields
@@ -91,17 +91,36 @@ whose existence was found by SDK observation, but they are not wired to the
 `task` envelope (rationale and source: [ADR-0047](../../adr/0047-task-envelope-schema.md)
 addendum). `task_updated` is a fourth subtype whose `status` is broader than
 the coarse four-value lifecycle of [ADR-0019](../../adr/0019-subagent-workflow-entity-and-task-envelope.md)
-F3, and is outside v1 scope (that ADR's addendum).
+F3, and is outside v1 scope for the task envelope (that ADR's addendum); the
+host still logs it as an unrecognized `task_*` subtype. Only its
+`patch.is_backgrounded` is used, for notification admission.
 
 These do **not enter** `KaoiroState` (they do not change the parent state).
 They are derived separately into the dedicated `task` envelope
 ([tasks](../protocol/tasks.md); implemented — stage 1 (wrapper), stage 2
 (server), stage 3 (dashboard overhead ring)).
 
-A background Bash or Agent completion can resume the SDK without a new wrapper
-input. The host registers candidates only for `task_started.is_backgrounded`
-tasks, since a foreground Bash also emits `task_notification` without an
-autonomous continuation. The parent host correlates the candidate with the subsequent root
+A background Bash, Agent or Workflow completion can resume the SDK without a
+new wrapper input. The host keeps a bounded record (64) per started
+`local_bash`, `local_agent` and `local_workflow` task, tied to its `run_id`,
+and creates a notification candidate only for a record that runs in the
+background, since a foreground Bash also emits `task_notification` without
+an autonomous continuation:
+
+- Bash and Agent are background when `task_started.is_backgrounded` is true.
+  A Bash moved to the background by its timeout starts with `false` and is
+  promoted by a `task_updated` with `patch.is_backgrounded: true` for the
+  same run (`false` returns it to the foreground). A promoted Agent is not
+  admitted.
+- A Workflow `task_started` carries no `is_backgrounded`; it is registered
+  as background unless the field is `false` or `parent_task_id` is present.
+- A start for the same run keeps an earlier promotion, a newer `run_id`
+  replaces the record, and an older or one-sided `run_id` is ignored. A
+  `task_notification` whose `run_id` differs from the record is ignored and
+  leaves the record in place. A frame naming another session clears every
+  record first.
+
+The parent host correlates the candidate with the subsequent root
 `UserPromptSubmit` and `PreToolUse` hooks before authorizing an inter-agent
 call. A prompt ID shared with a confirmed live wrapper turn retains that turn's
 reply snapshot and terminal result; a fresh ID with no live owner starts an
@@ -115,6 +134,16 @@ the exact path from its SDK `task_notification` frame. Either form requires the
 known one-use background-task candidate, matching session, task and parent tool
 IDs, status, and SDK summary in `<result>`. A present but empty, duplicated,
 malformed, or mismatched path is rejected; it is never treated as omission.
+A Bash notification requires the exact `<output-file>`, the SDK summary in
+`<summary>` and no `<result>`. A Workflow notification requires the exact
+`<output-file>` and the SDK summary in `<summary>`; its `<result>` (the
+script's return value) and `<diagnostics>` are never compared.
+The CLI XML-escapes `&`, `<` and `>` (once; `"`, `'` and newlines are kept)
+in `<summary>` and in the Agent `<result>`, but not in the IDs, status or
+`<output-file>`. The host never decodes the prompt: a compared summary or
+result must equal the SDK text or that text escaped once, and the IDs,
+status and output file need exact equality
+([evidence](../../evidence/claude/background-notification-admission-2026-10-14.md)).
 If a different notification prompt is rejected while a wrapper turn is live,
 an originless result cannot prove which prompt ended. The host stops admission
 and revokes inter-agent send authority while keeping the wrapper owner until
