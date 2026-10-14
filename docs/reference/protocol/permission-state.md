@@ -261,21 +261,6 @@ before the supporting capability is enabled end to end. Older dashboard clients
 with the absence-as-mode fallback must be refreshed for this rollout; disabling
 their new picker alone does not correct their legacy fallback.
 
-## Control reasons
-
-A control in `status: "failed"` or `status: "unknown"` carries a `reason`:
-
-- `policy_mismatch`: the observed policy differs from the submitted policy
-  (Codex).
-- `approval_policy_mismatch`: the observed approval value differs from the
-  submitted one (Codex).
-- `observation_unavailable`: the outcome of the revision could not be confirmed
-  (Codex).
-- `unsupported_permission_pair`: the server refused a later selection
-  (Grok, issue #591).
-- `restart_failed`: restarting the wrapper after a permission switch failed
-  (Grok, issue #591).
-
 ## Permission gate (`ext.permission_gate`)
 
 While an agent's dispatch is blocked by a permission gate, the wrapper publishes
@@ -302,6 +287,9 @@ ext.permission_gate = {
 A `rolled_back_to` on a control while a gate is present is the server's
 fallback, not applied; it is not a completed rollback. The dashboard labels it
 so.
+
+`restart_failed` is a control reason, not a gate reason: restarting the wrapper
+after a permission switch failed (Grok, issue #591).
 
 ## Related protocol topics
 
