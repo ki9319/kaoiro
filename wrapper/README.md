@@ -14,7 +14,7 @@ contains six packages ([ADR-0017](../docs/adr/0017-wrapper-multientity-packages.
 | `@kaoiro/claude-code` | `claude-code/` | Claude Code adapter: SDK event mapping, file uploads, inter-agent tools, and CLI |
 | `@kaoiro/codex` | `codex/` | Codex adapter: thread and turn event mapping, tool host bridge, session restore, model catalog, file uploads, and CLI |
 | `@kaoiro/antigravity` | `antigravity/` | Antigravity adapter: CLI event mapping, tool bridge, and CLI |
-| `@kaoiro/grok` | `grok/` | Grok Build adapter: resident ACP session, stdio MCP bridge, cancellation and CLI |
+| `@kaoiro/grok` | `grok/` | Grok Build adapter: resident ACP session, authenticated HTTP MCP server, cancellation and CLI |
 
 Dependency graph (arrows point to dependencies):
 

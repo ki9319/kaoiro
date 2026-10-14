@@ -252,8 +252,8 @@ bleak.
 
 ## Grok Build engine
 
-Grok Build runs as one resident ACP session with the kaoiro tool bridge and
-server-composed persona. Work unit 1 supports text, resident conversation,
+Grok Build runs as one resident ACP session with the kaoiro tools served over an
+authenticated HTTP MCP server and server-composed persona. Work unit 1 supports text, resident conversation,
 cancellation and normal peer delivery. See the
 [Grok reference](docs/reference/engines/grok-acp.md) for supported sandbox
 pairs and operations deferred to later work units.
