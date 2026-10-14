@@ -410,7 +410,16 @@ describe("resident ACP host", () => {
       .toBe("B_STILL_PENDINGfinished");
     expect(host.state).toBe("waiting_input");
   });
-  it("waits for the broker and reports rejection", async () => {
+  it.each([
+    { scene: "permission", beforeWaitTexts: [], toolNames: ["write fixture"] },
+    {
+      scene: "permission-no-tool-call",
+      beforeWaitTexts: ["Before permission"],
+      toolNames: [],
+    },
+  ])("waits for the broker and reports rejection ($scene)", async ({
+    scene, beforeWaitTexts, toolNames,
+  }) => {
     let host!: GrokHost;
     const envelopes: Envelope[] = [];
     const broker = new PermissionBroker({
@@ -425,7 +434,7 @@ describe("resident ACP host", () => {
     host = startedHost.host;
     const received = vi.spyOn(events, "updateEvents");
     vi.useFakeTimers();
-    const turn = host.send("permission");
+    const turn = host.send(scene);
     void turn.catch(() => {});
     await vi.waitFor(() => expect(host.state).toBe("waiting_permission"));
     const request = envelopes.find((e) => e.type === "permission_request")!;
@@ -433,14 +442,15 @@ describe("resident ACP host", () => {
       notification.update.sessionUpdate === "agent_message_chunk" &&
       notification.update.content.type === "text" &&
       notification.update.content.text === "BROKER_WAIT_PROGRESS")).toBe(true));
-    const beforeWait = envelopes.find(e => e.type === "log" &&
-      e.payload.kind === "assistant" && e.payload.text === "Before permission")!;
-    expect(beforeWait).toBeDefined();
-    expect(beforeWait.state).toBe("thinking");
-    expect(envelopes.indexOf(beforeWait)).toBeLessThan(
-      envelopes.findIndex(e => e.type === "state_change" && e.state === "waiting_permission"));
-    expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "tool_use"))
-      .toHaveLength(0);
+    const beforeWait = assistantLogs(envelopes);
+    expect(beforeWait.map(e => e.payload.text)).toEqual(beforeWaitTexts);
+    for (const log of beforeWait) {
+      expect(log.state).toBe("thinking");
+      expect(envelopes.indexOf(log)).toBeLessThan(
+        envelopes.findIndex(e => e.type === "state_change" && e.state === "waiting_permission"));
+    }
+    expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "tool_use")
+      .map(e => e.payload.tool_name)).toEqual(toolNames);
     try {
       await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
       expect(host.state).toBe("waiting_permission");
@@ -453,7 +463,7 @@ describe("resident ACP host", () => {
     });
     await expect(turn).rejects.toThrow("permission rejected");
     expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "assistant")
-      .map(e => e.payload.text)).toEqual(["Before permission", "BROKER_WAIT_PROGRESS"]);
+      .map(e => e.payload.text)).toEqual([...beforeWaitTexts, "BROKER_WAIT_PROGRESS"]);
     expect(envelopes.findIndex(e => e.type === "log" &&
       e.payload.text === "BROKER_WAIT_PROGRESS")).toBeLessThan(
       envelopes.findIndex(e => e.type === "result"));

@@ -328,6 +328,46 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             session_id: sid,
             notification: { type: "pending_interaction", kind: "permission" },
           });
+          update({
+            sessionUpdate: "tool_call",
+            toolCallId: "permission-tool",
+            title: "write fixture",
+            status: "in_progress",
+            kind: "edit",
+          });
+          process.stdout.write(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: "permission",
+              method: "session/request_permission",
+              params: {
+                sessionId: sid,
+                toolCall: {
+                  toolCallId: "permission-tool",
+                  title: "write fixture",
+                },
+                options: [
+                  { optionId: "yes", name: "Allow", kind: "allow_once" },
+                  { optionId: "no", name: "Reject", kind: "reject_once" },
+                ],
+              },
+            }) + "\n",
+          );
+          setTimeout(
+            () =>
+              update({
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: "BROKER_WAIT_PROGRESS" },
+              }),
+            25,
+          );
+          break;
+        }
+        if (text === "permission-no-tool-call") {
+          notification("_x.ai/session_notification", {
+            session_id: sid,
+            notification: { type: "pending_interaction", kind: "permission" },
+          });
           textChunk("Before");
           textChunk(" permission");
           process.stdout.write(
