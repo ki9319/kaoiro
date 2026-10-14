@@ -4,8 +4,8 @@ description: Add Grok Build as engine `grok` — wrapper/grok package hosting a 
 status: in_progress
 phase: 36
 depends_on: [phase-34-antigravity-adapter]
-related: [issue-589, issue-590, issue-591, issue-592, issue-593, issue-594, issue-597]
-last_updated: 2026-10-14
+related: [issue-589, issue-590, issue-591, issue-592, issue-593, issue-594, issue-597, issue-604, issue-628]
+last_updated: 2026-10-15
 ---
 
 # Phase 36 — Grok Build adapter (fourth engine, resident ACP host)
@@ -392,9 +392,11 @@ permission pages, the runner configuration page, and an ADR for the engine
 |---|---|---|
 | 1. Registration, launch and minimal ACP host | [#590](https://github.com/sakuraiyuta/kaoiro/issues/590) | ✅ landed 3364c0e8 |
 | 1b. Keep vendor extensions out of `acp/` (before unit 2) | [#597](https://github.com/sakuraiyuta/kaoiro/issues/597) | ✅ landed 0ad1ee5b |
-| 2. Permission and sandbox enforcement | [#591](https://github.com/sakuraiyuta/kaoiro/issues/591) | Implemented; implementation review pending |
+| 1c. Serve the kaoiro tools over authenticated HTTP MCP (before unit 2) | [#604](https://github.com/sakuraiyuta/kaoiro/issues/604) | ✅ landed 8011fb0e |
+| 2. Permission and sandbox enforcement | [#591](https://github.com/sakuraiyuta/kaoiro/issues/591) | ✅ landed 6e7f7b7b |
 | 3. Resume, history replay and catalog probe | [#592](https://github.com/sakuraiyuta/kaoiro/issues/592) | ⏳ |
 | 4. Context usage, live model and effort switching | [#593](https://github.com/sakuraiyuta/kaoiro/issues/593) | ⏳ |
+| 5. Parity as a delegated peer (rate limits, early delivery, reply basis, attachments) | [#628](https://github.com/sakuraiyuta/kaoiro/issues/628) | ⏳ |
 
 ### Unit 2 verification
 
