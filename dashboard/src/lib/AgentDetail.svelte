@@ -1959,25 +1959,29 @@
   // issue #612: engine-independent recovery for a published permission gate.
   // Not gated on isCodexAgent and not dependent on rolled_back_to being absent.
   // The Codex path above is left unchanged; Codex does not emit the gate.
+  // The stop is explained whenever a gate is present. Only the reselect
+  // action and the sentence that promises a resume depend on the switch
+  // capability and the operator callback (issue #612 review S2).
   const permissionGateRecovery = $derived.by(() =>
-    permission !== null ||
-    permissionGate === null ||
-    !permissionSwitchSupported ||
-    onSetPermission === undefined
-      ? null
-      : permissionGate,
+    permission !== null || permissionGate === null ? null : permissionGate,
+  );
+  const permissionGateCanReselect = $derived(
+    permissionSwitchSupported && onSetPermission !== undefined,
   );
   // The guidance text per reason and step. `next_over_ceiling` is a separate
   // text: the same pair cannot be selected again there (issue #612 design).
-  function permissionGateGuidance(gate: PermissionGate): string {
+  function permissionGateGuidance(
+    gate: PermissionGate,
+    canReselect: boolean,
+  ): string {
     if (gate.reason === "observation_unavailable") {
-      return `rev ${gate.revision} の結果を確認できませんでした。権限を選び直すと再開します。`;
+      return `rev ${gate.revision} の結果を確認できませんでした。${canReselect ? "権限を選び直すと再開します。" : ""}`;
     }
     if (gate.step === "next_over_ceiling") {
-      return `サーバの選択 (rev ${gate.revision}) は、再起動後の起動設定の上限を超えています。上限内の権限を選ぶと再開します。同じ組み合わせは、サーバの clamp と wrapper の最終 gate の両方で拒否されるため、選べません。`;
+      return `サーバの選択 (rev ${gate.revision}) は、再起動後の起動設定の上限を超えています。${canReselect ? "上限内の権限を選ぶと再開します。" : ""}同じ組み合わせは、サーバの clamp と wrapper の最終 gate の両方で拒否されるため、選べません。`;
     }
     const step = gate.step === undefined ? "" : ` (${gate.step})`;
-    return `wrapper は rev ${gate.revision}${step} を適用する前に止まっています。サーバの fallback では何も実行されていません。権限を選び直すと再開します（同じ組み合わせでも可）。キャンセルされた指示は再送されません。`;
+    return `wrapper は rev ${gate.revision}${step} を適用する前に止まっています。サーバの fallback では何も実行されていません。${canReselect ? "権限を選び直すと再開します（同じ組み合わせでも可）。" : ""}キャンセルされた指示は再送されません。`;
   }
   // While a gate is present, a rolled_back_to is the server's fallback, not an
   // applied rollback, and the requested permission is unknown.
@@ -4143,7 +4147,7 @@
               rev {permissionGateRecovery.revision}: {permissionGateRecovery.reason}{permissionGateRecovery.step === undefined ? "" : ` (${permissionGateRecovery.step})`}
             </p>
             <p class="permission-note">
-              {permissionGateGuidance(permissionGateRecovery)}
+              {permissionGateGuidance(permissionGateRecovery, permissionGateCanReselect)}
             </p>
           </div>
         {/if}

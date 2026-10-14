@@ -177,18 +177,21 @@ describe("AgentDetail permission gate recovery (issue #612)", () => {
     expect(row).toContain("要求: 不明");
   });
 
-  it("case 3: a refused later selection names the revision of the server fallback", async () => {
+  it("case 3: the guidance names the gate's revision (A), not the refused later selection (B)", async () => {
+    // B (revision 8) was refused after A (revision 7) had started. The stop
+    // belongs to A: the control row shows B, the dock and guidance show A.
     const { target } = await render(
       grokExt({
         permission_control: failedWithFallback("unsupported_permission_pair", 8),
-        permission_gate: gate({ revision: 8, step: "load" }),
+        permission_gate: gate({ revision: 7, step: "load" }),
       }),
     );
     const dock = target.querySelector(".permission-gate-dock")?.textContent ?? "";
-    expect(dock).toContain("rev 8: awaiting_server_next (load)");
-    expect(dock).toContain("wrapper は rev 8 (load) を適用する前に止まっています");
-    expect(dock).not.toContain("rev 7");
+    expect(dock).toContain("rev 7: awaiting_server_next (load)");
+    expect(dock).toContain("wrapper は rev 7 (load) を適用する前に止まっています");
+    expect(dock).not.toContain("rev 8");
     const row = rowByLabel(target, "権限要求")?.textContent ?? "";
+    expect(row).toContain("rev 8");
     expect(row).toContain("サーバの fallback（未適用）");
     expect(row).toContain("read-only");
   });
@@ -276,5 +279,150 @@ describe("AgentDetail permission gate recovery (issue #612)", () => {
     const dock = target.querySelector(".permission-dock")?.textContent ?? "";
     expect(dock).toContain("Bash");
     expect(dock).not.toContain("権限の確認で止まっています");
+  });
+});
+
+/** Grok-shaped controls: the producer's constraints are approval on-request
+ *  and enforcement os (issue #612 review S1). The request is revision 7. */
+function grokControl(status: string): Record<string, unknown> {
+  const requested = { sandbox: "workspace-write", network_access: false };
+  const submitted = { revision: 7, requested, execution_id: "exec-7" };
+  const constraints = { approval: "on-request", enforcement: "os" };
+  switch (status) {
+    case "pending":
+      return control({ constraints, status });
+    case "applying":
+      return control({ constraints, status, submitted });
+    case "applied":
+      return control({
+        constraints,
+        status,
+        submitted,
+        effective: {
+          ...submitted,
+          session_id: "session-g",
+          turn_id: "turn-7",
+          permission: {
+            sandbox: "workspace-write",
+            approval: "on-request",
+            enforcement: "os",
+          },
+          network_access: false,
+        },
+      });
+    case "failed":
+      return control({ constraints, status, reason: "restart_failed" });
+    case "unknown":
+      return control({
+        constraints,
+        status,
+        submitted,
+        reason: "observation_unavailable",
+      });
+    default:
+      throw new Error(`no grok control fixture for ${status}`);
+  }
+}
+
+describe("grok permission request states (issue #612 review S1)", () => {
+  it.each([
+    ["pending", "要求済み (次の turn から適用)"],
+    ["applying", "適用中 (次の実行が取得済み)"],
+    ["applied", "適用済み"],
+    ["failed", "失敗"],
+    ["unknown", "未確認"],
+  ])("the request row shows the %s state for a grok control", async (status, label) => {
+    const { target } = await render(
+      grokExt({ permission_control: grokControl(status) }),
+    );
+    expect(rowByLabel(target, "権限要求")?.textContent).toContain(`rev 7 — ${label}`);
+  });
+
+  it("off-Linux legacy status: the sandbox is shown with no enforcement badge and no picker", async () => {
+    const { target } = await render({
+      engine: "grok",
+      session_capabilities: {
+        supports_attachments: false,
+        supports_user_input_dialog: true,
+      },
+      permission: { sandbox: "danger-full-access", approval: "on-request" },
+    });
+    const dd = rowByLabel(target, "実効書込範囲");
+    expect(dd?.textContent).toContain("danger-full-access");
+    expect(dd?.textContent).not.toContain("advisory");
+    expect(dd?.querySelector("button")).toBeNull();
+  });
+});
+
+/** Render with an explicit operator callback (or none), for the S2 cases. */
+async function renderDetail(
+  ext: Record<string, unknown>,
+  options: { state?: string; onSetPermission?: unknown } = {},
+) {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const props = makeReactivePermissionDetailProps({
+    envelope: envelope(ext, options.state ?? "waiting_input"),
+    connection: connection(),
+    onClose: vi.fn(),
+    onSetPermission: options.onSetPermission as never,
+  });
+  const component = mount(AgentDetail, { target, props });
+  mounted.push(component);
+  await tick();
+  return { target };
+}
+
+const NO_SWITCH_CAPS = {
+  supports_attachments: false,
+  supports_user_input_dialog: true,
+};
+
+describe("permission gate explanation without a switch action (issue #612 review S2)", () => {
+  it("keeps the stop explanation and drops only the reselect sentence when the switch capability is false", async () => {
+    const { target } = await renderDetail({
+      engine: "grok",
+      session_capabilities: NO_SWITCH_CAPS,
+      permission_control: failedWithFallback("restart_failed", 7),
+      permission_gate: gate(),
+    }, { onSetPermission: vi.fn(async () => null) });
+    const dock = target.querySelector(".permission-gate-dock")?.textContent ?? "";
+    expect(dock).toContain("権限の確認で止まっています");
+    expect(dock).toContain("wrapper は rev 7 (spawn) を適用する前に止まっています");
+    expect(dock).not.toContain("権限を選び直すと再開します");
+    (target.querySelector(".toggle") as HTMLElement).click();
+    await tick();
+    expect(target.querySelector(".pending-lamp")?.getAttribute("data-tone")).toBe(
+      "waiting_permission",
+    );
+  });
+
+  it("drops the reselect sentence without the operator callback, even with the capability", async () => {
+    const { target } = await renderDetail(
+      {
+        engine: "grok",
+        session_capabilities: SWITCH_CAPS,
+        permission_control: failedWithFallback("restart_failed", 7),
+        permission_gate: gate(),
+      },
+      { onSetPermission: undefined },
+    );
+    const dock = target.querySelector(".permission-gate-dock")?.textContent ?? "";
+    expect(dock).toContain("wrapper は rev 7 (spawn) を適用する前に止まっています");
+    expect(dock).not.toContain("権限を選び直すと再開します");
+  });
+
+  it("states the resume when the capability and the callback are both present", async () => {
+    const { target } = await renderDetail(
+      {
+        engine: "grok",
+        session_capabilities: SWITCH_CAPS,
+        permission_control: failedWithFallback("restart_failed", 7),
+        permission_gate: gate(),
+      },
+      { onSetPermission: vi.fn(async () => null) },
+    );
+    const dock = target.querySelector(".permission-gate-dock")?.textContent ?? "";
+    expect(dock).toContain("権限を選び直すと再開します（同じ組み合わせでも可）");
   });
 });

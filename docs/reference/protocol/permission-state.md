@@ -288,8 +288,9 @@ A `rolled_back_to` on a control while a gate is present is the server's
 fallback, not applied; it is not a completed rollback. The dashboard labels it
 so.
 
-`restart_failed` is a control reason, not a gate reason: restarting the wrapper
-after a permission switch failed (Grok, issue #591).
+`restart_failed` is a control reason, not a gate reason: starting the child
+process again to apply a permission switch failed (Grok, issue #591). The
+wrapper itself stays alive and waits for the operator's next selection.
 
 ## Related protocol topics
 
