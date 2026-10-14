@@ -41,6 +41,7 @@
     pendingQuestionFrom,
     permissionControlFrom,
     permissionFrom,
+    permissionGateFrom,
     PERMISSION_MODE_AXES,
     resultOf,
     resumeDriftFrom,
@@ -59,6 +60,7 @@
     PersonaManifest,
     PermissionConfiguration,
     PermissionControlStatus,
+    PermissionGate,
     RunnerSessions,
     SessionResetMode,
     SetPermissionAck,
@@ -532,6 +534,9 @@
   const sessionCaps = $derived(sessionCapabilitiesFrom(envelope));
   const contextUsageSupport = $derived(contextUsageSupportFrom(envelope));
   const permControl = $derived(permissionControlFrom(envelope));
+  // issue #612: ext.permission_gate, published by an engine whose dispatch is
+  // blocked by a permission gate (grok, issue #591). Absent for other engines.
+  const permissionGate = $derived(permissionGateFrom(envelope));
   const permissionSwitchSupported = $derived(
     sessionCaps?.supports_permission_switch === true,
   );
@@ -1951,12 +1956,43 @@
       : permRequestView,
   );
 
+  // issue #612: engine-independent recovery for a published permission gate.
+  // Not gated on isCodexAgent and not dependent on rolled_back_to being absent.
+  // The Codex path above is left unchanged; Codex does not emit the gate.
+  const permissionGateRecovery = $derived.by(() =>
+    permission !== null ||
+    permissionGate === null ||
+    !permissionSwitchSupported ||
+    onSetPermission === undefined
+      ? null
+      : permissionGate,
+  );
+  // The guidance text per reason and step. `next_over_ceiling` is a separate
+  // text: the same pair cannot be selected again there (issue #612 design).
+  function permissionGateGuidance(gate: PermissionGate): string {
+    if (gate.reason === "observation_unavailable") {
+      return `rev ${gate.revision} の結果を確認できませんでした。権限を選び直すと再開します。`;
+    }
+    if (gate.step === "next_over_ceiling") {
+      return `サーバの選択 (rev ${gate.revision}) は、再起動後の起動設定の上限を超えています。上限内の権限を選ぶと再開します。同じ組み合わせは、サーバの clamp と wrapper の最終 gate の両方で拒否されるため、選べません。`;
+    }
+    const step = gate.step === undefined ? "" : ` (${gate.step})`;
+    return `wrapper は rev ${gate.revision}${step} を適用する前に止まっています。サーバの fallback では何も実行されていません。権限を選び直すと再開します（同じ組み合わせでも可）。キャンセルされた指示は再送されません。`;
+  }
+  // While a gate is present, a rolled_back_to is the server's fallback, not an
+  // applied rollback, and the requested permission is unknown.
+  const rolledBackLabel = $derived(
+    permissionGate === null
+      ? "適用前に戻した設定"
+      : "サーバの fallback（未適用）",
+  );
+
   // Handle lamp for the status sheet (phase-31 31-6): while the sheet is
   // open the in-flow permission/question docks sit behind it, so the
   // current agent's pending decision must stay noticeable on the handle
   // (responsive-layout.md MUST). Mirrors the dock render gates.
   const sheetPendingTone = $derived(
-    permission || codexPermissionGateRecovery
+    permission || codexPermissionGateRecovery || permissionGate !== null
       ? "waiting_permission"
       : question && dialogAvailability !== "unsupported"
         ? "waiting_question"
@@ -3503,10 +3539,14 @@
                     permRequestView.status
                   ]}
                   <span class="axes-hint">
-                    要求: 書込 {permRequestView.requested.sandbox} / network
-                    {permRequestView.requested.network_access}{#if permRequestView
-                      .requested.approval} / 承認 {permRequestView.requested
-                      .approval}{/if}
+                    {#if permissionGate === null}
+                      要求: 書込 {permRequestView.requested.sandbox} / network
+                      {permRequestView.requested.network_access}{#if permRequestView
+                        .requested.approval} / 承認 {permRequestView.requested
+                        .approval}{/if}
+                    {:else}
+                      要求: 不明（サーバの選択は未確定）
+                    {/if}
                   </span>
                   {#if permRequestView.reason}
                     <span class="axes-hint">理由: {permRequestView.reason}</span>
@@ -3518,7 +3558,7 @@
                   {/if}
                   {#if permRequestView.rolledBackTo}
                     <span class="axes-hint">
-                      適用前に戻した設定: 書込 {permRequestView.rolledBackTo
+                      {rolledBackLabel}: 書込 {permRequestView.rolledBackTo
                         .sandbox} / network {permRequestView.rolledBackTo
                         .network_access}{#if permRequestView.rolledBackTo
                         .approval} / 承認 {permRequestView.rolledBackTo
@@ -4096,6 +4136,16 @@
               </div>
             </div>
           {/if}
+        {:else if permissionGateRecovery}
+          <div class="permission-dock permission-gate-dock">
+            <p class="permission-tool">権限の確認で止まっています</p>
+            <p class="permission-note">
+              rev {permissionGateRecovery.revision}: {permissionGateRecovery.reason}{permissionGateRecovery.step === undefined ? "" : ` (${permissionGateRecovery.step})`}
+            </p>
+            <p class="permission-note">
+              {permissionGateGuidance(permissionGateRecovery)}
+            </p>
+          </div>
         {/if}
 
         {#if question && dialogAvailability !== "unsupported"}

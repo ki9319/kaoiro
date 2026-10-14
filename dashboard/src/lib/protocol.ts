@@ -247,6 +247,73 @@ const PERMISSION_CONTROL_STATUSES: ReadonlySet<string> = new Set([
   "unknown",
 ]);
 
+/** ext.permission_gate (issue #612; `PermissionGateExt` in @kaoiro/protocol).
+ *  Operator-only and optional: present while an agent's dispatch is blocked by
+ *  a permission gate. Only the fields this client renders are kept. */
+export type PermissionGateReason =
+  | "awaiting_server_next"
+  | "observation_unavailable";
+
+export type PermissionGateStep =
+  | "inspect"
+  | "spawn"
+  | "initialize"
+  | "load"
+  | "readiness"
+  | "loading_exit"
+  | "deadline"
+  | "next_over_ceiling";
+
+export interface PermissionGate {
+  reason: PermissionGateReason;
+  revision: number;
+  step?: PermissionGateStep;
+  since: string;
+}
+
+const PERMISSION_GATE_REASONS: ReadonlySet<string> = new Set([
+  "awaiting_server_next",
+  "observation_unavailable",
+]);
+
+const PERMISSION_GATE_STEPS: ReadonlySet<string> = new Set([
+  "inspect",
+  "spawn",
+  "initialize",
+  "load",
+  "readiness",
+  "loading_exit",
+  "deadline",
+  "next_over_ceiling",
+]);
+
+/** A malformed gate reads as absent, the same convention as
+ *  `permissionControlFrom`: a field this client cannot read is not rendered. */
+export function permissionGateFrom(envelope: Envelope): PermissionGate | null {
+  const raw = envelope.ext?.permission_gate;
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  if (r.status !== "blocked") return null;
+  if (typeof r.reason !== "string" || !PERMISSION_GATE_REASONS.has(r.reason)) {
+    return null;
+  }
+  const revision = revisionOf(r.revision);
+  if (revision === null) return null;
+  if (typeof r.since !== "string") return null;
+  if (
+    r.step !== undefined &&
+    (typeof r.step !== "string" || !PERMISSION_GATE_STEPS.has(r.step))
+  ) {
+    return null;
+  }
+  return {
+    reason: r.reason as PermissionGateReason,
+    revision,
+    since: r.since,
+    ...(r.step === undefined ? {} : { step: r.step as PermissionGateStep }),
+  };
+}
+
 /** The closed value domains `PermissionAxesExt` declares (`@kaoiro/protocol`
  *  index.ts). Every enum-typed field an evidence record carries is checked
  *  against these — the class of defect here was a parser that validated
