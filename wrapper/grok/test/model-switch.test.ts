@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Envelope, WrapperConfig } from "@kaoiro/agent-common";
+import { AcpSession } from "../src/acp/session.js";
 import { GrokHost, type GrokHostOptions } from "../src/host.js";
 
 const executable = fileURLToPath(new URL("./fixtures/grok.mjs", import.meta.url));
@@ -58,6 +59,21 @@ const firstCall = (t: Started) => vi.waitFor(() => expect(t.modelCalls()).toHave
 const modelIs = (t: Started, model: string) =>
   vi.waitFor(() => expect(t.ext().model).toBe(model), { timeout: 10_000 });
 const choose = (revision: number) => ({ revision, requested: { sandbox: "read-only" as const, network_access: false } });
+
+// Holds the model request for `target` until `open` is called, so a test can
+// ask for something else while that request is in flight.
+function holdModelRequest(target: string) {
+  const real = AcpSession.prototype.setConfigOption;
+  let open!: () => void;
+  let enter!: () => void;
+  const held = new Promise<void>((resolve) => { open = resolve; });
+  const entered = new Promise<void>((resolve) => { enter = resolve; });
+  vi.spyOn(AcpSession.prototype, "setConfigOption").mockImplementation(async function (this: AcpSession, id, value) {
+    if (id === "model" && value === target) { enter(); await held; }
+    return real.call(this, id, value);
+  });
+  return { open, entered };
+}
 
 describe("catalog and capabilities", () => {
   it("publishes the models and the selection Grok reports, and advertises the switches", async () => {
@@ -205,6 +221,42 @@ describe("switch outcomes", () => {
     t.release();
     await turn;
     await modelIs(t, "grok-4.5");
+    expect(t.requests()).toEqual([["model", "grok-4.5"]]);
+  });
+
+  it("accepts an effort that only the model in flight offers", async () => {
+    const t = await started();
+    await t.host.setModel("grok-4.5");
+    await modelIs(t, "grok-4.5");
+    const hold = holdModelRequest("grok-4.7");
+    try {
+      await t.host.setModel("grok-4.7");
+      await hold.entered;
+      expect(t.ext().pending_model).toBe("grok-4.7");
+      await t.host.setEffort("xhigh");
+      expect(t.ext().pending_effort).toBe("xhigh");
+      expect(t.states().some((e) => e.ext?.switch_error)).toBe(false);
+    } finally { hold.open(); }
+    await vi.waitFor(() => expect(t.ext().effort).toBe("xhigh"), { timeout: 10_000 });
+    expect(t.ext()).toMatchObject({ model: "grok-4.7", effort: "xhigh" });
+    expect(t.requests()).toEqual([["model", "grok-4.5"], ["model", "grok-4.7"], ["reasoning_effort", "xhigh"]]);
+    expect(t.states().some((e) => e.ext?.switch_error)).toBe(false);
+  });
+
+  it("rejects an effort that the model in flight does not offer", async () => {
+    const t = await started();
+    const hold = holdModelRequest("grok-4.5");
+    try {
+      await t.host.setModel("grok-4.5");
+      await hold.entered;
+      await t.host.setEffort("xhigh");
+      expect(t.states().filter((e) => e.ext?.switch_error).map((e) => e.ext!.switch_error)).toEqual([
+        { kind: "effort", requested: "xhigh", reason: "control_rejected", rolled_back_to: "high" },
+      ]);
+      expect(t.ext()).not.toHaveProperty("pending_effort");
+    } finally { hold.open(); }
+    await modelIs(t, "grok-4.5");
+    expect(t.ext().effort).toBe("high");
     expect(t.requests()).toEqual([["model", "grok-4.5"]]);
   });
 

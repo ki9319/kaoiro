@@ -894,7 +894,7 @@ export class GrokHost implements EngineAdapter {
   }
   async setEffort(value: string) {
     const selection = this.#requireSwitchable("effort");
-    const target = this.#pending.model ?? selection.model;
+    const target = this.#pending.model ?? this.#inflight.model ?? selection.model;
     const levels = this.#catalog.find((entry) => entry.value === target)?.effort_levels ?? [];
     if (!levels.includes(value)) return this.#rejectSwitch("effort", value, selection.effort);
     this.#pending = { ...this.#pending, effort: value };
