@@ -102,14 +102,36 @@ describe("assistant log projection", () => {
     expect(envelopes.find(e => e.type === "result")?.payload.text)
       .toBe("Before toolAfter tool");
   });
-  it("clips a joined 20 KiB log while preserving the full result", async () => {
+  it("clips a joined 20 KiB log and the result to 16 KiB", async () => {
     const { host, envelopes } = await started();
     await host.send("large-chunks");
     expect(assistantLogs(envelopes).map(e => e.payload)).toEqual([
       { kind: "assistant", text: "x".repeat(16 * 1024), truncated: true },
     ]);
     expect(envelopes.find(e => e.type === "result")?.payload.text)
-      .toBe("x".repeat(20 * 1024));
+      .toBe("x".repeat(16 * 1024));
+  });
+  it("keeps a 70,000-byte reply's result envelope under the server limit", async () => {
+    const { host, envelopes } = await started();
+    await host.send("reply-70000");
+    const result = envelopes.find(e => e.type === "result")!;
+    expect(result.payload.text).toBe("x".repeat(16 * 1024));
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(65_536);
+    expect(assistantLogs(envelopes).map(e => e.payload)).toEqual([
+      { kind: "assistant", text: "x".repeat(16 * 1024), truncated: true },
+    ]);
+    expect(host.state).toBe("waiting_input");
+  });
+  it.each([
+    { size: 16_384, clipped: false },
+    { size: 16_385, clipped: true },
+  ])("clips a $size-byte result only above 16,384 bytes", async ({ size, clipped }) => {
+    const { host, envelopes } = await started();
+    await host.send(`reply-${size}`);
+    expect(envelopes.find(e => e.type === "result")?.payload.text)
+      .toBe("x".repeat(16 * 1024));
+    expect(assistantLogs(envelopes).map(e => e.payload.truncated === true))
+      .toEqual([clipped]);
   });
   it("emits no assistant log for non-text chunks or thoughts", async () => {
     const { host, envelopes } = await started();

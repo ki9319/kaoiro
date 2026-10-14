@@ -7,6 +7,7 @@ import { createPermissionState, setPermissionSyncSupport, requestPermission,
   withinCeiling, effectiveNetworkAccess, type PermissionState } from "./permission_state.js";
 import type * as acp from "@agentclientprotocol/sdk";
 import {
+  clipText,
   initialMachineState,
   logEntryToPayload,
   makeLog,
@@ -569,7 +570,7 @@ export class GrokHost implements EngineAdapter {
           this.#options.config,
           new Date().toISOString(),
           {
-            text: this.#text,
+            text: clipText(this.#text).text,
             is_error: rejected,
             ...(rejected ? { error_code: "permission_rejected" } : {}),
           },

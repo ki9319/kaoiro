@@ -226,6 +226,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           } else finish(msg.id, "");
           break;
         }
+        const reply = /^reply-(\d+)$/.exec(text);
+        if (reply) {
+          for (let left = Number(reply[1]); left > 0; left -= 10_000)
+            textChunk("x".repeat(Math.min(left, 10_000)));
+          finish(msg.id, "");
+          break;
+        }
         if (text === "large-chunks") {
           textChunk("x".repeat(10 * 1024));
           textChunk("x".repeat(10 * 1024));
