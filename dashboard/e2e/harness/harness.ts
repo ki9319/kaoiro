@@ -9,13 +9,16 @@
 //     [&statusLine=hostile|unset|cleared|cutlink|omitted]
 //   ?view=overlay&overlay=dialog|drawer|persona|dialog-triggered|drawer-triggered
 //     |status-line-history
-//   ?view=app        — real App.svelte behind fetch mocks (header chrome)
+//   ?view=app[&offline=N][&live=M] — real App.svelte behind fetch mocks (header
+//     chrome); with offline or live, behind a Phoenix-wire stand-in that joins as
+//     an operator and hands over M live agents and N offline directory entries
 import { mount } from "svelte";
 import "../../src/app.css";
 import App from "../../src/App.svelte";
 import DetailHarness from "./DetailHarness.svelte";
 import LobbyHarness from "./LobbyHarness.svelte";
 import OverlayHarness from "./OverlayHarness.svelte";
+import { installFakeLobbySocket } from "./fakeLobbySocket";
 import type { DetailScenario } from "./fixtures";
 import { personaSpriteManifest, statusLineViewNamed } from "./fixtures";
 
@@ -62,6 +65,9 @@ function mockAppFetch(): void {
 
 if (view === "app") {
   mockAppFetch();
+  const offline = Number(params.get("offline") ?? 0);
+  const live = Number(params.get("live") ?? 0);
+  if (offline > 0 || live > 0) installFakeLobbySocket({ offline, live });
   mount(App, { target });
 } else if (view === "detail") {
   const scenario: DetailScenario = {};

@@ -65,4 +65,22 @@ describe("実機検収 1 regression pin: offline section grid CSS", () => {
     expect(liveList).toMatch(/overflow-y:\s*auto/);
     expect(agentGridShellSource).toMatch(/\.fit-viewport :global\(\.timeline\)/);
   });
+
+  // The declarations above only take effect on the list if its parent box is
+  // the shrinking flex column. The effect itself is pinned in the real browser
+  // (e2e/offline.spec.ts); this pins that the rule exists and stands alone.
+  it("makes the ::details-content box the shrinking flex column, in a rule of its own", () => {
+    const selector = ".dashboard.with-offline .offline[open]::details-content";
+    const box = block(appSvelteSource, selector);
+    expect(box, "`::details-content` rule missing").not.toBeNull();
+    expect(box).toMatch(/display:\s*flex/);
+    expect(box).toMatch(/flex-direction:\s*column/);
+    expect(box).toMatch(/flex:\s*1 1 auto/);
+    expect(box).toMatch(/min-block-size:\s*0/);
+    // An engine that does not know the pseudo-element drops every member of a
+    // selector list that contains it.
+    const at = appSvelteSource.indexOf(selector);
+    expect(appSvelteSource.slice(0, at).trimEnd().endsWith(",")).toBe(false);
+    expect(appSvelteSource.slice(at + selector.length).trimStart().startsWith(",")).toBe(false);
+  });
 });

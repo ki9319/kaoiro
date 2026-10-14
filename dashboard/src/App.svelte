@@ -2662,6 +2662,19 @@
     overflow: hidden;
   }
 
+  /* Where ::details-content exists (Chrome 131, Safari 18.4, Firefox 143) the
+     contents of a <details> sit in that box, not directly in the flex column
+     above, so the list's flex and overflow rules below have nothing to act on
+     and the clipped list could not be scrolled. The box is itself the flex
+     column that shrinks. Kept as its own rule: an engine without the
+     pseudo-element drops the whole rule that mentions it. */
+  .dashboard.with-offline .offline[open]::details-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-block-size: 0;
+  }
+
   .offline > summary {
     display: flex;
     align-items: center;
