@@ -1,6 +1,6 @@
 ---
 title: Grok Build as a resident ACP engine
-status: proposed
+status: accepted
 date: 2026-10-14
 related: [issue-589, issue-590]
 ---
@@ -33,4 +33,3 @@ Metadata-only diagnostics prevent unknown SDK variants from leaking content.
 Cold resume, history, catalog probing, context usage and live model/effort
 switching belong to later work units. Individual Claude hooks and upstream
 reports are outside this work. Production enabling requires operator approval.
-The number is provisional until landing.

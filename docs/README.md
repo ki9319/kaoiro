@@ -80,7 +80,7 @@ kaoiro documentation. The pre-taxonomy folders (specs / plans / open-questions) 
 | [0053](adr/0053-build-identity.md) | Introduce build identity and separate it from the protocol version | accepted |
 | [0054](adr/0054-fatigue-as-orthogonal-persona-modifier.md) | Treat fatigue as a persona modifier separate from protocol state | accepted |
 | [0055](adr/0055-compaction-resume-and-lifecycle-log.md) | Automatic resume after compaction and retaining a session-lifecycle timeline | accepted |
-| [0056](adr/0056-project-calver-build-version.md) | Adopt one lockstep CalVer project version and explicit build channels | accepted |
+| [0056](adr/0056-project-calver-build-version.md) | Adopt one lockstep CalVer project version and explicit build channels | superseded |
 | [0057](adr/0057-antigravity-adapter.md) | Add a Google Antigravity adapter as the third engine, driving the agy CLI headless with a hook-based permission gate | accepted |
 | [0058](adr/0058-codex-app-server-turn-steer.md) | Codex app-server transport and in-flight turn steering | accepted |
 | [0059](adr/0059-launcher-owned-runner-pairing.md) | Launcher-owned runner token pairing for dev.sh and dogfood.sh | accepted |
@@ -88,8 +88,10 @@ kaoiro documentation. The pre-taxonomy folders (specs / plans / open-questions) 
 | [0061](adr/0061-dashboard-operator-bulk-reset.md) | Dashboard operator bulk close + bulk session reset | accepted |
 | [0062](adr/0062-input-bound-inter-agent-replies.md) | Input-bound inter-agent replies | accepted |
 | [0063](adr/0063-layered-delivery-authority-and-continuations.md) | Layered inter-agent delivery, authority and continuation admission | accepted |
-| [0067](adr/0067-grok-resident-acp-host.md) | Grok Build as a resident ACP engine | proposed |
 | [0064](adr/0064-codex-app-server-approval-requests.md) | Codex approval requests over the app-server transport | accepted |
+| [0065](adr/0065-footer-changes-on-resumed-sessions.md) | Footer changes do not reach resumed sessions, by design | accepted |
+| [0066](adr/0066-tag-derived-lockstep-build-identity.md) | Derive lockstep build identity from immutable landing tags | accepted |
+| [0067](adr/0067-grok-resident-acp-host.md) | Grok Build as a resident ACP engine | accepted |
 <!-- adr-index:end -->
 
 Regenerate with the `my-docs-restructure` skill's `scripts/build-adr-index.sh docs` (the script lives in the skill, not in this repository). Do not edit inside the markers manually.
