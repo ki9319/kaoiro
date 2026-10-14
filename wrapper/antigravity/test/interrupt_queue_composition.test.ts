@@ -157,6 +157,10 @@ describe("Antigravity ordinary interrupt preserves the queued peer turn (issue #
   it("retires a queued peer batch once on a gate trip, then dispatches that peer's next batch", async () => {
     const root = mkdtempSync(join(tmpdir(), "kaoiro-agy-541-"));
     const lifecycleOutput: string[] = [];
+    const readLifecycle = () => lifecycleOutput.join("").split("\n")
+      .filter((line) => line.startsWith("[kaoiro][antigravity-lifecycle] "))
+      .map((line) => JSON.parse(line.slice(line.indexOf("{"))) as
+        Record<string, unknown> & { event: string });
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
       lifecycleOutput.push(String(chunk));
       return true;
@@ -252,6 +256,14 @@ describe("Antigravity ordinary interrupt preserves the queued peer turn (issue #
       );
       expect(sent.some((envelope) => envelope.type === "result" && JSON.stringify(envelope.payload).includes("second turn ran"))).toBe(true);
 
+      // This one-shot fixture exits after its result. The failure turn
+      // needs a fresh epoch, rather than a write to its closing stdin.
+      await waitFor(
+        () => readLifecycle().some((event) => event.event === "epoch_ended" &&
+          event.reason === "idle_exit" && event.turns === 1),
+        () => ({ acknowledgements, lifecycle: readLifecycle() }),
+        12_000,
+      );
       await deliver(inbound("peer2", 4, "KUROE541_FAIL", 3, "c-peer2-first"));
       await waitFor(
         () => acknowledgements.includes(4) && sent.some((envelope) => {
@@ -271,9 +283,7 @@ describe("Antigravity ordinary interrupt preserves the queued peer turn (issue #
           payload.error?.code === "api_error";
       })).toHaveLength(1);
 
-      const lifecycle = lifecycleOutput.join("").split("\n")
-        .filter((line) => line.startsWith("[kaoiro][antigravity-lifecycle] "))
-        .map((line) => JSON.parse(line.slice(line.indexOf("{") )) as Record<string, unknown> & { event: string });
+      const lifecycle = readLifecycle();
       expect(lifecycle).toContainEqual(expect.objectContaining({
         event: "gate_fault",
         fault_class: "tool_completion_unobserved",
