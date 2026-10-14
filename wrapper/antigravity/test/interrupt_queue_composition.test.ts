@@ -258,6 +258,7 @@ describe("Antigravity ordinary interrupt preserves the queued peer turn (issue #
 
       // This one-shot fixture exits after its result. The failure turn
       // needs a fresh epoch, rather than a write to its closing stdin.
+      // The same exit-before-close window in production is issue #602.
       await waitFor(
         () => readLifecycle().some((event) => event.event === "epoch_ended" &&
           event.reason === "idle_exit" && event.turns === 1),
