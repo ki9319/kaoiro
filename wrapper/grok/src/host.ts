@@ -92,6 +92,9 @@ const MCP_READY_TIMEOUT_MS = 15_000;
 // Metadata held per loading generation until promotion; a memory bound, well
 // above the few dozen lines a start-up sends.
 const LOADING_METADATA_LIMIT = 256;
+// session/load replays the history as session/update and Grok's own records,
+// past hook executions included, as _x.ai/session/update.
+const LOAD_REPLAY_METHODS = new Set(["session/update", "_x.ai/session/update"]);
 type LaneStep = "stopping" | "inspect" | "spawn" | "initialize" | "load" | "readiness" | "promotion";
 interface Generation {
   role: "current" | "loading" | "retired";
@@ -683,11 +686,11 @@ export class GrokHost implements EngineAdapter {
     );
   }
   // Grok sends the session_start hook after the session/new or session/load
-  // response, while the generation is still loading (issue #633). Its
+  // response, often while the generation is still loading (issue #633). Its
   // metadata is held and published only if the generation is promoted. The
-  // load replay (session/update) is not held.
+  // load replay is not held.
   #hold(generation: Generation, metadata: GrokWireMetadata) {
-    if (metadata.method === "session/update") return;
+    if (metadata.method && LOAD_REPLAY_METHODS.has(metadata.method)) return;
     if (generation.held.length < LOADING_METADATA_LIMIT) generation.held.push(metadata);
     else generation.heldDropped += 1;
   }

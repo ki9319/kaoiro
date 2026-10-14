@@ -164,11 +164,12 @@ retired-generation callbacks cannot affect turns or permission observations.
 Close aborts the lane and waits for every generation it created.
 
 Grok sends the `session_start` hook execution after the `session/new` or
-`session/load` response, so it arrives while the generation is loading
+`session/load` response, often while the generation is loading
 ([evidence](../../evidence/grok/2026-10-15-session-start-hook.md)). A loading
-generation's wire metadata is therefore held, without its `session/update`
-replay lines and up to 256 records, and published in order when the
-generation is promoted. Records beyond the bound are reported as one
+generation's wire metadata is therefore held, up to 256 records, and
+published in order when the generation is promoted. The load replay is not
+held: `session/update` and Grok's `_x.ai/session/update`, which replays past
+hook executions. Records beyond the bound are reported as one
 `loading_lines_dropped` count. A generation that is never promoted is retired
 with its held metadata dropped, so nothing it saw is attributed to the
 session.

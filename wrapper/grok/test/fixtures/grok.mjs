@@ -156,6 +156,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         if (!loading) rules = msg.params._meta.rules;
         if (loading) {
           update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "REPLAY_ONLY" } });
+          // Grok replays past hook executions on load (issue 633).
+          notification("_x.ai/session/update", {
+            sessionId: sid, update: { sessionUpdate: "hook_execution", event_name: "session_start", runs: [] },
+          });
           notification("_x.ai/session_notification", {
             sessionId: sid, update: { sessionUpdate: "turn_completed", prompt_id: "replayed-id" },
           });

@@ -425,6 +425,7 @@ describe("metadata of a loading generation (issue #633)", () => {
     const window = metadata.slice(load, prompt);
     expect(window.some(isStart)).toBe(true);
     expect(window.some(m => m.method === "session/update")).toBe(false);
+    expect(window.some(m => m.method === "_x.ai/session/update")).toBe(false);
   });
   for (const fault of ["exit", "close"]) {
     it(`drops the metadata of a generation that fails at readiness (${fault})`, async () => {
