@@ -92,6 +92,12 @@ describe("utf8HeadEnd (issue #624)", () => {
     expect(utf8HeadEnd(bytes, 8)).toBe(5);
   });
 
+  it("returns 0 for a cap of zero or less", () => {
+    const bytes = Buffer.from("abc", "utf8");
+    expect(utf8HeadEnd(bytes, 0)).toBe(0);
+    expect(utf8HeadEnd(bytes, -1)).toBe(0);
+  });
+
   it("never steps below zero", () => {
     expect(utf8HeadEnd(Uint8Array.from([0x80, 0x80, 0x80]), 1)).toBe(0);
   });
