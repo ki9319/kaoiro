@@ -16,6 +16,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyInterAgentError } from "@kaoiro/agent-common";
+import { clipUtf8Tail } from "@kaoiro/wrapper-core";
 
 const MAX_EVENTS = 24;
 const MAX_STDERR_BYTES = 8192;
@@ -88,17 +89,13 @@ export async function ensureCodexTurnTraceDir(directory: string): Promise<void> 
   await chmod(directory, 0o700);
 }
 
-/** Keeps the LAST `maxBytes` UTF-8 bytes of `value` (a cut may land
- *  mid-codepoint; toString renders the partial byte as U+FFFD). Exported
- *  for reuse by adapter.ts's operator-facing stderr-tail extraction
- *  (issue #300) -- same byte-safe tail-take, different consumer; this
- *  file's own trace output stays host-private regardless of who else
- *  calls this helper. */
+/** Keeps the longest tail of whole characters within `maxBytes` of UTF-8
+ *  (issue #624: a plain byte cut could gain U+FFFD and exceed the cap).
+ *  Exported for reuse by adapter.ts's operator-facing stderr-tail extraction
+ *  (issue #300) -- same tail-take, different consumer; this file's own trace
+ *  output stays host-private regardless of who else calls this helper. */
 export function clipTail(value: string, maxBytes: number): string {
-  const bytes = Buffer.from(value, "utf8");
-  return bytes.length <= maxBytes
-    ? value
-    : bytes.subarray(bytes.length - maxBytes).toString("utf8");
+  return clipUtf8Tail(value, maxBytes);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

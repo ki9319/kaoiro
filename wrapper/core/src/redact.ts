@@ -11,18 +11,18 @@
 // under-masking is not. Deliberately does NOT touch filesystem paths
 // (including home directories) -- those are not credentials.
 
+import { clipUtf8Head } from "./utf8_clip.js";
+
 /** Shared UTF-8 cap for wrapper diagnostics and relayed error detail. */
 export const MAX_LOG_BYTES = 16_384;
 
-/** Clips text to MAX_LOG_BYTES of UTF-8, flagging truncation. */
+/** Clips text to MAX_LOG_BYTES of UTF-8 at a character boundary, flagging
+ *  truncation. */
 export function clipText(text: string): { text: string; truncated: boolean } {
   if (Buffer.byteLength(text, "utf8") <= MAX_LOG_BYTES) {
     return { text, truncated: false };
   }
-  return {
-    text: Buffer.from(text, "utf8").subarray(0, MAX_LOG_BYTES).toString("utf8"),
-    truncated: true,
-  };
+  return { text: clipUtf8Head(text, MAX_LOG_BYTES), truncated: true };
 }
 
 /** Masks a matched secret-shaped value to security.md's convention (at

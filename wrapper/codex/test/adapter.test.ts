@@ -543,6 +543,24 @@ describe("codexErrorClassification (issue #300)", () => {
       Buffer.byteLength(result?.error_code ?? "", "utf8"),
     ).toBeLessThanOrEqual(MAX_ERROR_CODE_BYTES);
   });
+
+  it.each([
+    ["2-byte", "\u00e9"],
+    ["3-byte", "\u3042"],
+    ["4-byte", "\u{1F600}"],
+  ])("cuts a %s error code at every offset at a character boundary (issue #624)", (_name, char) => {
+    for (let pad = 0; pad < 4; pad += 1) {
+      const value = "p".repeat(pad) + char.repeat(MAX_ERROR_CODE_BYTES);
+      const code = codexErrorClassification({ message: "x", code: value })
+        ?.error_code ?? "";
+      const bytes = Buffer.byteLength(code, "utf8");
+      expect(value.startsWith(code)).toBe(true);
+      expect(bytes).toBeLessThanOrEqual(MAX_ERROR_CODE_BYTES);
+      expect(bytes).toBeGreaterThan(
+        MAX_ERROR_CODE_BYTES - Buffer.byteLength(char, "utf8"),
+      );
+    }
+  });
 });
 
 describe("codexExecFailureRelay (issue #300)", () => {
@@ -623,5 +641,15 @@ describe("codexExecFailureRelay (issue #300)", () => {
     // visible by design) -- so it surviving raw proves masking never saw
     // the "api_key=" anchor, i.e. the clip ran first and cut it away.
     expect(relay.error_detail).not.toContain("def1");
+  });
+
+  it.each([0, 1, 2, 3])("keeps a 4-byte tail with %i padding at a character boundary (issue #624)", (pad) => {
+    const tail = "\u{1F600}".repeat(MAX_RELAYED_STDERR_TAIL_BYTES) + "p".repeat(pad);
+    const relay = codexExecFailureRelay(`Codex Exec exited with code 1: ${tail}`);
+    expect(tail.endsWith(relay.error_detail)).toBe(true);
+    expect(Buffer.byteLength(relay.error_detail, "utf8")).toBeLessThanOrEqual(
+      MAX_RELAYED_STDERR_TAIL_BYTES,
+    );
+    expect(relay.error_detail).not.toContain("\uFFFD");
   });
 });

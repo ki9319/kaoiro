@@ -11,6 +11,7 @@ import type {
   TasklistSourceItem,
 } from "@kaoiro/agent-common";
 import { redactCredentials } from "@kaoiro/agent-common";
+import { clipUtf8Head } from "@kaoiro/wrapper-core";
 import { clipTail } from "./turn_diagnostics.js";
 
 /** Tool-ish items: they occupy the tool_running state between item.started
@@ -352,26 +353,11 @@ interface CodexErrorCodeInfo {
  *  before the table lookup never changes behavior for a legitimate code. */
 export const MAX_ERROR_CODE_BYTES = 256;
 
-/** A straight byte cut (as clipTail uses for the tail-clip case) can land
- *  mid-codepoint; toString("utf8") then substitutes a 3-byte U+FFFD for
- *  the dangling partial sequence, which can push the decoded string's own
- *  byte length back OVER MAX_ERROR_CODE_BYTES -- defeating the very bound
- *  this function exists to enforce (review finding, issue #300 round 2).
- *  Back off byte-by-byte from the cut point with a fatal decoder until the
- *  prefix is valid UTF-8 on its own, so the result never gains a
- *  cut-induced character and its byte length never exceeds the bound. */
+/** A straight byte cut can land mid-codepoint, and the decoded U+FFFD can
+ *  push the result back over MAX_ERROR_CODE_BYTES (issue #300 round 2), so
+ *  the clip stops at a character boundary. */
 function clipErrorCode(value: string): string {
-  const bytes = Buffer.from(value, "utf8");
-  if (bytes.length <= MAX_ERROR_CODE_BYTES) return value;
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  for (let end = MAX_ERROR_CODE_BYTES; end > 0; end--) {
-    try {
-      return decoder.decode(bytes.subarray(0, end));
-    } catch {
-      continue;
-    }
-  }
-  return "";
+  return clipUtf8Head(value, MAX_ERROR_CODE_BYTES);
 }
 
 /** Closed, wrapper-owned code -> {summary, hint} table for Codex's own

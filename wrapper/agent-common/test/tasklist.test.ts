@@ -41,6 +41,24 @@ describe("normalizeTasklist", () => {
     expect(text).toBe("あ".repeat(85));
   });
 
+  it.each([
+    ["2-byte", "\u00e9"],
+    ["3-byte", "\u3042"],
+    ["4-byte", "\u{1F600}"],
+  ])("cuts %s text at every offset at a character boundary (issue #624)", (_name, char) => {
+    for (let pad = 0; pad < 4; pad += 1) {
+      const source = "p".repeat(pad) + char.repeat(MAX_TASKLIST_ITEM_TEXT_BYTES);
+      const text = normalizeTasklist([{ text: source, status: "pending" }])
+        .items[0]?.text ?? "";
+      const bytes = Buffer.byteLength(text, "utf8");
+      expect(source.startsWith(text)).toBe(true);
+      expect(bytes).toBeLessThanOrEqual(MAX_TASKLIST_ITEM_TEXT_BYTES);
+      expect(bytes).toBeGreaterThan(
+        MAX_TASKLIST_ITEM_TEXT_BYTES - Buffer.byteLength(char, "utf8"),
+      );
+    }
+  });
+
   it("text がちょうど256 UTF-8 bytes なら切らない", () => {
     const text = "a".repeat(MAX_TASKLIST_ITEM_TEXT_BYTES);
 

@@ -15,6 +15,7 @@ import { OfficeParser } from "officeparser";
 import { PDFDocument } from "pdf-lib";
 import sharp from "sharp";
 import type { FileUploadRejectReason } from "@kaoiro/protocol";
+import { utf8HeadEnd } from "@kaoiro/wrapper-core";
 
 /** Allowed image MIMEs (file-upload spec). Render path: image content
  *  block (renderImageBlock). */
@@ -445,7 +446,7 @@ export function renderTextBlock(
   let truncatedNote = "";
   let slice = bytes;
   if (bytes.byteLength > TEXT_SDK_BYTE_LIMIT) {
-    slice = bytes.subarray(0, TEXT_SDK_BYTE_LIMIT);
+    slice = bytes.subarray(0, utf8HeadEnd(bytes, TEXT_SDK_BYTE_LIMIT));
     truncatedNote = `\n\n[...truncated, original ${bytes.byteLength} bytes]\n`;
   }
   const body = new TextDecoder("utf-8").decode(slice);

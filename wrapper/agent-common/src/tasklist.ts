@@ -3,6 +3,7 @@
 // here prevents Claude/Codex drift before either reaches the common task
 // envelope builder.
 
+import { clipUtf8Head } from "@kaoiro/wrapper-core";
 import type {
   TasklistItem,
   TasklistItemStatus,
@@ -28,21 +29,6 @@ export interface TasklistSnapshot {
   omitted?: TasklistOmitted;
 }
 
-/** Clips a string at a UTF-8 code-point boundary. Unlike a raw Buffer slice,
- * this never introduces U+FFFD into a task text merely to fit the wire cap. */
-function clipUtf8(text: string, maxBytes: number): string {
-  const bytes = Buffer.from(text, "utf8");
-  if (bytes.byteLength <= maxBytes) return text;
-
-  let end = maxBytes;
-  while (end > 0) {
-    const byte = bytes[end];
-    if (byte === undefined || (byte & 0b1100_0000) !== 0b1000_0000) break;
-    end -= 1;
-  }
-  return bytes.subarray(0, end).toString("utf8");
-}
-
 /**
  * Normalizes an engine's whole-list source event into the bounded wire form.
  * The first items are retained in source order. Any remainder is represented
@@ -59,7 +45,7 @@ export function normalizeTasklist(
   for (const candidate of source) {
     if (items.length >= MAX_TASKLIST_ITEMS) break;
     const item: TasklistItem = {
-      text: clipUtf8(candidate.text, MAX_TASKLIST_ITEM_TEXT_BYTES),
+      text: clipUtf8Head(candidate.text, MAX_TASKLIST_ITEM_TEXT_BYTES),
       status: candidate.status,
     };
     if (

@@ -387,6 +387,12 @@ describe("boundErrorDetail (issue #300 round 3, finding M-B: the mask-then-clip 
     const text = "tool crashed: EACCES";
     expect(boundErrorDetail(text)).toBe(text);
   });
+
+  it("clips multi-byte text at a character boundary within MAX_LOG_BYTES (issue #624)", () => {
+    const detail = boundErrorDetail("\u3042".repeat(7000));
+    expect(Buffer.byteLength(detail, "utf8")).toBeLessThanOrEqual(MAX_LOG_BYTES);
+    expect(detail).not.toContain("\uFFFD");
+  });
 });
 
 describe("writeRedactedStderr", () => {
@@ -400,5 +406,12 @@ describe("writeRedactedStderr", () => {
     expect(writes[0]).toContain("api_key=********3456");
     expect(writes[0]).not.toContain("api_key=abcdef123456");
     expect(Buffer.byteLength(writes[0]!, "utf8")).toBe(MAX_LOG_BYTES);
+  });
+
+  it("keeps a multi-byte diagnostic within MAX_LOG_BYTES (issue #624)", () => {
+    const writes: string[] = [];
+    writeRedactedStderr(`ab${"\u{1F600}".repeat(5000)}`, (chunk) => writes.push(chunk));
+    expect(Buffer.byteLength(writes[0]!, "utf8")).toBeLessThanOrEqual(MAX_LOG_BYTES);
+    expect(writes[0]).not.toContain("\uFFFD");
   });
 });

@@ -244,6 +244,26 @@ describe("renderTextBlock / renderAttachmentBlock", () => {
     expect(block.text.length).toBeLessThan(bytes.byteLength + 100);
   });
 
+  it("renderTextBlock cuts at a character boundary within TEXT_SDK_BYTE_LIMIT (issue #624)", () => {
+    const text = `ab${"\u3042".repeat(Math.ceil(TEXT_SDK_BYTE_LIMIT / 3) + 10)}`;
+    const block = renderTextBlock(
+      meta_({ filename: "wide.txt" }),
+      new TextEncoder().encode(text),
+    );
+    const prefix = "[file: wide.txt]\n";
+    const body = block.text.slice(prefix.length, block.text.indexOf("\n\n[...truncated"));
+    expect(text.startsWith(body)).toBe(true);
+    expect(Buffer.byteLength(body, "utf8")).toBeLessThanOrEqual(TEXT_SDK_BYTE_LIMIT);
+    expect(body).not.toContain("\uFFFD");
+  });
+
+  it("renderTextBlock still renders bytes that are not UTF-8 (issue #624)", () => {
+    const bytes = new Uint8Array(TEXT_SDK_BYTE_LIMIT + 8).fill(0x80);
+    const block = renderTextBlock(meta_({ filename: "raw.bin" }), bytes);
+    expect(block.text.startsWith("[file: raw.bin]\n")).toBe(true);
+    expect(block.text).toContain(`[...truncated, original ${bytes.byteLength} bytes]`);
+  });
+
   it("blockWireSize は image/document の base64 長と text の UTF-8 バイト長", () => {
     expect(
       blockWireSize({
