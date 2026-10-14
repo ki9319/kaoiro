@@ -47,8 +47,11 @@ sees them.
 `test/acp-boundary.test.ts` fails when any file under `src/acp/` names
 `_x.ai`, `GROK_`, `grok`, a Grok `_meta` or wire-metadata key
 (`promptId`, `requestId`, `prompt_id`, `request_id`, `cancellationCategory`,
-`vendor_kind`, `hook_event`), uses `rules` as code, or imports from outside
-`acp/`.
+`vendor_kind`, `hook_event`), uses `rules` as code, or has a module specifier
+that resolves outside `acp/`. The specifiers read are those of imports,
+re-exports, `import x = require()`, import types, and `import()` and
+`require()` calls; each relative one is resolved from its own file's
+directory, and one that is not a string literal counts as outside.
 
 ## Capabilities
 
