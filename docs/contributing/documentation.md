@@ -22,6 +22,7 @@ the migration of the pre-2026-09 tree is tracked in
 | `adr/` | What was decided, when, against which alternatives? | Decision records in the past tense; addenda for later decisions | Rewrites into the present tense; current contracts (link out instead) |
 | `evidence/` | What was measured, under which conditions? | Date, target commit or binary hash, real CLI vs fixture, observations, negative controls, limits; a short summary plus a pointer to the stored artifact | Full logs; claims that rest on a `/tmp` path |
 | `contributing/` | How do I change the project? | Build, test, review and change procedures, including this page | Operator runbooks |
+| `release/` | What changed in each production release? | One page per production release: changes since the previous production release, upgrade steps, known issues; an index in `release/README.md` | Rewrites of old notes to match later behaviour; operator environment details |
 | `plans/`, `open-questions/` | What is in progress or undecided? | Phase plans with live status; unresolved questions until they become ADRs | Finished work presented as current (re-home pending items, then demote) |
 
 `specs/` is the pre-taxonomy folder and has been dissolved into

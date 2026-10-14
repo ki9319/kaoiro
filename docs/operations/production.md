@@ -180,6 +180,9 @@ If the change can stop the runner from starting or every agent's turns from
 completing, read [High-risk change release](high-risk-change-release.md) first;
 it adds a production-shape start check and a canary stage to this update.
 
+When preparing a release, write its release note under
+[docs/release/](../release/README.md).
+
 **Server-side, this is a `--dry-run` preview plus two real invocations —
 prepare, then commit — not one call.** `update` deliberately splits the real
 work into a no-downtime *prepare* and an explicitly-approved *commit*,
