@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { SessionNotification } from "@agentclientprotocol/sdk";
 import {
   PermissionBroker,
   type Envelope,
+  type PendingQuestionExt,
   type WrapperConfig,
 } from "@kaoiro/agent-common";
 import { GrokHost, type GrokHostOptions } from "../src/host.js";
@@ -52,6 +54,146 @@ async function started(options: Partial<GrokHostOptions> = {}) {
   });
   return { host, envelopes, run };
 }
+function assistantLogs(envelopes: Envelope[]) {
+  return envelopes.filter(e => e.type === "log" && e.payload.kind === "assistant");
+}
+const pendingQuestion: PendingQuestionExt = {
+  request_id: "question-fixture",
+  ts: "2026-10-14T00:00:00Z",
+  questions: [{ header: "Continue", question: "Continue?", multiSelect: false, options: [
+    { label: "Yes", description: "Continue" },
+    { label: "No", description: "Stop" },
+  ] }],
+};
+async function waitForHeldChunks(received: { mock: { calls: [SessionNotification][] } }) {
+  await vi.waitFor(() => expect(received.mock.calls.filter(([notification]) =>
+    notification.update.sessionUpdate === "agent_message_chunk")).toHaveLength(3));
+}
+describe("assistant log projection", () => {
+  it.each(["chunks", "fail-chunks"])(
+    "flushes %s once before the result event with the thinking stamp",
+    async input => {
+      const { host, envelopes } = await started();
+      if (input === "fail-chunks") await expect(host.send(input)).rejects.toThrow();
+      else await host.send(input);
+      const logs = assistantLogs(envelopes);
+      expect(logs).toHaveLength(1);
+      expect(logs[0]).toMatchObject({
+        state: "thinking", payload: { kind: "assistant", text: "Hello world" },
+      });
+      const result = envelopes.find(e => e.type === "result")!;
+      expect(envelopes.indexOf(logs[0]!)).toBeLessThan(envelopes.indexOf(result));
+      expect(result.payload).toMatchObject(input === "chunks"
+        ? { text: "Hello world", is_error: false }
+        : { text: "", is_error: true });
+      expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "user")
+        .map(e => e.payload.text)).toEqual([input]);
+    },
+  );
+  it("keeps live-shaped thought and tool updates inside their text group", async () => {
+    const { host, envelopes } = await started();
+    await host.send("ordered-chunks");
+    expect(envelopes.filter(e => e.type === "log" && e.payload.kind !== "user")
+      .map(e => e.payload)).toEqual([
+        { kind: "assistant", text: "Before tool" },
+        { kind: "tool_use", tool_name: "probe" },
+        { kind: "assistant", text: "After tool" },
+      ]);
+    expect(envelopes.find(e => e.type === "result")?.payload.text)
+      .toBe("Before toolAfter tool");
+  });
+  it("clips a joined 20 KiB log while preserving the full result", async () => {
+    const { host, envelopes } = await started();
+    await host.send("large-chunks");
+    expect(assistantLogs(envelopes).map(e => e.payload)).toEqual([
+      { kind: "assistant", text: "x".repeat(16 * 1024), truncated: true },
+    ]);
+    expect(envelopes.find(e => e.type === "result")?.payload.text)
+      .toBe("x".repeat(20 * 1024));
+  });
+  it("emits no assistant log for non-text chunks or thoughts", async () => {
+    const { host, envelopes } = await started();
+    await host.send("non-text-chunks");
+    expect(assistantLogs(envelopes)).toHaveLength(0);
+    expect(envelopes.find(e => e.type === "result")?.payload.text).toBe("");
+  });
+  it("flushes before entering a question wait without duplicating on cancel", async () => {
+    const { host, envelopes } = await started();
+    const received = vi.spyOn(events, "updateEvents");
+    const turn = host.send("hold-chunks");
+    await waitForHeldChunks(received);
+    expect(assistantLogs(envelopes)).toHaveLength(0);
+    host.setPendingQuestion(pendingQuestion);
+    const logs = assistantLogs(envelopes);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({ state: "thinking", payload: { text: "Hello world" } });
+    expect(envelopes.indexOf(logs[0]!)).toBeLessThan(
+      envelopes.findIndex(e => e.type === "state_change" && e.state === "waiting_question"));
+    host.setPendingQuestion(null);
+    await host.interrupt();
+    await turn;
+    expect(assistantLogs(envelopes)).toHaveLength(1);
+  });
+  it("clears buffered text before sending a reentrant log", async () => {
+    let host!: GrokHost;
+    const envelopes: Envelope[] = [];
+    let reentered = false;
+    const setup = await started({ send: envelope => {
+      envelopes.push(envelope);
+      if (envelope.type === "log" && envelope.payload.kind === "assistant" && !reentered) {
+        reentered = true;
+        host.setPendingQuestion(pendingQuestion);
+      }
+    } });
+    host = setup.host;
+    await host.send("chunks");
+    expect(assistantLogs(envelopes).map(e => e.payload.text)).toEqual(["Hello world"]);
+    host.setPendingQuestion(null);
+  });
+  it.each(["cancel", "close", "inactivity"])("flushes buffered text exactly once on %s", async mode => {
+    const { host, envelopes } = await started();
+    const received = vi.spyOn(events, "updateEvents");
+    if (mode === "inactivity") vi.useFakeTimers();
+    const turn = host.send("hold-chunks");
+    void turn.catch(() => {});
+    await waitForHeldChunks(received);
+    expect(assistantLogs(envelopes)).toHaveLength(0);
+    if (mode === "cancel") {
+      await host.interrupt();
+      await turn;
+    } else {
+      if (mode === "close") host.close();
+      else await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
+      vi.useRealTimers();
+      await expect(turn).rejects.toThrow();
+      await host.closed;
+    }
+    const logs = assistantLogs(envelopes);
+    expect(logs.map(e => e.payload.text)).toEqual(["Hello world"]);
+    const results = envelopes.filter(e => e.type === "result");
+    expect(results).toHaveLength(1);
+    expect(envelopes.indexOf(logs[0]!)).toBeLessThan(envelopes.indexOf(results[0]!));
+    if (mode === "cancel") expect(results[0]?.ext).toMatchObject({ interrupted: true });
+  });
+  it("puts a queued operator bubble after the running turn's assistant text", async () => {
+    const { host, envelopes } = await started();
+    const received = vi.spyOn(events, "updateEvents");
+    const first = host.send("hold-chunks");
+    await waitForHeldChunks(received);
+    const next = host.send("NEXT_OPERATOR");
+    expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "user")
+      .map(e => e.payload.text)).toEqual(["hold-chunks"]);
+    await host.interrupt();
+    await first;
+    await next;
+    expect(envelopes.filter(e => e.type === "log").map(e => e.payload)).toEqual([
+      { kind: "user", text: "hold-chunks" },
+      { kind: "assistant", text: "Hello world" },
+      { kind: "user", text: "NEXT_OPERATOR" },
+      { kind: "assistant", text: "NEXT_OPERATOR" },
+    ]);
+  });
+});
 describe("resident ACP host", () => {
   it("fails when stdout ends without exiting", async () => {
     const path = mkdtempSync(join(tmpdir(), "kaoiro-grok-eof-"));
@@ -254,11 +396,12 @@ describe("resident ACP host", () => {
   it("keeps running until every parallel tool call has completed", async () => {
     const { host, envelopes } = await started();
     await host.send("parallel");
-    expect(
-      envelopes.find(
-        (e) => e.type === "log" && e.payload.text === "B_STILL_PENDING",
-      )?.state,
-    ).toBe("tool_running");
+    expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "assistant")
+      .map(e => ({ state: e.state, payload: e.payload }))).toEqual([
+        { state: "thinking", payload: { kind: "assistant", text: "B_STILL_PENDINGfinished" } },
+      ]);
+    expect(envelopes.find(e => e.type === "result")?.payload.text)
+      .toBe("B_STILL_PENDINGfinished");
     expect(host.state).toBe("waiting_input");
   });
   it("waits for the broker and reports rejection", async () => {
@@ -274,18 +417,24 @@ describe("resident ACP host", () => {
       decidePermission: (...args) => broker.decide(...args),
     });
     host = startedHost.host;
+    const received = vi.spyOn(events, "updateEvents");
     vi.useFakeTimers();
     const turn = host.send("permission");
     void turn.catch(() => {});
     await vi.waitFor(() => expect(host.state).toBe("waiting_permission"));
     const request = envelopes.find((e) => e.type === "permission_request")!;
-    await vi.waitFor(() =>
-      expect(
-        envelopes.some(
-          (e) => e.type === "log" && e.payload.text === "BROKER_WAIT_PROGRESS",
-        ),
-      ).toBe(true),
-    );
+    await vi.waitFor(() => expect(received.mock.calls.some(([notification]) =>
+      notification.update.sessionUpdate === "agent_message_chunk" &&
+      notification.update.content.type === "text" &&
+      notification.update.content.text === "BROKER_WAIT_PROGRESS")).toBe(true));
+    const beforeWait = envelopes.find(e => e.type === "log" &&
+      e.payload.kind === "assistant" && e.payload.text === "Before permission")!;
+    expect(beforeWait).toBeDefined();
+    expect(beforeWait.state).toBe("thinking");
+    expect(envelopes.indexOf(beforeWait)).toBeLessThan(
+      envelopes.findIndex(e => e.type === "state_change" && e.state === "waiting_permission"));
+    expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "tool_use"))
+      .toHaveLength(0);
     try {
       await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
       expect(host.state).toBe("waiting_permission");
@@ -297,6 +446,11 @@ describe("resident ACP host", () => {
       allow: false,
     });
     await expect(turn).rejects.toThrow("permission rejected");
+    expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "assistant")
+      .map(e => e.payload.text)).toEqual(["Before permission", "BROKER_WAIT_PROGRESS"]);
+    expect(envelopes.findIndex(e => e.type === "log" &&
+      e.payload.text === "BROKER_WAIT_PROGRESS")).toBeLessThan(
+      envelopes.findIndex(e => e.type === "result"));
     expect(envelopes.filter((e) => e.type === "result")).toHaveLength(1);
     expect(
       envelopes.filter((e) => e.type === "result")[0]?.payload.error_code,

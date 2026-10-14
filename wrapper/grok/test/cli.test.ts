@@ -4,6 +4,7 @@ import type { ServerLink, ServerLinkOptions } from "@kaoiro/wrapper-core";
 import type { Envelope, WrapperConfig } from "@kaoiro/agent-common";
 import { runGrokCli } from "../src/cli.js";
 import { GrokHost } from "../src/host.js";
+import * as events from "../src/grok/events.js";
 const config: WrapperConfig = {
   agent_id: "test.grok",
   server_url: "ws://127.0.0.1:1/agent",
@@ -52,6 +53,81 @@ export function recordingLink(
   } as unknown as ServerLink;
 }
 describe("runGrokCli composition", () => {
+  it("logs an operator instruction received before readiness only at turn start", async () => {
+    const envelopes: Envelope[] = [];
+    let probe!: Promise<void>;
+    const work = runGrokCli({
+      parseCliArgs: () => ({ configPath: "fixture" }),
+      loadConfig: () => ({ ...config }),
+      loadWrapperBuildInfo: () => buildInfo,
+      createHost: options => new GrokHost({ ...options,
+        executable: fileURLToPath(new URL("./fixtures/grok.mjs", import.meta.url)),
+      }),
+      createServerLink: (_url, _id, callbacks) => {
+        callbacks.onInstruction?.("BEFORE_READY");
+        expect(envelopes.filter(e => e.type === "log")).toHaveLength(0);
+        return recordingLink(callbacks, envelopes, [], []);
+      },
+      onHostCreated: host => {
+        probe = (async () => {
+          await vi.waitFor(() => expect(envelopes.filter(e => e.type === "result"))
+            .toHaveLength(1), { timeout: 5000 });
+          expect(envelopes.filter(e => e.type === "log").map(e => e.payload)).toEqual([
+            { kind: "user", text: "BEFORE_READY" },
+            { kind: "assistant", text: "BEFORE_READY" },
+          ]);
+          expect(envelopes.find(e => e.type === "log" && e.payload.kind === "user")?.state)
+            .toBe("sending");
+        })().finally(() => host.close());
+        void probe.catch(() => {});
+      },
+    });
+    await work;
+    await probe;
+  });
+  it("keeps a queued operator bubble after the running turn's assistant log", async () => {
+    const envelopes: Envelope[] = [];
+    const received = vi.spyOn(events, "updateEvents");
+    let callbacks!: ServerLinkOptions;
+    let probe!: Promise<void>;
+    try {
+      const work = runGrokCli({
+        parseCliArgs: () => ({ configPath: "fixture" }),
+        loadConfig: () => ({ ...config }),
+        loadWrapperBuildInfo: () => buildInfo,
+        createHost: options => new GrokHost({ ...options,
+          executable: fileURLToPath(new URL("./fixtures/grok.mjs", import.meta.url)),
+        }),
+        createServerLink: (_url, _id, options) => {
+          callbacks = options;
+          return recordingLink(options, envelopes, [], []);
+        },
+        onHostCreated: host => {
+          probe = (async () => {
+            await vi.waitFor(() => expect(host.state).toBe("waiting_input"), { timeout: 5000 });
+            callbacks.onInstruction?.("hold-chunks");
+            await vi.waitFor(() => expect(received.mock.calls.filter(([notification]) =>
+              notification.update.sessionUpdate === "agent_message_chunk")).toHaveLength(3));
+            callbacks.onInstruction?.("NEXT_OPERATOR");
+            expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "user")
+              .map(e => e.payload.text)).toEqual(["hold-chunks"]);
+            await host.interrupt();
+            await vi.waitFor(() => expect(envelopes.filter(e => e.type === "result"))
+              .toHaveLength(2), { timeout: 5000 });
+            expect(envelopes.filter(e => e.type === "log").map(e => e.payload)).toEqual([
+              { kind: "user", text: "hold-chunks" },
+              { kind: "assistant", text: "Hello world" },
+              { kind: "user", text: "NEXT_OPERATOR" },
+              { kind: "assistant", text: "NEXT_OPERATOR" },
+            ]);
+          })().finally(() => host.close());
+          void probe.catch(() => {});
+        },
+      });
+      await work;
+      await probe;
+    } finally { received.mockRestore(); }
+  });
   it("reports settings and classifies instruction failures", async () => {
     const envelopes: Envelope[] = [];
     const stderr: string[] = [];
@@ -94,6 +170,8 @@ describe("runGrokCli composition", () => {
               e.type === "log" && e.payload.text ===
                 "grok attachment input is unsupported in work unit 1",
             )).toBe(true));
+            expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "user")
+              .map(e => e.payload.text)).toEqual(["fail-turn"]);
             const output = stderr.join("");
             expect(output).toContain(
               `[kaoiro] grok behaviour: pid=${process.pid} `,
@@ -161,6 +239,8 @@ describe("runGrokCli composition", () => {
               timeout: 5000,
             });
             expect(ack).toEqual([1]);
+            expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "user"))
+              .toHaveLength(0);
             expect(outbound[0]?.payload).toMatchObject({
               to: "peer",
               conversation_id: "fixture-conversation",

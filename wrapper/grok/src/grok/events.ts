@@ -12,7 +12,6 @@ export function updateEvents(notification: SessionNotification): {
       if (update.content.type === "text") {
         return {
           events: [{ kind: "assistant", blocks: ["text"] }],
-          log: { kind: "assistant", text: update.content.text },
           text: update.content.text,
         };
       }

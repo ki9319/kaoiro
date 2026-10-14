@@ -8,6 +8,7 @@ import { createPermissionState, setPermissionSyncSupport, requestPermission,
 import type * as acp from "@agentclientprotocol/sdk";
 import {
   initialMachineState,
+  logEntryToPayload,
   makeLog,
   makeResult,
   makeStateChange,
@@ -133,6 +134,7 @@ export class GrokHost implements EngineAdapter {
   #pendingPermission: PendingPermissionExt | null = null;
   #pendingQuestion: PendingQuestionExt | null = null;
   #text = "";
+  #assistantText = "";
   #timer: ReturnType<typeof setTimeout> | undefined;
   #abortTimer: ReturnType<typeof setTimeout> | undefined;
   #resolveClosed!: () => void;
@@ -531,13 +533,16 @@ export class GrokHost implements EngineAdapter {
     this.#active = turn;
     this.#signal = new AbortController();
     this.#text = "";
+    this.#assistantText = "";
     this.#event({ kind: "user_send" });
-    this.#options.send(
-      makeLog(this.#options.config, this.state, new Date().toISOString(), {
-        kind: "user",
-        text: turn.text,
-      }),
-    );
+    if (turn.conversations.length === 0) {
+      this.#options.send(
+        makeLog(this.#options.config, this.state, new Date().toISOString(), {
+          kind: "user",
+          text: turn.text,
+        }),
+      );
+    }
     this.#options.onTurnStart?.({ turnToken: turn.token });
     this.#progress();
     let error: Error | undefined;
@@ -554,6 +559,7 @@ export class GrokHost implements EngineAdapter {
       permissionRejected = rejected;
       if (rejected) throw new Error("grok permission rejected");
       const interrupted = response.stopReason === "cancelled" && !rejected;
+      this.#flushAssistantLog();
       this.#event({
         kind: "result",
         subtype: rejected ? "error_during_execution" : "success",
@@ -579,6 +585,7 @@ export class GrokHost implements EngineAdapter {
       error = cause instanceof Error ? cause : new Error("grok turn failed");
       if (this.#permissions.current?.submission.execution_id === submission.execution_id &&
         this.#permissions.current.status === "applying") this.#observe(submission, undefined);
+      this.#flushAssistantLog();
       this.#event({ kind: "result", subtype: "error_during_execution" });
       this.#options.send(
         makeResult(this.#options.config, new Date().toISOString(), {
@@ -623,8 +630,12 @@ export class GrokHost implements EngineAdapter {
       return;
     this.#progress();
     const update = updateEvents(notification);
+    if (update.log && update.log.kind !== "assistant") this.#flushAssistantLog();
     for (const event of update.events) this.#event(event);
-    if (update.text) this.#text += update.text;
+    if (update.text) {
+      this.#text += update.text;
+      this.#assistantText += update.text;
+    }
     if (update.log)
       this.#options.send(
         makeLog(
@@ -634,6 +645,19 @@ export class GrokHost implements EngineAdapter {
           update.log,
         ),
       );
+  }
+  #flushAssistantLog() {
+    const text = this.#assistantText;
+    this.#assistantText = "";
+    if (!text) return;
+    this.#options.send(
+      makeLog(
+        this.#options.config,
+        this.state,
+        new Date().toISOString(),
+        logEntryToPayload({ kind: "assistant", text }, new Map()),
+      ),
+    );
   }
   #vendor(notification: Record<string, unknown>) {
     const completion = turnCompletion(notification, this.#sessionId);
@@ -750,6 +774,7 @@ export class GrokHost implements EngineAdapter {
     throw new Error("grok permission mode is unsupported");
   }
   setPendingPermission(pending: PendingPermissionExt | null) {
+    if (pending) this.#flushAssistantLog();
     this.#pendingPermission = pending;
     if (pending) {
       clearTimeout(this.#timer);
@@ -760,6 +785,7 @@ export class GrokHost implements EngineAdapter {
     }
   }
   setPendingQuestion(pending: PendingQuestionExt | null) {
+    if (pending) this.#flushAssistantLog();
     this.#pendingQuestion = pending;
     if (pending) {
       clearTimeout(this.#timer);

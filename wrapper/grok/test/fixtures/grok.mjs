@@ -89,6 +89,8 @@ const update = (data) =>
     sessionId: sid,
     update: data,
   });
+const textChunk = (text) =>
+  update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
 const finish = (id, text, stopReason = "end_turn", category) => {
   if (text)
     update({
@@ -212,6 +214,49 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       case "session/prompt": {
         prompt = msg.id;
         const text = msg.params.prompt[0].text;
+        if (["chunks", "fail-chunks", "hold-chunks"].includes(text)) {
+          for (const chunk of ["Hello", " ", "world"]) textChunk(chunk);
+          if (text === "hold-chunks") break;
+          if (text === "fail-chunks") {
+            process.stdout.write(JSON.stringify({
+              jsonrpc: "2.0", id: msg.id,
+              error: { code: -32603, message: "fixture turn failure" },
+            }) + "\n");
+            prompt = undefined;
+          } else finish(msg.id, "");
+          break;
+        }
+        if (text === "large-chunks") {
+          textChunk("x".repeat(10 * 1024));
+          textChunk("x".repeat(10 * 1024));
+          finish(msg.id, "");
+          break;
+        }
+        if (text === "ordered-chunks") {
+          textChunk("Before");
+          update({ sessionUpdate: "agent_thought_chunk",
+            content: { type: "text", text: "private thought" } });
+          textChunk(" tool");
+          update({ sessionUpdate: "tool_call_update",
+            toolCallId: "ordered", status: "in_progress" });
+          update({ sessionUpdate: "tool_call", toolCallId: "ordered", title: "probe",
+            status: "in_progress", kind: "other" });
+          textChunk("After");
+          update({ sessionUpdate: "tool_call_update", toolCallId: "ordered", status: "completed" });
+          update({ sessionUpdate: "agent_thought_chunk",
+            content: { type: "text", text: "private thought" } });
+          textChunk(" tool");
+          finish(msg.id, "");
+          break;
+        }
+        if (text === "non-text-chunks") {
+          update({ sessionUpdate: "agent_message_chunk", content: {
+            type: "image", data: "", mimeType: "image/png" } });
+          update({ sessionUpdate: "agent_thought_chunk",
+            content: { type: "text", text: "private thought" } });
+          finish(msg.id, "");
+          break;
+        }
         if (text === "close-output") {
           if (process.env.KAOIRO_TEST_GROK_PID_FILE)
             writeFileSync(process.env.KAOIRO_TEST_GROK_PID_FILE,
@@ -283,13 +328,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             session_id: sid,
             notification: { type: "pending_interaction", kind: "permission" },
           });
-          update({
-            sessionUpdate: "tool_call",
-            toolCallId: "permission-tool",
-            title: "write fixture",
-            status: "in_progress",
-            kind: "edit",
-          });
+          textChunk("Before");
+          textChunk(" permission");
           process.stdout.write(
             JSON.stringify({
               jsonrpc: "2.0",

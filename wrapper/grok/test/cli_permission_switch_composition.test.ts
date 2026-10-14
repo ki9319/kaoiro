@@ -75,7 +75,7 @@ it("negotiates, switches and publishes observations and stops on the actual Serv
     expect(statuses().at(-1)).not.toHaveProperty("permission_gate");
     await vi.waitFor(() => expect(server.received.filter(x => x.event === "delivery_ack")).toHaveLength(1));
     expect(server.received.filter(x => x.event === "envelope" && x.payload.type === "log" &&
-      (x.payload.payload as any).kind === "user")).toHaveLength(3);
+      (x.payload.payload as any).kind === "user")).toHaveLength(2);
     server.push("instruction", { version: "0", text: "no-prompt-id" });
     await vi.waitFor(() => expect(control()).toMatchObject({ revision: 5, status: "unknown" }));
     expect(statuses().at(-1)?.permission_gate).toMatchObject({ reason: "observation_unavailable" });

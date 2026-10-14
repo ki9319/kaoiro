@@ -107,10 +107,13 @@ describe("permission switch at the queued head boundary", () => {
     expect(host.statusExtSnapshot().permission_gate).toMatchObject({ reason: "observation_unavailable" });
     await expect(host.send("never-sent")).rejects.toThrow("permission_gate_blocked");
     expect(events().filter(r => r.event === "session/prompt")).toHaveLength(1);
-    expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "user")).toHaveLength(1);
+    expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "user")
+      .map(e => e.payload.text)).toEqual(["no-prompt-id"]);
     await host.setPermission(choose(1, "workspace-write", true));
     expect(host.statusExtSnapshot()).not.toHaveProperty("permission_gate");
     await host.send("recovered");
+    expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "user")
+      .map(e => e.payload.text)).toEqual(["no-prompt-id", "recovered"]);
     expect(host.statusExtSnapshot().permission_control).toMatchObject({ status: "applied", revision: 1 });
   });
   it("retains next after a refused raw toggle instead of capturing latest", async () => {
