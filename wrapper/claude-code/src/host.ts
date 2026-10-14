@@ -19,6 +19,8 @@ import type {
   Query,
   SDKRateLimitInfo,
   SDKMessage,
+  SDKTaskStartedMessage,
+  SDKTaskUpdatedMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -668,6 +670,19 @@ interface NotificationCandidate {
   timeout: ReturnType<typeof setTimeout> | null;
 }
 
+/** A task whose completion may become a notification prompt. `runId` ties
+ * later frames to this run; `background` is true once the task runs in the
+ * background, from its start or from a later promotion. Records belong to
+ * the host's current session: a frame naming another session clears them
+ * before any task frame is applied. */
+interface TaskRecord {
+  runId?: string;
+  taskType: "local_bash" | "local_agent" | "local_workflow";
+  background: boolean;
+}
+
+const MAX_TASK_RECORDS = 64;
+
 interface ForeignOccupancy {
   /** null while only root frames (no prompt hook) evidence the interval. */
   promptId: string | null;
@@ -735,6 +750,17 @@ function parseNotificationPrompt(prompt: string): ParsedNotification[] | null {
   return parsed as ParsedNotification[];
 }
 
+function xmlEscape(text: string): string {
+  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+/** The CLI XML-escapes `&`, `<` and `>` in a notification's summary and
+ * Agent result, but not in its IDs or output file. The prompt value is never
+ * decoded: it must equal the SDK's raw text or that text escaped once. */
+function notificationTextMatches(trusted: string, shown: string | undefined): boolean {
+  return shown !== undefined && (shown === trusted || shown === xmlEscape(trusted));
+}
+
 /**
  * Hosts a single agent session. `run` drives the message loop until the input
  * stream is closed; `send` feeds follow-up turns, `interrupt` stops the current
@@ -778,7 +804,8 @@ export class AgentHost implements EngineAdapter {
    * null, applying wrapper-side backpressure to the SDK's eager pull. */
   #activeTurn: QueuedTurn | NotificationTurn | null = null;
   readonly #notificationCandidates = new Map<string, NotificationCandidate>();
-  readonly #backgroundTaskIds = new Set<string>();
+  readonly #taskRecords = new Map<string, TaskRecord>();
+  #taskRecordsFullWarned = false;
   readonly #promptOwners = new Map<string, { sessionId: string; token: string; kind: "wrapper_input" | "sdk_notification"; tainted?: boolean }>();
   readonly #retiredPromptIds = new Set<string>();
   #turnBoundaryNotify: (() => void) | null = null;
@@ -2191,11 +2218,66 @@ export class AgentHost implements EngineAdapter {
     if (cwd !== null) this.#cwd = cwd;
   }
 
+  #recordTaskStart(message: SDKTaskStartedMessage): void {
+    let background: boolean;
+    let taskType: TaskRecord["taskType"];
+    if (message.task_type === "local_bash" || message.task_type === "local_agent") {
+      taskType = message.task_type;
+      background = message.is_backgrounded === true;
+    } else if (message.task_type === "local_workflow") {
+      // The SDK sends no is_backgrounded for workflows, which launch in the
+      // background; one launched by a subagent never reaches the root prompt.
+      if (message.is_backgrounded === false || message.parent_task_id !== undefined) return;
+      taskType = message.task_type;
+      background = true;
+    } else {
+      return;
+    }
+    const existing = this.#taskRecords.get(message.task_id);
+    if (existing) {
+      if (existing.runId === message.run_id) {
+        existing.background ||= background;
+        return;
+      }
+      // Run ids of one task sort in the order the runs opened; an older or
+      // one-sided run id cannot replace the current run.
+      if (existing.runId === undefined || message.run_id === undefined || message.run_id <= existing.runId) return;
+    } else if (this.#taskRecords.size >= MAX_TASK_RECORDS) {
+      if (!this.#taskRecordsFullWarned) {
+        this.#taskRecordsFullWarned = true;
+        this.#warn(`[kaoiro] task record limit reached; task_id=${message.task_id} is not tracked for notifications`);
+      }
+      return;
+    }
+    this.#taskRecords.set(message.task_id, {
+      ...(message.run_id !== undefined ? { runId: message.run_id } : {}),
+      taskType,
+      background,
+    });
+  }
+
+  /** Applies a move to or from the background, measured only for Bash. */
+  #recordTaskUpdate(message: SDKTaskUpdatedMessage): void {
+    const backgrounded = message.patch.is_backgrounded;
+    if (typeof backgrounded !== "boolean") return;
+    const record = this.#taskRecords.get(message.task_id);
+    if (!record || record.taskType !== "local_bash" || record.runId !== message.run_id) return;
+    record.background = backgrounded;
+  }
+
+  #deleteTaskRecord(taskId: string): void {
+    this.#taskRecords.delete(taskId);
+    this.#taskRecordsFullWarned = false;
+  }
+
   #rememberNotification(message: SDKMessage): void {
     if (message.type !== "system" || message.subtype !== "task_notification") return;
-    if (!this.#backgroundTaskIds.delete(message.task_id)) return;
-    const task = this.#taskCache.get(message.task_id);
-    if (!task) return;
+    const record = this.#taskRecords.get(message.task_id);
+    // A notification from another run leaves the current run's record in
+    // place for its own notification.
+    if (!record || record.runId !== message.run_id) return;
+    this.#deleteTaskRecord(message.task_id);
+    if (!record.background) return;
     if (this.#notificationCandidates.size >= 16) return;
     const taskId = message.task_id;
     const previous = this.#notificationCandidates.get(taskId);
@@ -2204,7 +2286,7 @@ export class AgentHost implements EngineAdapter {
       sessionId: message.session_id,
       taskId,
       ...(message.tool_use_id ? { toolUseId: message.tool_use_id } : {}),
-      taskType: task.task_type,
+      taskType: record.taskType,
       status: message.status,
       ...(message.output_file ? { outputFile: message.output_file } : {}),
       summary: message.summary,
@@ -2226,7 +2308,8 @@ export class AgentHost implements EngineAdapter {
   #clearNotificationCandidates(): void {
     for (const candidate of this.#notificationCandidates.values()) if (candidate.timeout) clearTimeout(candidate.timeout);
     this.#notificationCandidates.clear();
-    this.#backgroundTaskIds.clear();
+    this.#taskRecords.clear();
+    this.#taskRecordsFullWarned = false;
     this.#wakeTurnBoundary();
   }
 
@@ -2287,10 +2370,17 @@ export class AgentHost implements EngineAdapter {
       candidate.status === notifications[index]!.status && (
         candidate.taskType === "local_bash"
           ? notifications[index]!.outputFilePresent && candidate.outputFile !== undefined &&
-            candidate.outputFile === notifications[index]!.outputFile && candidate.summary === notifications[index]!.summary && notifications[index]!.result === undefined
-          : candidate.taskType === "local_agent" && candidate.outputFile !== undefined &&
-            (!notifications[index]!.outputFilePresent || candidate.outputFile === notifications[index]!.outputFile) &&
-            candidate.summary === notifications[index]!.result && notifications[index]!.summary !== undefined
+            candidate.outputFile === notifications[index]!.outputFile &&
+            notificationTextMatches(candidate.summary, notifications[index]!.summary) && notifications[index]!.result === undefined
+          : candidate.taskType === "local_agent"
+            ? candidate.outputFile !== undefined &&
+              (!notifications[index]!.outputFilePresent || candidate.outputFile === notifications[index]!.outputFile) &&
+              notificationTextMatches(candidate.summary, notifications[index]!.result) && notifications[index]!.summary !== undefined
+            // A workflow's <result> is its script's return value with no SDK
+            // counterpart, so it is never compared.
+            : candidate.taskType === "local_workflow" && notifications[index]!.outputFilePresent &&
+              candidate.outputFile !== undefined && candidate.outputFile === notifications[index]!.outputFile &&
+              notificationTextMatches(candidate.summary, notifications[index]!.summary)
       ));
     // The one definition of a uniquely recognized wrapper input: every
     // precedence exception and the registration below use it, so a hook that
@@ -2759,9 +2849,8 @@ export class AgentHost implements EngineAdapter {
         // ADR-0019 F2 requires task info to stay off the parent's own
         // KaoiroState / state_change entirely.
         const taskEvent = sdkMessageToTask(message);
-        if (message.type === "system" && message.subtype === "task_started" && message.is_backgrounded) {
-          this.#backgroundTaskIds.add(message.task_id);
-        }
+        if (message.type === "system" && message.subtype === "task_started") this.#recordTaskStart(message);
+        if (message.type === "system" && message.subtype === "task_updated") this.#recordTaskUpdate(message);
         this.#rememberNotification(message);
         if (taskEvent) {
           this.#applyTaskEvent(taskEvent);
