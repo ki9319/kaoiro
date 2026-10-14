@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
-import { writeFileSync, appendFileSync } from "node:fs";
+import { writeFileSync, appendFileSync, existsSync, readFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 if (process.argv.includes("--version")) {
@@ -61,6 +61,62 @@ if (process.env.KAOIRO_TEST_GROK_IGNORE_TERM === "1") {
       writeFileSync(process.env.KAOIRO_TEST_GROK_PID_FILE, String(child.pid));
   });
 }
+// Like Grok 1.0.52: four models, the fourth without the xhigh effort, and a
+// selection that lives in the session rather than in the process.
+const LEVELS = ["xhigh", "high", "medium", "low"];
+const MODELS = [
+  { id: "grok-4.7", name: "Grok 4.7", levels: LEVELS, window: 200_000 },
+  { id: "grok-4.7-build-fast", name: "Grok 4.7 Fast", levels: LEVELS, window: 200_000 },
+  { id: "grok-4.6", name: "Grok 4.6", levels: LEVELS, window: 150_000 },
+  { id: "grok-4.5", name: "Grok 4.5", levels: LEVELS.slice(1), window: 100_000 },
+];
+let model = "grok-4.7";
+let effort = process.env.KAOIRO_TEST_GROK_EFFORT ?? "high";
+const noConfig = process.env.KAOIRO_TEST_GROK_CONFIG === "none";
+const modelState = () => ({
+  currentModelId: model,
+  availableModels: MODELS.map((m) => ({
+    modelId: m.id, name: m.name,
+    _meta: { totalContextTokens: m.window, contextWindows: [m.window, m.window],
+      supportsReasoningEffort: true,
+      reasoningEfforts: m.levels.map((value) => ({ id: value, value, label: value, default: value === "high" })) },
+  })),
+});
+const configOptions = () => [
+  { id: "model", name: "Model", category: "model", type: "select", currentValue: model,
+    options: MODELS.map((m) => ({ value: m.id, name: m.name })) },
+  { id: "reasoning_effort", name: "Reasoning Effort", category: "thought_level", type: "select",
+    currentValue: effort,
+    options: MODELS.find((m) => m.id === model).levels.map((value) => ({ value, name: value })) },
+];
+const persist = () => {
+  if (process.env.KAOIRO_TEST_GROK_SESSION_FILE)
+    writeFileSync(process.env.KAOIRO_TEST_GROK_SESSION_FILE, JSON.stringify({ model, effort }));
+};
+const restore = () => {
+  const file = process.env.KAOIRO_TEST_GROK_SESSION_FILE;
+  if (!file || !existsSync(file)) return;
+  ({ model, effort } = JSON.parse(readFileSync(file, "utf8")));
+};
+const invalidParams = (id) =>
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id,
+    error: { code: -32602, message: "Invalid params" } }) + "\n");
+// One simulated model call. The prompt grows with the call number, so the
+// last call, the first call and the turn's sum all differ.
+let turnCalls = 0;
+let turnModel = model;
+const modelCall = (n) => {
+  turnCalls = n;
+  record("model_call", { model, call: n });
+  notification("_x.ai/session_notification", { sessionId: sid, update: {
+    sessionUpdate: "response_completed", signature: "fixture",
+    usage: { input_tokens: 1000 * n, output_tokens: 5, cache_read_input_tokens: 100 * n,
+      cache_creation_input_tokens: 10 * n, reasoning_tokens: 1 } } });
+};
+const waitRelease = async () => {
+  const file = process.env.KAOIRO_TEST_GROK_RELEASE_FILE;
+  while (file && !existsSync(file)) await new Promise((resolve) => setTimeout(resolve, 5));
+};
 let client;
 let transport;
 // Settles when the MCP connection attempt has ended, whatever its outcome.
@@ -91,7 +147,8 @@ const update = (data) =>
   });
 const textChunk = (text) =>
   update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
-const finish = (id, text, stopReason = "end_turn", category) => {
+const finish = (id, text, stopReason = "end_turn", category, noCall = false) => {
+  if (turnCalls === 0 && stopReason === "end_turn" && !noCall) modelCall(1);
   if (text)
     update({
       sessionUpdate: "agent_message_chunk",
@@ -106,6 +163,8 @@ const finish = (id, text, stopReason = "end_turn", category) => {
     _meta: {
       ...(text === "no-prompt-id" ? {} : { promptId: String(id) }),
       requestId: String(id),
+      modelId: turnModel,
+      ...(turnCalls > 0 ? { inputTokens: 1110 * turnCalls } : {}),
       ...(category ? { cancellationCategory: category } : {}),
     },
   });
@@ -120,7 +179,9 @@ process.on("SIGTERM", () => {
 createInterface({ input: process.stdin }).on("line", (line) => {
   void (async () => {
     const msg = JSON.parse(line);
-    record(msg.method ?? "response", { ...(msg.params?.sessionId ? { sessionId: msg.params.sessionId } : {}) });
+    record(msg.method ?? "response", { ...(msg.params?.sessionId ? { sessionId: msg.params.sessionId } : {}),
+      ...(msg.method === "session/set_config_option"
+        ? { configId: msg.params.configId, value: msg.params.value } : {}) });
     const fault = process.env.KAOIRO_TEST_GROK_SWITCH_FAULT;
     if (fault && process.env.GROK_SANDBOX === "read-only") {
       if (fault === `${msg.method}:exit`) process.exit(13);
@@ -148,12 +209,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
               ? {}
               : { loadSession: true, mcpCapabilities: { http: true, sse: true } },
           authMethods: [],
+          ...(noConfig ? {} : { _meta: { modelState: modelState() } }),
         });
         break;
       case "session/load":
       case "session/new": {
         const loading = msg.method === "session/load";
         if (!loading) rules = msg.params._meta.rules;
+        else restore();
         if (loading) {
           update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "REPLAY_ONLY" } });
           // Grok replays past hook executions on load (issue 633).
@@ -191,7 +254,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           );
         // Like Grok, reply first and connect afterwards, and carry on without
         // the server when the connection fails.
-        reply(msg.id, loading ? {} : { sessionId: sid });
+        reply(msg.id, {
+          ...(loading ? {} : { sessionId: sid }),
+          ...(noConfig ? {} : { configOptions: configOptions() }),
+        });
         // Like Grok 1.0.52: the session_start hook follows the response on
         // both session/new and session/load (issue 633).
         notification("_x.ai/session_notification", {
@@ -225,9 +291,50 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         }
         break;
       }
+      case "session/set_config_option": {
+        const { configId, value } = msg.params;
+        if (process.env.KAOIRO_TEST_GROK_SET_HANG === "1") break;
+        if (configId === "model") {
+          if (process.env.KAOIRO_TEST_GROK_MODEL_FAIL === "1" || !MODELS.some((m) => m.id === value))
+            return invalidParams(msg.id);
+          model = value;
+        } else if (configId === "reasoning_effort") {
+          if (process.env.KAOIRO_TEST_GROK_EFFORT_FAIL === "1" ||
+            !MODELS.find((m) => m.id === model).levels.includes(value)) return invalidParams(msg.id);
+          effort = value;
+        } else return invalidParams(msg.id);
+        persist();
+        reply(msg.id, { configOptions: configOptions() });
+        update({ sessionUpdate: "config_option_update", configOptions: configOptions() });
+        notification("_x.ai/session_notification", { sessionId: sid, update: {
+          sessionUpdate: "model_changed", model_id: model, reasoning_effort: effort } });
+        break;
+      }
       case "session/prompt": {
         prompt = msg.id;
+        turnCalls = 0;
+        turnModel = process.env.KAOIRO_TEST_GROK_REPORT_MODEL ?? model;
         const text = msg.params.prompt[0].text;
+        const calls = /^calls-(\d+)$/.exec(text);
+        if (calls) {
+          for (let n = 1; n <= Number(calls[1]); n++) {
+            if (n > 1) await waitRelease();
+            update({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "thinking" } });
+            modelCall(n);
+          }
+          finish(msg.id, "");
+          break;
+        }
+        if (text === "no-calls") {
+          finish(msg.id, "", "end_turn", undefined, true);
+          break;
+        }
+        if (text === "rogue-model-changed") {
+          notification("_x.ai/session_notification", { sessionId: sid, update: {
+            sessionUpdate: "model_changed", model_id: "grok-4.5", reasoning_effort: "low" } });
+          finish(msg.id, "");
+          break;
+        }
         if (["chunks", "fail-chunks", "hold-chunks"].includes(text)) {
           for (const chunk of ["Hello", " ", "world"]) textChunk(chunk);
           if (text === "hold-chunks") break;

@@ -4,6 +4,9 @@ export class AcpSession {
   sessionId: string | undefined;
   initializeResponse: acp.InitializeResponse | undefined;
   newSessionResponse: acp.NewSessionResponse | undefined;
+  /** The latest `configOptions` this session was given: by new, by load, or
+   *  by the last accepted `set_config_option`. */
+  configOptions: acp.SessionConfigOption[] | undefined;
   constructor(readonly connection: acp.ClientConnection) {}
 
   async initialize() {
@@ -28,6 +31,7 @@ export class AcpSession {
       { cwd, mcpServers, ...(newSessionMeta ? { _meta: newSessionMeta } : {}) },
     );
     this.sessionId = this.newSessionResponse.sessionId;
+    this.configOptions = this.newSessionResponse.configOptions ?? undefined;
     return this.newSessionResponse;
   }
 
@@ -36,6 +40,17 @@ export class AcpSession {
       sessionId, cwd, mcpServers,
     });
     this.sessionId = sessionId;
+    this.configOptions = response.configOptions ?? undefined;
+    return response;
+  }
+
+  async setConfigOption(configId: string, value: string) {
+    if (!this.sessionId) throw new Error("ACP session is not initialized");
+    const response = await this.connection.agent.request(
+      acp.methods.agent.session.setConfigOption,
+      { sessionId: this.sessionId, configId, value },
+    );
+    this.configOptions = response.configOptions;
     return response;
   }
 

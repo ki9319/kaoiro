@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PermissionSelection as Selection, PermissionSubmission, PermissionSyncMessage,
-  PermissionGateExt, WrapperPermissionLifecycleMessage } from "@kaoiro/protocol";
+  PermissionGateExt, SwitchErrorExt, WrapperPermissionLifecycleMessage } from "@kaoiro/protocol";
 import { createPermissionState, setPermissionSyncSupport, requestPermission,
   applyPermissionSyncState, capturePermission, beginPermissionExecution,
   permissionLaneFailed, permissionObservationApplied, permissionObservationFailed,
@@ -51,6 +51,13 @@ import { formatTurnWatchdogLine } from "@kaoiro/wrapper-core";
 import { resolveTurnWatchdogSettings } from "./settings.js";
 import { GrokLaunchError } from "./grok/errors.js";
 import { stateChangeKey } from "./grok/state_key.js";
+import {
+  parseModelState,
+  parseSelection,
+  promptTokens,
+  reportedSelection,
+  type GrokModel,
+} from "./grok/usage.js";
 import { MCP_NOT_CONNECTED, ToolHost, type ToolHostStats } from "./toolhost.js";
 
 export interface GrokHostOptions {
@@ -73,6 +80,9 @@ export interface GrokHostOptions {
   permissionSyncSupported?: boolean;
   waitForPermissionSync?: () => Promise<void>;
   permissionGateTimeoutMs?: number;
+  /** How long one `session/set_config_option` may take before the host
+   *  fails; the request normally answers in milliseconds. */
+  switchTimeoutMs?: number;
   onPermissionLifecycle?: (event: WrapperPermissionLifecycleMessage) => void;
   /** A synchronization seam for lifecycle tests; production has no observer. */
   onLaneStep?: (step: LaneStep, pid?: number) => Promise<void> | void;
@@ -92,6 +102,7 @@ const MCP_READY_TIMEOUT_MS = 15_000;
 // Metadata held per loading generation until promotion; a memory bound, well
 // above the few dozen lines a start-up sends.
 const LOADING_METADATA_LIMIT = 256;
+const SWITCH_TIMEOUT_MS = 15_000;
 // session/load replays the history as session/update and Grok's own records,
 // past hook executions included, as _x.ai/session/update.
 const LOAD_REPLAY_METHODS = new Set(["session/update", "_x.ai/session/update"]);
@@ -108,6 +119,10 @@ interface Generation {
   fail: (error: Error) => void;
   held: GrokWireMetadata[];
   heldDropped: number;
+  models: GrokModel[];
+}
+class SwitchTimeout extends Error {
+  constructor() { super("grok configuration request timed out"); }
 }
 class LaneFailure extends Error {
   constructor(readonly step: PermissionGateExt["step"] | "stopping") { super("grok restart failed"); }
@@ -146,6 +161,21 @@ export class GrokHost implements EngineAdapter {
   #text = "";
   #assistantText = "";
   #publishedState: string | undefined;
+  // Model and effort as Grok holds them, read from its configOptions.
+  #catalog: GrokModel[] = [];
+  #selection: { model: string; effort: string } | undefined;
+  #switchable = false;
+  #modelSource: "default" | "config" = "default";
+  #effortSource: "default" | "config" = "default";
+  #pending: { model?: string; effort?: string } = {};
+  #inflight: { model?: string; effort?: string } = {};
+  #switchErrorOnce: SwitchErrorExt | undefined;
+  #effortResetOnce = false;
+  // The model-call prompt size of the running turn, and the last published
+  // reading. A reading shows only while its generation is the current one.
+  #turnTokens: number | undefined;
+  #contextGeneration = 0;
+  #context: { generation: number; used: number; max: number } | undefined;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #abortTimer: ReturnType<typeof setTimeout> | undefined;
   #resolveClosed!: () => void;
@@ -209,23 +239,21 @@ export class GrokHost implements EngineAdapter {
     const switching = this.#platform === "linux" && this.#permissions.syncSupported;
     return {
       engine: "grok",
-      models: [{ value: "default", display_name: "Account default" }],
-      model: "default",
-      model_source: "default",
+      ...this.#selectionFields(),
       ...(permission ? { permission } : {}),
       ...(effective ? { effective } : {}),
       ...(this.#current ? { permission_policy: this.#current.policy } : {}),
       ...(this.#permissions.latest ? { permission_control: this.#permissions.latest } : {}),
       ...(this.#permissions.gate ? { permission_gate: this.#permissions.gate } : {}),
       session_capabilities: {
-        supports_model_switch: false,
-        supports_effort_switch: false,
+        supports_model_switch: this.#switchable,
+        supports_effort_switch: this.#switchable,
         supports_permission_switch: switching,
         supports_permission_mode_switch: false,
         supports_attachments: false,
         supports_user_input_dialog: true,
         supports_session_reset: false,
-        supports_context_usage: false,
+        supports_context_usage: this.#switchable,
         permission_switch_axes: switching ? { sandbox: { max: pair.sandbox }, network_access: { max: pair.network_access } } : {},
       },
       delivery_modes: { early: "none", yield: "none" },
@@ -241,13 +269,54 @@ export class GrokHost implements EngineAdapter {
     const ext = this.statusExtSnapshot();
     return {
       engine: "grok",
-      model: "default",
-      model_source: "default",
+      model: ext.model,
+      model_source: ext.model_source,
+      ...(ext.effort ? { effort: ext.effort, effort_source: ext.effort_source } : {}),
+      ...(ext.context ? { context: ext.context } : {}),
       ...(ext.permission ? { permission: ext.permission } : {}),
+    };
+  }
+  // Until a configOptions reading passes the checks of #adoptGeneration the
+  // catalog stays the account default, so the switch capabilities stay off.
+  #selectionFields(): Record<string, unknown> {
+    const selection = this.#switchable ? this.#selection : undefined;
+    if (!selection) {
+      return {
+        models: [{ value: "default", display_name: "Account default" }],
+        model: "default",
+        model_source: "default",
+      };
+    }
+    const pendingModel = this.#pending.model ?? this.#inflight.model;
+    const pendingEffort = this.#pending.effort ?? this.#inflight.effort;
+    const context = this.#context;
+    return {
+      models: this.#catalog.map(({ window: _window, effort_levels, ...info }) => ({
+        ...info,
+        ...(effort_levels.length > 0 ? { effort_levels } : {}),
+      })),
+      model: selection.model,
+      model_source: this.#modelSource,
+      effort: selection.effort,
+      effort_source: this.#effortSource,
+      ...(pendingModel === undefined ? {} : { pending_model: pendingModel }),
+      ...(pendingEffort === undefined ? {} : { pending_effort: pendingEffort }),
+      ...(this.#effortResetOnce ? { effort_reset: true } : {}),
+      ...(this.#switchErrorOnce ? { switch_error: this.#switchErrorOnce } : {}),
+      ...(context && context.generation === this.#contextGeneration ? {
+        context: {
+          used_tokens: context.used,
+          max_tokens: context.max,
+          used_percentage: (100 * context.used) / context.max,
+        },
+      } : {}),
     };
   }
   #state(state: MachineState["state"]) {
     this.#machine = { ...this.#machine, state };
+    // A switch error or an effort reset is reported once. Each is published
+    // even when it repeats the last envelope.
+    const once = this.#switchErrorOnce !== undefined || this.#effortResetOnce;
     const envelope = makeStateChange(
       this.#options.config,
       state,
@@ -255,8 +324,10 @@ export class GrokHost implements EngineAdapter {
       {},
       this.statusExtSnapshot(),
     );
+    this.#switchErrorOnce = undefined;
+    this.#effortResetOnce = false;
     const key = stateChangeKey(envelope);
-    if (key === this.#publishedState) return;
+    if (key === this.#publishedState && !once) return;
     this.#publishedState = key;
     this.#options.send(envelope);
   }
@@ -416,7 +487,7 @@ export class GrokHost implements EngineAdapter {
         },
       }, grokExtension((notification) => { if (generation?.role === "current") this.#vendor(notification); }));
       generation = { role: "loading", process: childProcess, session: new AcpSession(connection), toolHost,
-        profile, policy, failed, fail, held: [], heldDropped: 0 };
+        profile, policy, failed, fail, held: [], heldDropped: 0, models: [] };
       this.#loading = generation;
       const owned = generation;
       void connection.closed.then(() => this.#generationFailed(owned, new Error("grok ACP connection closed unexpectedly")));
@@ -426,6 +497,7 @@ export class GrokHost implements EngineAdapter {
       const initialized = await wait(generation.session.initialize());
       if (initialized.agentCapabilities?.mcpCapabilities?.http !== true)
         throw new GrokLaunchError("grok does not support HTTP MCP servers");
+      generation.models = parseModelState(initialized._meta);
       await at("load");
       if (this.#sessionId) {
         if (initialized.agentCapabilities?.loadSession !== true) throw new Error("grok session load unsupported");
@@ -445,6 +517,7 @@ export class GrokHost implements EngineAdapter {
       this.#loading = undefined;
       this.#sessionId = generation.session.sessionId;
       this.#completion = undefined;
+      this.#adoptGeneration(generation);
       this.#flushHeld(generation);
       this.#options.onSessionId?.(this.#sessionId!);
     } catch (error) {
@@ -508,7 +581,12 @@ export class GrokHost implements EngineAdapter {
     if (this.#draining || !this.#started || this.#closing) return;
     this.#draining = true;
     try {
-      while (this.#queue.length && !this.#closing) {
+      while (!this.#closing) {
+        // An empty queue is an idle boundary: send what the operator chose.
+        if (!this.#queue.length) {
+          if (!await this.#applyPending()) break;
+          continue;
+        }
         const turn = this.#queue[0]!;
         if (!await this.#awaitDispatch()) {
           if (this.#closing) return;
@@ -548,6 +626,7 @@ export class GrokHost implements EngineAdapter {
             continue;
           }
         }
+        await this.#applyPending();
         if (this.#closing) return;
         this.#queue.shift();
         await this.#execute(turn, submission);
@@ -560,6 +639,7 @@ export class GrokHost implements EngineAdapter {
     this.#signal = new AbortController();
     this.#text = "";
     this.#assistantText = "";
+    this.#turnTokens = undefined;
     this.#event({ kind: "user_send" });
     if (turn.conversations.length === 0) {
       this.#options.send(
@@ -576,6 +656,7 @@ export class GrokHost implements EngineAdapter {
     try {
       const response = await this.#current!.session.prompt(turn.text);
       this.#observe(submission, promptIdOf(response._meta));
+      this.#settleContext(response._meta);
       const completed =
         this.#completion?.sessionId === this.#sessionId &&
         this.#completion?.promptId === promptIdOf(response._meta);
@@ -652,8 +733,13 @@ export class GrokHost implements EngineAdapter {
     }, this.#settings.inactivityMs);
   }
   #update(notification: acp.SessionNotification) {
-    if (!this.#active || notification.sessionId !== this.#sessionId)
+    if (notification.sessionId !== this.#sessionId) return;
+    if (notification.update.sessionUpdate === "config_option_update") {
+      const selection = parseSelection(notification.update.configOptions);
+      if (selection) this.#confirmSelection(selection.model, selection.effort);
       return;
+    }
+    if (!this.#active) return;
     this.#progress();
     const update = updateEvents(notification);
     if (update.log && update.log.kind !== "assistant") this.#flushAssistantLog();
@@ -711,6 +797,38 @@ export class GrokHost implements EngineAdapter {
   #vendor(notification: Record<string, unknown>) {
     const completion = turnCompletion(notification, this.#sessionId);
     if (completion) this.#completion = completion;
+    const sessionId = notification.sessionId ?? notification.session_id;
+    if (sessionId !== this.#sessionId) return;
+    const tokens = promptTokens(notification);
+    if (tokens !== undefined && this.#active) this.#turnTokens = tokens;
+    const reported = reportedSelection(notification);
+    if (reported) this.#confirmSelection(reported.model, reported.effort);
+  }
+  // model_changed and config_option_update only confirm what a request
+  // returned. A disagreement is logged and the returned value stays.
+  #confirmSelection(model: string | undefined, effort: string | undefined) {
+    const held = this.#selection;
+    if (!held || !this.#switchable || this.#inflight.model || this.#inflight.effort) return;
+    if ((model !== undefined && model !== held.model) || (effort !== undefined && effort !== held.effort))
+      writeRedactedStderr("[kaoiro] grok reported a model or effort other than the one it last returned\n");
+  }
+  // The reading of a turn is its last model call's prompt size, against the
+  // window of the model the turn ran on. A turn that made no call keeps the
+  // last reading.
+  #settleContext(meta: unknown) {
+    const tokens = this.#turnTokens;
+    this.#turnTokens = undefined;
+    const model = this.#selection?.model;
+    if (tokens === undefined || !this.#switchable || model === undefined) return;
+    const reported = (meta as Record<string, unknown> | null | undefined)?.modelId;
+    if (typeof reported === "string" && reported !== model) {
+      writeRedactedStderr("[kaoiro] grok ran a turn on a model other than the selected one; its context reading is withdrawn\n");
+      this.#contextGeneration += 1;
+      return;
+    }
+    const max = this.#catalog.find((entry) => entry.value === model)?.window;
+    if (max === undefined) return;
+    this.#context = { generation: this.#contextGeneration, used: tokens, max };
   }
   async #permission(
     request: acp.RequestPermissionRequest,
@@ -766,11 +884,119 @@ export class GrokHost implements EngineAdapter {
     }).finally(() => this.#resolveClosed());
   }
 
-  async setModel(_value: string) {
-    throw new Error("grok model switching is unsupported");
+  async setModel(value: string) {
+    const selection = this.#requireSwitchable("model");
+    if (!this.#catalog.some((entry) => entry.value === value))
+      return this.#rejectSwitch("model", value, selection.model);
+    this.#pending = { ...this.#pending, model: value };
+    this.#state(this.state);
+    void this.#drain();
   }
-  async setEffort(_value: string) {
-    throw new Error("grok effort switching is unsupported");
+  async setEffort(value: string) {
+    const selection = this.#requireSwitchable("effort");
+    const target = this.#pending.model ?? selection.model;
+    const levels = this.#catalog.find((entry) => entry.value === target)?.effort_levels ?? [];
+    if (!levels.includes(value)) return this.#rejectSwitch("effort", value, selection.effort);
+    this.#pending = { ...this.#pending, effort: value };
+    this.#state(this.state);
+    void this.#drain();
+  }
+  #requireSwitchable(kind: "model" | "effort") {
+    if (this.#closing) throw new Error("grok host is closed");
+    if (!this.#switchable || !this.#selection) throw new Error(`grok ${kind} switching is unsupported`);
+    return this.#selection;
+  }
+  #rejectSwitch(kind: "model" | "effort", requested: string, rolledBackTo: string) {
+    this.#switchErrorOnce = { kind, requested, reason: "control_rejected", rolled_back_to: rolledBackTo };
+    this.#state(this.state);
+  }
+  // Takes what Grok reports for a generation as the truth: the catalog from
+  // initialize, the selection from configOptions. Switching is offered only
+  // when both selects exist and every model they list has a catalog entry.
+  #adoptGeneration(generation: Generation) {
+    const selection = parseSelection(generation.session.configOptions);
+    const known = new Set(generation.models.map((entry) => entry.value));
+    const switchable = selection !== undefined && known.size > 0 && selection.models.every((value) => known.has(value))
+      && known.has(selection.model);
+    this.#catalog = generation.models;
+    this.#switchable = switchable;
+    this.#setSelection(switchable ? { model: selection.model, effort: selection.effort } : undefined);
+  }
+  // A different model withdraws the context reading until a turn finishes on it.
+  #setSelection(next: { model: string; effort: string } | undefined) {
+    if (this.#selection && this.#selection.model !== next?.model) this.#contextGeneration += 1;
+    this.#selection = next;
+  }
+  async #applyPending(): Promise<boolean> {
+    const generation = this.#current;
+    if (!generation || this.#loading || this.#active || this.#closing || !this.#switchable) return false;
+    if (this.#pending.model === undefined && this.#pending.effort === undefined) return false;
+    // Claim the values before the first await, so no second entry sends them.
+    const claimed = (this.#inflight = this.#pending);
+    this.#pending = {};
+    try {
+      await this.#sendSwitch(generation, claimed);
+    } finally {
+      this.#inflight = {};
+    }
+    if (!this.#closing) this.#state(this.state);
+    return true;
+  }
+  async #sendSwitch(generation: Generation, claimed: { model?: string; effort?: string }) {
+    const held = this.#selection!;
+    const target = claimed.model ?? held.model;
+    const entry = this.#catalog.find((candidate) => candidate.value === target);
+    let effort = claimed.effort ?? held.effort;
+    let reset = false;
+    if (entry && entry.effort_levels.length > 0 && !entry.effort_levels.includes(effort) && entry.default_effort) {
+      effort = entry.default_effort;
+      reset = true;
+    }
+    if (target !== held.model) {
+      const failure = await this.#setOption(generation, "model", target);
+      if (failure) {
+        if (failure !== "closing")
+          this.#switchErrorOnce = { kind: "model", requested: target, reason: "control_rejected", rolled_back_to: held.model };
+        return;
+      }
+      this.#modelSource = "config";
+    }
+    const now = this.#selection!;
+    if (effort === now.effort) return;
+    const failure = await this.#setOption(generation, "reasoning_effort", effort);
+    if (failure) {
+      if (failure !== "closing")
+        this.#switchErrorOnce = { kind: "effort", requested: effort,
+          reason: reset ? "effort_reset_failed" : "control_rejected", rolled_back_to: now.effort };
+      return;
+    }
+    this.#effortSource = "config";
+    if (reset) this.#effortResetOnce = true;
+  }
+  // Sends one request and adopts the configOptions it returns. Resolves to
+  // why it did not apply, or undefined when it did.
+  async #setOption(generation: Generation, id: "model" | "reasoning_effort", value: string): Promise<"failed" | "closing" | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new SwitchTimeout()),
+        this.#options.switchTimeoutMs ?? SWITCH_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([generation.session.setConfigOption(id, value), expired]);
+      const selection = parseSelection(generation.session.configOptions);
+      if (!selection) throw new Error("grok returned no model or effort selection");
+      this.#setSelection({ model: selection.model, effort: selection.effort });
+      return undefined;
+    } catch (error) {
+      if (this.#closing) return "closing";
+      if (error instanceof SwitchTimeout) {
+        this.#generationFailed(generation, error);
+        return "closing";
+      }
+      return "failed";
+    } finally {
+      clearTimeout(timer);
+    }
   }
   async setPermission(value: PermissionSelection) {
     if (this.#platform !== "linux" || !this.#permissions.syncSupported)

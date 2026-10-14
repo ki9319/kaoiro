@@ -569,8 +569,6 @@ describe("resident ACP host", () => {
   });
   it("rejects unsupported controls and attachments", async () => {
     const { host } = await started();
-    await expect(host.setModel("other")).rejects.toThrow("unsupported");
-    await expect(host.setEffort("low")).rejects.toThrow("unsupported");
     await expect(
       host.setPermission({
         revision: 1,

@@ -181,8 +181,14 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
     onInterrupt: () => {
       void host?.interrupt().catch(() => host?.close());
     },
-    onSetModel: () => controlFailure("model switching"),
-    onSetEffort: () => controlFailure("effort switching"),
+    onSetModel: (value: string) => {
+      if (host) void host.setModel(value).catch(() => controlFailure("model switching", "failed"));
+      else controlFailure("model switching", "is not ready");
+    },
+    onSetEffort: (level: string) => {
+      if (host) void host.setEffort(level).catch(() => controlFailure("effort switching", "failed"));
+      else controlFailure("effort switching", "is not ready");
+    },
     onSetPermission: (value: PermissionSelection) => {
       if (host) void host.setPermission(value).catch(() => controlFailure("permission switching", "failed"));
       else pendingPermissions.push({ kind: "relay", value });
