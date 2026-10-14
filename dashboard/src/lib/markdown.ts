@@ -3,9 +3,20 @@
 // untrusted, so this is the single XSS chokepoint: marked turns markdown
 // into HTML, then DOMPurify strips scripts, event handlers, and
 // javascript: URLs before the string is ever inserted as HTML.
+//
+// renderMarkdown runs inside templates, so it never throws: a failure anywhere
+// in the pipeline, or block quote / list nesting deeper than the limit the
+// strict renderer uses (untrustedMarkdown.ts), shows the source as escaped text
+// instead. A few thousand nested quotes overflow marked's lexer, and the limit
+// makes the result of anything deeper the same whatever the engine's stack.
 
 import { marked } from "marked";
 import DOMPurify from "dompurify";
+import {
+  escapeHtml,
+  MAX_NESTING_DEPTH,
+  nestingDepth,
+} from "./untrustedMarkdown";
 
 const MARKDOWN_SANITIZER_POLICY = {
   // Untrusted markdown must not be able to cover controls in the surrounding
@@ -23,12 +34,33 @@ const MERMAID_SANITIZER_POLICY = {
   ADD_TAGS: ["style"],
 };
 
-/** Markdown -> sanitized HTML. Never returns script/handler markup. */
+/** The source as escaped text: one <p>, each line break a <br>. Escaping leaves
+ *  no markup, and it is not sanitized again because the sanitizer may be what
+ *  failed. */
+function plainText(text: string): string {
+  return `<p>${text.split(/\r?\n/).map(escapeHtml).join("<br>")}</p>`;
+}
+
+/** Markdown -> sanitized HTML. Never returns script/handler markup, and never
+ *  throws; see the header for what it returns instead. */
 export function renderMarkdown(text: string): string {
-  // async:false selects marked's synchronous overload (returns string,
-  // not Promise); breaks turns single newlines into <br> for chat text.
-  const html = marked.parse(text, { async: false, breaks: true });
-  return DOMPurify.sanitize(html, MARKDOWN_SANITIZER_POLICY);
+  try {
+    // The lexer and the parser are called directly so the tokens can be
+    // measured between them. marked.parse merges marked's defaults (gfm among
+    // them) into the options it is given and the direct pair does not, so the
+    // merged options are built here and given to both. A direct pair also skips
+    // the hooks and walkTokens stages of marked.parse; the global `marked` has
+    // neither configured. breaks turns single newlines into <br> for chat text.
+    const options = { ...marked.defaults, async: false, breaks: true };
+    const tokens = marked.lexer(text, options);
+    if (nestingDepth(tokens) > MAX_NESTING_DEPTH) return plainText(text);
+    return DOMPurify.sanitize(
+      marked.parser(tokens, options),
+      MARKDOWN_SANITIZER_POLICY,
+    );
+  } catch {
+    return plainText(text);
+  }
 }
 
 /** Sanitizes Mermaid's generated SVG under its narrowly-scoped style policy. */

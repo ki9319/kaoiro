@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
+import { marked } from "marked";
 import { describe, expect, it } from "vitest";
 import { renderMarkdown } from "../src/lib/markdown";
 import {
   inlineLineCount,
   inlineMarkdownToHtml,
   MAX_NESTING_DEPTH,
+  nestingDepth,
   renderUntrustedInline,
   renderUntrustedMarkdown,
   sanitizeUntrustedHtml,
@@ -554,3 +556,19 @@ const CUT_CORPUS = [
   "<code>x <strong/x>bold <span/class=md-link>fake</span> <kbd>k <b/x>b</kbd> <pre>p <img/src=x/onerror=alert(1)>",
   "é \u{1F468}‍\u{1F469}‍\u{1F467} **強調 ~~取り消し~~** <b>raw</b>\n\n本文",
 ];
+
+// Shared with the chat renderer (markdown.ts), where a message can be as large
+// as an agent writes it.
+describe("nestingDepth", () => {
+  it("counts quote and list nesting along the deepest path", () => {
+    expect(nestingDepth(marked.lexer("plain text"))).toBe(0);
+    expect(nestingDepth(marked.lexer("> - a"))).toBe(2);
+    expect(nestingDepth(marked.lexer("- a\n  - b\n    - c\n- d"))).toBe(3);
+    expect(nestingDepth(marked.lexer("> > > deep"))).toBe(3);
+  });
+
+  it("measures a paragraph of 200,000 inline tokens without overflowing the stack", () => {
+    const tokens = marked.lexer("*a* ".repeat(100_000));
+    expect(nestingDepth(tokens)).toBe(0);
+  });
+});

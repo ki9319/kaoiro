@@ -25,7 +25,9 @@ import { Marked, type Token, type Tokens } from "marked";
 
 /** Deeper than this (blockquote or list nesting) renders as plain text. A
  *  deep nest makes the lexer overflow the stack, and below that DOMPurify slow
- *  on the resulting tree (measured: ">" x 1000 took 459 ms to sanitize). */
+ *  on the resulting tree (measured: ">" x 1000 took 459 ms to sanitize). The
+ *  chat renderer (markdown.ts) applies the same limit, and nothing else of
+ *  this module's policy. */
 export const MAX_NESTING_DEPTH = 32;
 
 export type UntrustedRender =
@@ -33,7 +35,7 @@ export type UntrustedRender =
   /** Parsing or sanitizing failed or was refused; show the source as text. */
   | { kind: "plain" };
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -266,17 +268,20 @@ export function sanitizeUntrustedInlineHtml(html: string): string {
   });
 }
 
-/** Blockquote and list nesting along the deepest path of a token tree. */
-function nestingDepth(tokens: readonly Token[]): number {
+/** Blockquote and list nesting along the deepest path of a token tree. The
+ *  chat renderer (markdown.ts) measures with it too, where one paragraph can
+ *  hold more inline tokens than an argument list can spread, so each array is
+ *  walked in place. */
+export function nestingDepth(tokens: readonly Token[]): number {
   let deepest = 0;
   for (const token of tokens) {
-    const children: Token[] = [];
-    if ("tokens" in token && Array.isArray(token.tokens)) children.push(...token.tokens);
+    let below = 0;
+    if ("tokens" in token && Array.isArray(token.tokens)) below = nestingDepth(token.tokens);
     if (token.type === "list" && "items" in token && Array.isArray(token.items)) {
-      for (const item of token.items) children.push(item as Token);
+      below = Math.max(below, nestingDepth(token.items as Token[]));
     }
     const own = token.type === "blockquote" || token.type === "list" ? 1 : 0;
-    deepest = Math.max(deepest, own + nestingDepth(children));
+    deepest = Math.max(deepest, own + below);
   }
   return deepest;
 }
