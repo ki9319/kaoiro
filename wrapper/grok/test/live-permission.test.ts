@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { liveExecutable } from "./native-support.js";
+import { allowedByRule, liveExecutable } from "./native-support.js";
 
 // The fixtures behind the live tests' permission path (issue 615), checked
 // without Grok.
@@ -65,6 +65,22 @@ describe("live-permission policy hook", () => {
   it("denies everything when nothing is configured", () => {
     expect(decide(terminal("printf KAOIRO_HOOK_PROBE"))).toBe("deny");
     expect(decide({ tool_name: "list_agents", tool_input: {} })).toBe("deny");
+  });
+});
+
+describe("the live tests' answer rule", () => {
+  const rule = { marker: "KAOIRO_HOOK_PROBE", tools: ["list_agents"] };
+  const ask = (input: unknown) => allowedByRule({ request_id: "r", tool_name: "t", input }, rule);
+  it("allows the marker command and listed tools, with or without the server prefix", () => {
+    expect(ask({ command: "printf KAOIRO_HOOK_PROBE" })).toBe(true);
+    expect(ask({ tool_name: "list_agents" })).toBe(true);
+    expect(ask({ tool_name: "kaoiro__list_agents" })).toBe(true);
+  });
+  it("denies other commands, unlisted tools and missing input", () => {
+    expect(ask({ command: "printf other" })).toBe(false);
+    expect(ask({ tool_name: "whoami" })).toBe(false);
+    expect(ask(undefined)).toBe(false);
+    expect(allowedByRule({ input: { command: "printf KAOIRO_HOOK_PROBE" } }, {})).toBe(false);
   });
 });
 
