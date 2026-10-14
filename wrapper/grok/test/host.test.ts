@@ -400,7 +400,7 @@ describe("resident ACP host", () => {
     expect(envelopes.slice(start).filter(e => e.type === "state_change")
       .map(e => e.state)).toEqual([
         "sending", "tool_running", "tool_running", "tool_running",
-        "thinking", "thinking", "waiting_input", "waiting_input",
+        "thinking", "thinking", "done", "waiting_input", "waiting_input",
       ]);
     expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "assistant")
       .map(e => ({ state: e.state, payload: e.payload }))).toEqual([
