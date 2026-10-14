@@ -104,8 +104,11 @@ normal peer messages and dispatch confirmation. Early and yield delivery
 are explicitly `none`. Reply-basis v1 is not negotiated: Grok MCP calls do
 not carry turn-origin identity, so the MCP server cannot prove it.
 
-The launch catalog contains only `default` (account default). Model and
-effort switching, attachments, cold resume, history replay, context usage
+The launch catalog contains only `default` (account default); launch-time
+model selection is not supported. Live model and effort switching and context
+usage are supported when Grok lists its configuration options (see
+[Model and effort switching](#model-and-effort-switching) and
+[Context usage](#context-usage)). Attachments, cold resume, history replay
 and quota reporting are unsupported. Unsupported controls reject explicitly.
 
 ## Permission projection
@@ -202,6 +205,86 @@ its 15-second limit. Grok's stored session summary still names the creation
 profile after load. The wrapper reports the current generation's profile
 instead. Session rules are retained by load and are not resent.
 
+## Model and effort switching
+
+The catalog and the selection are read from Grok, once per generation.
+`initialize` `_meta.modelState.availableModels` gives each model's id, name,
+description, reasoning-effort levels with the default one, and context window
+(the window stays private). `session/new` and `session/load` `configOptions`
+give the current `model` and `reasoning_effort`. `ext.models`, `ext.model` and
+`ext.effort` mirror them; `model_source` and `effort_source` stay `default`
+until an operator switch succeeds, then read `config`.
+
+`supports_model_switch`, `supports_effort_switch` and `supports_context_usage`
+are `true` only when both options are `select` options and every model they
+list has a catalog entry. Otherwise the capabilities stay `false`, the
+catalog stays the account default and `setModel` and `setEffort` reject.
+
+`setModel` and `setEffort` never talk to Grok. They check the value against
+the catalog (an effort against the levels of the pending model, else of the
+current one), record it, stamp `ext.pending_model` or `ext.pending_effort`
+and wake the drain loop. A value outside the catalog sends nothing and
+publishes `switch_error` with `reason: "control_rejected"`.
+
+Grok applies a switch made during a turn to that turn's later model calls, so
+the host sends `session/set_config_option` only at a boundary: right before
+the next `session/prompt`, and whenever the queue is empty (a switch asked
+while idle, the end of a turn with no successor). The drain loop is the only
+sender and runs one request at a time. A request that gets no answer within
+15 seconds fails the host, like an unexpected ACP closure.
+
+The target values are decided when the pending values are applied. The target
+model is the pending model or the current one. The target effort is the
+pending effort, else the current effort if the target model lists it, else the
+target model's default effort. Grok keeps a stale effort on a model switch, so
+the host sends the model request and then the effort request, and stamps
+`effort_reset: true` once when it substituted the default. Each response's
+`configOptions` is adopted as the truth.
+
+A request Grok rejects (JSON-RPC `-32602`) changes nothing it did not apply:
+
+- The model request fails: nothing is applied, a pending effort is dropped,
+  and `switch_error` is `{ kind: "model", requested, reason:
+  "control_rejected", rolled_back_to: <current model> }`.
+- The model request succeeds and the effort request fails: the model stays
+  switched, because Grok applied it. `ext.effort` reports what Grok still
+  holds, which can be outside the new model's `effort_levels`.
+  `switch_error` is `{ kind: "effort", requested, reason, rolled_back_to:
+  <the held effort> }` with `reason: "effort_reset_failed"` when the default
+  was being substituted and `"control_rejected"` otherwise, and no
+  `effort_reset` is stamped. A later `setEffort` repairs it.
+
+A pending value is not queued again after a failure. `switch_error` and
+`effort_reset` are published once each.
+
+The selection lives in the Grok session, not in the process. A permission
+switch loads the same session into a new process; the new generation adopts
+the `configOptions` of its load response at promotion and nothing is sent
+again. `model_changed` and `config_option_update` only confirm: a value that
+disagrees with the last returned one is logged to stderr and the returned
+value stays.
+
+## Context usage
+
+`ext.context` is `{ used_tokens, max_tokens, used_percentage }` where
+`used_tokens` is the prompt size of the last model call of the last finished
+turn (`input_tokens + cache_read_input_tokens + cache_creation_input_tokens`
+of its last `_x.ai/session_notification` `response_completed`), `max_tokens`
+is the `totalContextTokens` of the model the turn ran on and the percentage is
+`100 * used / max`. This is the headline of Grok's own `/context`; the turn's
+summed usage is not the context size. It is published with the next
+`state_change` and rides every later one.
+
+A cancelled turn that made a call publishes the same way. A turn that made no
+call (a slash command, a rejected permission before the first call) keeps the
+last reading. A model change withdraws the reading until a turn has finished
+on the new model, and an effort change keeps it. The reading is also
+withdrawn, with a stderr line, when the prompt result's `_meta.modelId`
+differs from the selected model.
+
+Limit: the TUI's `/context-window` can change the window of a session's model
+and ACP does not expose it, so such a session shows the default window.
+
 ## Upstream gaps and limits
 
 - Claude permission import has no compat switch. Command-text deny matching
@@ -213,6 +296,12 @@ instead. Session rules are retained by load and are not resent.
   it cannot verify a permission-mode change and is never sent by the adapter.
 - Rules supplied on session/load did not replace the original session rules.
 - Rate and quota data are not exposed in ACP output.
+- `/context` in the Grok TUI floors its percentage to two decimals, and in a
+  session whose only model call is its first one it shows a far smaller
+  number than that call's prompt. From the second model call of a session it
+  matches the last call's prompt size. `ext.context` always follows the
+  prompt size the model received. See the
+  [dated evidence](../../evidence/grok/2026-10-15-unit4-premises.md).
 
 These are reference notes; no upstream report is part of this work.
 

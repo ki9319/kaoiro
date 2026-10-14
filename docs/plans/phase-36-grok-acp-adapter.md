@@ -76,8 +76,9 @@ Mapping:
 | state | `session/update` chunks and tool calls to running states; `_x.ai/session_notification` `turn_completed` to `waiting_input`; `pending_interaction` kind `permission` to `waiting_permission` only when a `session/request_permission` is actually outstanding | observed; acceptance item 1 records it |
 | turn identity | `session/prompt` result `_meta.promptId` (equal to `requestId`); the matching `_x.ai/session_notification` `turn_completed.prompt_id` | measured: equal on all 16 recorded turns |
 | tool-call origin | grok's MCP `tools/call` carries only `_meta.progressToken`; no turn or session identity | measured |
-| model / effort | default model from `session/new` `configOptions`; live switching is work unit 4 | measured: plain string value accepted; effect on the next turn unmeasured |
-| context, rate limits, attachments, history replay, cold resume | capability false or field omitted in work unit 1 | — |
+| model / effort | catalog from `initialize` `_meta.modelState`, selection from `session/new` and `session/load` `configOptions`; live switching through `session/set_config_option` (work unit 4) | measured, see the [unit 4 evidence](../evidence/grok/2026-10-15-unit4-premises.md): the switch applies at once, also inside a running turn, and the selection lives in the session |
+| context | `ext.context` from the last `response_completed` prompt size (work unit 4) | measured against the TUI `/context`, same evidence |
+| rate limits, attachments, history replay, cold resume | capability false or field omitted | — |
 
 ### Unsupported operations
 
@@ -85,7 +86,8 @@ Each is declared, not silently defaulted, and has a negative control:
 
 - `setPermissionMode` rejects. Unit 2 applies `setPermission` through a child
   restart and `session/load`; the result supplies the observed turn id.
-- `setModel` and `setEffort` reject until work unit 4.
+- `setModel` and `setEffort` reject only when Grok lists no configuration
+  options (work unit 4 supports them otherwise).
 - `send(text, attachmentIds)` with attachments rejects.
 - `delivery_modes`: `early: "none"`, `yield: "none"`, stated explicitly
   (absence would mean unknown).
@@ -395,7 +397,7 @@ permission pages, the runner configuration page, and an ADR for the engine
 | 1c. Serve the kaoiro tools over authenticated HTTP MCP (before unit 2) | [#604](https://github.com/sakuraiyuta/kaoiro/issues/604) | ✅ landed 8011fb0e |
 | 2. Permission and sandbox enforcement | [#591](https://github.com/sakuraiyuta/kaoiro/issues/591) | ✅ landed 6e7f7b7b |
 | 3. Resume, history replay and catalog probe | [#592](https://github.com/sakuraiyuta/kaoiro/issues/592) | ⏳ |
-| 4. Context usage, live model and effort switching | [#593](https://github.com/sakuraiyuta/kaoiro/issues/593) | ⏳ |
+| 4. Context usage, live model and effort switching | [#593](https://github.com/sakuraiyuta/kaoiro/issues/593) | in review |
 | 5. Parity as a delegated peer (rate limits, early delivery, reply basis, attachments) | [#628](https://github.com/sakuraiyuta/kaoiro/issues/628) | ⏳ |
 
 ### Unit 2 verification
