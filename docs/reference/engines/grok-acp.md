@@ -224,12 +224,15 @@ See the [dated evidence](../../evidence/grok/2026-10-14-premises.md).
 
 ## Result text
 
-The turn's `result.text` is all message text of the turn, clipped to 16,384
-bytes (`MAX_LOG_BYTES`), as Claude Code and Codex clip theirs. The result
-payload has no `truncated` field, so the clip is silent. The server rejects an
-envelope over 65,536 bytes without a reply the wrapper reads, which would lose
-the whole result envelope. Nothing reads `result.text`; the reply text reaches
-the dashboard through the assistant logs.
+A successful or interrupted turn's `result.text` is all message text of the
+turn, clipped by `clipText` to the `MAX_LOG_BYTES` budget (16,384 bytes), as
+Claude Code and Codex clip theirs; how a multi-byte character at the cut is
+handled is `clipText`'s contract. A failed or permission-rejected turn has an
+empty `result.text`, even when its text already reached the assistant logs.
+The result payload has no `truncated` field, so the clip is silent. The
+server rejects an envelope over 65,536 bytes without a reply the wrapper reads,
+which would lose the whole result envelope. Nothing reads `result.text`; the
+reply text reaches the dashboard through the assistant logs.
 
 ## Diagnostics and shutdown
 
