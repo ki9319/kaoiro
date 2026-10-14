@@ -91,9 +91,12 @@ Satisfy all of the following before starting.
   parser assumes GNU `tar tv*`'s output format; a bsdtar or busybox host fails
   loudly (a parse error, not a silent misread) once the archive has already
   been written.
-- **A manifest recorded before the LC_ALL=C listing change (issue #552) that
-  contains a non-ASCII entry name is refused by rollback's preflight**, before
-  any stop, archive, or wipe. Such a transaction is not restored automatically.
+- **A destructive rollback refuses, in its preflight, a manifest whose
+  `required_entries` do not match the archive's current `LC_ALL=C` listing**,
+  before any stop, archive, or wipe. In practice this is a manifest that
+  recorded a non-ASCII entry name in unescaped UTF-8, as listings made before
+  issue #552 under a UTF-8 locale did. Such a transaction is not restored
+  automatically.
 - **Use exactly one `backup_root` per deployment host.** The single-writer
   lock every mutating command (`start`/`update`/`rollback`) takes lives under
   `backup_root`, keyed by the checkout's own path — two DIFFERENT
