@@ -91,6 +91,12 @@ export type LaunchFn = (
 ) => ManagedChild;
 
 type MaybePromise<T> = T | Promise<T>;
+/** An async existence check in flight. `token` tells a late continuation it
+ *  was superseded; `abort` stops the probe it started (issue #644). */
+interface PendingCheck {
+  token: symbol;
+  abort: AbortController;
+}
 
 /** The validated fields of a `spawn` message the supervisor acts on. serverUrl
  *  is optional: under案A the server omits it and the runner falls back to its
@@ -213,6 +219,7 @@ export interface SupervisorOptions {
   listSessions?: (
     cwd: string,
     engine: EngineKind,
+    signal?: AbortSignal,
   ) => MaybePromise<SessionMeta[]>;
   /** Why Codex cannot be launched (an unusable CODEX_HOME), or null. Read at
    *  every Codex launch; the default checks the runner's own environment. */
@@ -221,6 +228,7 @@ export interface SupervisorOptions {
     cwd: string,
     sessionId: string,
     engine: EngineKind,
+    signal?: AbortSignal,
   ) => MaybePromise<boolean>;
   /** Clock in ms for the restart window; injectable for tests. Defaults to
    *  Date.now. */
@@ -658,11 +666,13 @@ export class Supervisor {
   readonly #listSessions: (
     cwd: string,
     engine: EngineKind,
+    signal?: AbortSignal,
   ) => MaybePromise<SessionMeta[]>;
   readonly #sessionExists: (
     cwd: string,
     sessionId: string,
     engine: EngineKind,
+    signal?: AbortSignal,
   ) => MaybePromise<boolean>;
   readonly #codexHomeProblem: () => string | null;
   readonly #now: () => number;
@@ -689,14 +699,16 @@ export class Supervisor {
   /** Resume validation for Codex uses async filesystem I/O (#97). Reserve
    *  the agent_id while it is pending so duplicate spawn events cannot pass
    *  the ordinary #children guard before the first launch has started. */
-  readonly #pendingSpawns = new Map<string, symbol>();
+  readonly #pendingSpawns = new Map<string, PendingCheck>();
   /** At most one async switch validation per live agent. The wrapper stays
    *  running until validation succeeds, so a stop/crash can cancel safely. */
-  readonly #pendingSwitches = new Map<string, symbol>();
+  readonly #pendingSwitches = new Map<string, PendingCheck>();
   /** `runner_sessions` is a singleton broadcast without request_id. Async
    *  scans can finish out of order, so only the latest valid enumerate
    *  request may publish a result. */
   #enumerationGeneration = 0;
+  /** The latest enumeration's probe; a newer request or stopAll aborts it. */
+  #enumerationAbort: AbortController | null = null;
 
   constructor(options: SupervisorOptions) {
     this.#hostId = options.hostId;
@@ -811,22 +823,23 @@ export class Supervisor {
     // injections may still answer synchronously. Preserve that fast path so
     // fresh/Claude spawn remains immediate while Codex I/O yields the event
     // loop instead of pausing status relay for every agent.
-    const exists = this.#sessionExists(parsed.cwd, resume, parsed.engine);
+    const abort = new AbortController();
+    const exists = this.#sessionExists(parsed.cwd, resume, parsed.engine, abort.signal);
     if (!isPromise(exists)) {
       this.#completeResumeSpawn(agentId, resumedParsed, exists);
       return;
     }
 
-    const token = Symbol(agentId);
-    this.#pendingSpawns.set(agentId, token);
+    const pending: PendingCheck = { token: Symbol(agentId), abort };
+    this.#pendingSpawns.set(agentId, pending);
     void exists
       .then((found) => {
-        if (this.#pendingSpawns.get(agentId) !== token) return;
+        if (this.#pendingSpawns.get(agentId) !== pending) return;
         this.#pendingSpawns.delete(agentId);
         this.#completeResumeSpawn(agentId, resumedParsed, found);
       })
       .catch((error: unknown) => {
-        if (this.#pendingSpawns.get(agentId) !== token) return;
+        if (this.#pendingSpawns.get(agentId) !== pending) return;
         this.#pendingSpawns.delete(agentId);
         process.stderr.write(
           `runner: resume session scan failed for ${agentId}: ${String(error)}\n`,
@@ -839,9 +852,9 @@ export class Supervisor {
   handleStop(payload: unknown): void {
     const agentId = readAgentId(payload);
     if (agentId === null) return;
-    // A stop racing an async Codex T3 scan cancels the not-yet-launched spawn.
-    // Deleting its token makes the promise continuation a no-op.
-    if (this.#pendingSpawns.delete(agentId)) {
+    // A stop racing an async T3 check cancels the not-yet-launched spawn.
+    // Dropping its record makes the continuation a no-op and stops its probe.
+    if (this.#cancelPendingSpawn(agentId)) {
       // Close the original spawn outcome instead of leaving the dashboard's
       // pending notice unresolved. The closed vocabulary has no cancellation
       // reason, so use the existing generic failure.
@@ -850,7 +863,7 @@ export class Supervisor {
     }
     const entry = this.#children.get(agentId);
     if (entry === undefined) return;
-    this.#pendingSwitches.delete(agentId);
+    this.#cancelPendingSwitch(agentId);
     this.#sendStopAgent(agentId);
     entry.stopping = true;
     entry.child.kill();
@@ -880,7 +893,7 @@ export class Supervisor {
       // restart behaviour unchanged.
       entry.parsed = { ...entry.parsed, requestId };
     }
-    this.#pendingSwitches.delete(agentId);
+    this.#cancelPendingSwitch(agentId);
     entry.restarting = true;
     entry.restarts = 0;
     entry.windowStart = this.#now();
@@ -914,30 +927,32 @@ export class Supervisor {
     }
     // A newer switch supersedes an older async validation for the same agent.
     // The older continuation observes its missing token and becomes a no-op.
-    this.#pendingSwitches.delete(agentId);
+    this.#cancelPendingSwitch(agentId);
     // T3 under the agent's currently bound cwd — the operator picked the id
     // from the same cwd's enumerate; re-verify at the boundary so a spoofed
     // or stale id cannot slip past.
+    const abort = new AbortController();
     const exists = this.#sessionExists(
       entry.parsed.cwd,
       resume,
       entry.parsed.engine,
+      abort.signal,
     );
     if (!isPromise(exists)) {
       this.#completeSwitchSession(agentId, entry, payload, resume, exists);
       return;
     }
 
-    const token = Symbol(agentId);
-    this.#pendingSwitches.set(agentId, token);
+    const pending: PendingCheck = { token: Symbol(agentId), abort };
+    this.#pendingSwitches.set(agentId, pending);
     void exists
       .then((found) => {
-        if (this.#pendingSwitches.get(agentId) !== token) return;
+        if (this.#pendingSwitches.get(agentId) !== pending) return;
         this.#pendingSwitches.delete(agentId);
         this.#completeSwitchSession(agentId, entry, payload, resume, found);
       })
       .catch((error: unknown) => {
-        if (this.#pendingSwitches.get(agentId) !== token) return;
+        if (this.#pendingSwitches.get(agentId) !== pending) return;
         this.#pendingSwitches.delete(agentId);
         process.stderr.write(
           `runner: switch_session scan failed for ${agentId}: ${String(error)}\n`,
@@ -1111,7 +1126,7 @@ export class Supervisor {
       });
       return;
     }
-    this.#pendingSwitches.delete(agentId);
+    this.#cancelPendingSwitch(agentId);
     const previousSessionId = optionalString(payload.previous_session_id);
     // Capture the spawn-time F4-lock holder BEFORE stripping it below;
     // #relaunchForReset releases it on success and #rollback transfers
@@ -1229,7 +1244,7 @@ export class Supervisor {
     if (!isObject(payload)) return;
     const cwd = payload.cwd;
     if (typeof cwd !== "string") return;
-    const generation = ++this.#enumerationGeneration;
+    const generation = this.#supersedeEnumeration();
     // engine scopes the listing to one session store (ADR-0032 F8,
     // ADR-0057 F1); absent = claude-code, unknown values fall back to an
     // empty list.
@@ -1255,7 +1270,9 @@ export class Supervisor {
       this.#sendSessionList(cwd, engine, []);
       return;
     }
-    const sessions = this.#listSessions(cwd, engine);
+    const abort = new AbortController();
+    this.#enumerationAbort = abort;
+    const sessions = this.#listSessions(cwd, engine, abort.signal);
     if (!isPromise(sessions)) {
       this.#sendSessionList(cwd, engine, sessions);
       return;
@@ -1277,15 +1294,40 @@ export class Supervisor {
 
   /** Stops every child (deliberate); used on runner shutdown. */
   stopAll(): void {
-    // Cancel resume spawns that have not launched yet. Their async continuations
-    // compare tokens before acting, so clearing the map is sufficient.
-    this.#pendingSpawns.clear();
-    this.#pendingSwitches.clear();
+    // Cancel async checks and the latest enumeration. Their continuations
+    // compare tokens and the generation before acting; the aborts stop the
+    // probes they started.
+    for (const agentId of [...this.#pendingSpawns.keys()]) this.#cancelPendingSpawn(agentId);
+    for (const agentId of [...this.#pendingSwitches.keys()]) this.#cancelPendingSwitch(agentId);
+    this.#supersedeEnumeration();
     for (const [agentId, entry] of this.#children) {
       this.#sendStopAgent(agentId);
       entry.stopping = true;
       entry.child.kill();
     }
+  }
+
+  /** Invalidates the running enumeration, if any, and returns the next
+   *  generation. */
+  #supersedeEnumeration(): number {
+    this.#enumerationAbort?.abort();
+    this.#enumerationAbort = null;
+    return ++this.#enumerationGeneration;
+  }
+
+  #cancelPendingSpawn(agentId: string): boolean {
+    const pending = this.#pendingSpawns.get(agentId);
+    if (pending === undefined) return false;
+    this.#pendingSpawns.delete(agentId);
+    pending.abort.abort();
+    return true;
+  }
+
+  #cancelPendingSwitch(agentId: string): void {
+    const pending = this.#pendingSwitches.get(agentId);
+    if (pending === undefined) return;
+    this.#pendingSwitches.delete(agentId);
+    pending.abort.abort();
   }
 
   #sendSessionList(
@@ -1656,7 +1698,7 @@ export class Supervisor {
    *  restarts and freed only when the agent is finally gone. */
   #remove(agentId: string, entry: ChildEntry): void {
     this.#clearResetTerminationTimer(entry);
-    this.#pendingSwitches.delete(agentId);
+    this.#cancelPendingSwitch(agentId);
     this.#children.delete(agentId);
     const resume = entry.parsed.resumeSessionId;
     if (resume !== undefined) this.#activeSessions.delete(resume);

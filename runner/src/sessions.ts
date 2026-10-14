@@ -32,6 +32,7 @@ import { join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { codexHome } from "@kaoiro/codex";
 import type { EngineKind, SessionMeta } from "@kaoiro/protocol";
+import { grokSessionExists, listGrokSessions } from "./grok_sessions.js";
 
 /** session_id rides a JSONL filename and the wrapper's `--resume` arg, so its
  *  charset is restricted (UUID-shaped: letters, digits, hyphen) — no path
@@ -763,8 +764,9 @@ export async function codexSessionExistsIn(
 export function listSessions(
   cwd: string,
   engine: EngineKind = "claude-code",
+  signal?: AbortSignal,
 ): SessionMeta[] | Promise<SessionMeta[]> {
-  if (engine === "grok") return [];
+  if (engine === "grok") return listGrokSessions(cwd, signal === undefined ? {} : { signal });
   if (engine === "antigravity") {
     return listAntigravitySessionsFrom(antigravityDatabasePath(), cwd);
   }
@@ -774,13 +776,15 @@ export function listSessions(
 }
 
 /** The T3 existence check: session_id is valid AND exists in the engine's
- *  session store under the bound cwd, gating a resume to that cwd. */
+ *  session store under the bound cwd, gating a resume to that cwd. `signal`
+ *  cancels a grok probe (and kills it); the other engines ignore it. */
 export function sessionExists(
   cwd: string,
   sessionId: string,
   engine: EngineKind = "claude-code",
+  signal?: AbortSignal,
 ): boolean | Promise<boolean> {
-  if (engine === "grok") return false;
+  if (engine === "grok") return grokSessionExists(cwd, sessionId, signal === undefined ? {} : { signal });
   if (engine === "antigravity") {
     return antigravitySessionExistsIn(antigravityDatabasePath(), cwd, sessionId);
   }

@@ -1,0 +1,172 @@
+// A short-lived Grok ACP process for questions the runner asks without a
+// session of its own: `initialize`, then one operation (issue #644). Grok runs
+// in its own process group so a stop, a deadline or an abort can end every
+// process it started.
+
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+
+export const GROK_PROBE_DEADLINE_MS = 10_000;
+const KILL_GRACE_MS = 1_000;
+
+export class GrokProbeError extends Error {
+  constructor(
+    readonly reason: "spawn" | "deadline" | "exit" | "protocol" | "rpc",
+    readonly code?: number,
+  ) {
+    super(`grok probe failed: ${reason}${code === undefined ? "" : ` ${code}`}`);
+  }
+}
+
+export class GrokProbeAborted extends Error {
+  constructor() {
+    super("grok probe aborted");
+  }
+}
+
+export interface GrokProbeOptions {
+  cwd: string;
+  signal?: AbortSignal;
+  executable?: string;
+  env?: NodeJS.ProcessEnv;
+  deadlineMs?: number;
+}
+
+export type GrokProbeCall = (method: string, params: unknown) => Promise<unknown>;
+
+/** Kills a probe's process group. Only a positive integer pid is signalled,
+ *  so a missing pid can never become kill(0) or kill(-1). */
+export function killProbeGroup(
+  pid: number | undefined,
+  signal: NodeJS.Signals,
+  kill: (pid: number, signal: NodeJS.Signals) => void = process.kill,
+): boolean {
+  if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    kill(-pid, signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Runs `initialize` and then `operation` against a fresh Grok. Resolves to
+ * the operation's value; rejects with GrokProbeAborted when `signal` aborts
+ * and with GrokProbeError for every other failure. The process group is
+ * killed before the promise settles either way.
+ */
+export async function runGrokProbe<T>(
+  options: GrokProbeOptions,
+  operation: (call: GrokProbeCall, initialized: unknown) => Promise<T>,
+): Promise<T> {
+  if (options.signal?.aborted) throw new GrokProbeAborted();
+  let child: ChildProcessWithoutNullStreams;
+  try {
+    child = spawn(
+      options.executable ?? "grok",
+      ["--no-auto-update", "agent", "--no-leader", "stdio"],
+      {
+        cwd: options.cwd,
+        env: options.env ?? process.env,
+        detached: true,
+        stdio: "pipe",
+      },
+    );
+  } catch {
+    throw new GrokProbeError("spawn");
+  }
+  const pid = child.pid;
+  const pending = new Map<number, {
+    resolve: (value: unknown) => void;
+    reject: (error: Error) => void;
+  }>();
+  let nextId = 0;
+  let buffer = "";
+  let settled = false;
+  let fail!: (error: Error) => void;
+  const failed = new Promise<never>((_, reject) => { fail = reject; });
+  void failed.catch(() => {});
+  const stop = (error: Error) => {
+    if (settled) return;
+    settled = true;
+    fail(error);
+    for (const entry of pending.values()) entry.reject(error);
+    pending.clear();
+  };
+  const exited = new Promise<void>((resolve) => {
+    child.once("exit", () => resolve());
+    child.once("error", () => resolve());
+  });
+  child.once("error", () => stop(new GrokProbeError("spawn")));
+  child.once("exit", () => stop(new GrokProbeError("exit")));
+  child.stderr.resume();
+  child.stdin.on("error", () => {});
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    buffer += chunk;
+    let index: number;
+    while ((index = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, index);
+      buffer = buffer.slice(index + 1);
+      let message: Record<string, unknown>;
+      try {
+        const parsed: unknown = JSON.parse(line);
+        if (typeof parsed !== "object" || parsed === null) continue;
+        message = parsed as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (typeof message.method === "string") {
+        // A request from Grok gets a refusal; the probe offers no client
+        // capabilities. Notifications are ignored.
+        if (message.id !== undefined) {
+          child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id,
+            error: { code: -32601, message: "not supported" } })}\n`);
+        }
+        continue;
+      }
+      const entry = typeof message.id === "number" ? pending.get(message.id) : undefined;
+      if (!entry) continue;
+      pending.delete(message.id as number);
+      const error = message.error as { code?: unknown } | undefined;
+      if (error !== undefined) {
+        entry.reject(new GrokProbeError("rpc",
+          typeof error.code === "number" ? error.code : undefined));
+      } else {
+        entry.resolve(message.result);
+      }
+    }
+  });
+  const call: GrokProbeCall = (method, params) => {
+    if (settled) return failed;
+    const id = ++nextId;
+    const answered = new Promise<unknown>((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+    });
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    return answered;
+  };
+  const timer = setTimeout(() => stop(new GrokProbeError("deadline")),
+    options.deadlineMs ?? GROK_PROBE_DEADLINE_MS);
+  const onAbort = () => stop(new GrokProbeAborted());
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    const initialized = await Promise.race([
+      call("initialize", { protocolVersion: 1, clientCapabilities: {} }),
+      failed,
+    ]);
+    return await Promise.race([operation(call, initialized), failed]);
+  } finally {
+    settled = true;
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", onAbort);
+    child.stdin.end();
+    if (killProbeGroup(pid, "SIGTERM")) {
+      const grace = setTimeout(() => killProbeGroup(pid, "SIGKILL"), KILL_GRACE_MS);
+      await exited;
+      clearTimeout(grace);
+    }
+    child.stdout.destroy();
+    child.stderr.destroy();
+  }
+}
