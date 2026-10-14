@@ -52,6 +52,64 @@ export function recordingLink(
   } as unknown as ServerLink;
 }
 describe("runGrokCli composition", () => {
+  it("reports settings and classifies instruction failures", async () => {
+    const envelopes: Envelope[] = [];
+    const stderr: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      stderr.push(String(chunk)); return true;
+    });
+    let callbacks!: ServerLinkOptions;
+    let probe!: Promise<void>;
+    try {
+      await runGrokCli({
+        parseCliArgs: () => ({ configPath: "fixture" }),
+        loadConfig: () => ({ ...config,
+          turn_watchdog_inactivity_ms: 120_000,
+          turn_watchdog_abort_grace_ms: 1_000,
+        }),
+        loadWrapperBuildInfo: () => buildInfo,
+        createHost: (values) => new GrokHost({ ...values,
+          executable: fileURLToPath(
+            new URL("./fixtures/grok.mjs", import.meta.url),
+          ),
+        }),
+        createServerLink: (_url, _id, options) => {
+          callbacks = options;
+          return recordingLink(options, envelopes, [], []);
+        },
+        onHostCreated: (host) => {
+          probe = (async () => {
+            await vi.waitFor(() => expect(host.state).toBe("waiting_input"), {
+              timeout: 5_000,
+            });
+            callbacks.onInstruction?.("fail-turn");
+            await vi.waitFor(() => expect(envelopes.some((e) =>
+              e.type === "log" && e.payload.text === "grok turn failed",
+            )).toBe(true));
+            expect(JSON.stringify(envelopes)).not.toContain("unsupported");
+            expect(JSON.stringify(envelopes))
+              .not.toContain("TURN_FAILURE_BODY_MARKER");
+            callbacks.onInstruction?.("attachment", ["attachment-id"]);
+            await vi.waitFor(() => expect(envelopes.some((e) =>
+              e.type === "log" && e.payload.text ===
+                "grok attachment input is unsupported in work unit 1",
+            )).toBe(true));
+            const output = stderr.join("");
+            expect(output).toContain(
+              `[kaoiro] grok behaviour: pid=${process.pid} `,
+            );
+            expect(output).toContain("120000(config)");
+            expect(output).toContain("1000(config)");
+            expect(output).toContain("below the 30-minute default");
+            host.close();
+          })();
+          void probe.catch(() => host.close());
+        },
+      });
+      await probe;
+    } finally { vi.restoreAllMocks(); }
+  });
+
   it("injects, replies and acknowledges a normal peer turn", async () => {
     const envelopes: Envelope[] = [];
     const ack: number[] = [];
@@ -182,7 +240,9 @@ describe("runGrokCli composition", () => {
         void probe.catch(() => host.close());
       },
     });
-    await expect(work).rejects.toThrow("exited unexpectedly");
+    await expect(work).rejects.toThrow(
+      /(?:exited|connection closed) unexpectedly/,
+    );
     await probe;
   });
   it("keeps all diagnostic outputs content-free through the CLI", async () => {

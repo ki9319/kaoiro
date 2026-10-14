@@ -128,6 +128,10 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
       }),
     );
   };
+  const turnFailure = () => send(makeLog(
+    config, host?.state ?? "idle", new Date().toISOString(),
+    { kind: "system", text: "grok turn failed" },
+  ));
   const options = acknowledgements.withServerLinkOptions({
     personaId: config.persona.id,
     ...(config.server_token ? { token: config.server_token } : {}),
@@ -148,7 +152,8 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
           await host!.send(text, attachments);
         })
         .catch(() => {
-          controlFailure("instruction");
+          if (attachments?.length) controlFailure("attachment input");
+          else turnFailure();
         });
     },
     onPermissionDecision: (
@@ -204,7 +209,7 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
           }
         })
         .catch(() => {
-          controlFailure("peer turn");
+          turnFailure();
         });
     },
   });

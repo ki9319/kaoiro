@@ -88,6 +88,7 @@ kaoiro documentation. The pre-taxonomy folders (specs / plans / open-questions) 
 | [0061](adr/0061-dashboard-operator-bulk-reset.md) | Dashboard operator bulk close + bulk session reset | accepted |
 | [0062](adr/0062-input-bound-inter-agent-replies.md) | Input-bound inter-agent replies | accepted |
 | [0063](adr/0063-layered-delivery-authority-and-continuations.md) | Layered inter-agent delivery, authority and continuation admission | accepted |
+| [0067](adr/0067-grok-resident-acp-host.md) | Grok Build as a resident ACP engine | proposed |
 | [0064](adr/0064-codex-app-server-approval-requests.md) | Codex approval requests over the app-server transport | accepted |
 <!-- adr-index:end -->
 
@@ -132,6 +133,12 @@ Regenerate with the `my-docs-restructure` skill's `scripts/build-adr-index.sh do
 - Event and state contract: [Antigravity events](reference/engines/antigravity-events.md).
 - Tool and permission contract: [Antigravity tools and permissions](reference/engines/antigravity-tools-permissions.md).
 - Dated CLI evidence: [Antigravity CLI contract](evidence/antigravity/cli-contract.md).
+
+## Grok Build documentation
+
+- Engine contract and upstream gaps: [Grok ACP host](reference/engines/grok-acp.md).
+- Dated premise measurements: [Grok ACP evidence](evidence/grok/2026-10-14-premises.md).
+- Adapter rationale: [ADR-0067](adr/0067-grok-resident-acp-host.md).
 
 ## Persona documentation
 

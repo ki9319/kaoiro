@@ -4,7 +4,7 @@ description: Add Grok Build as engine `grok` — wrapper/grok package hosting a 
 status: in_progress
 phase: 36
 depends_on: [phase-34-antigravity-adapter]
-related: [issue-589, issue-590, issue-591, issue-592, issue-593]
+related: [issue-589, issue-590, issue-591, issue-592, issue-593, issue-594]
 last_updated: 2026-10-14
 ---
 
@@ -47,7 +47,7 @@ Module layout:
 
 | Module | Responsibility |
 |---|---|
-| `acp/connection.ts` | `@agentclientprotocol/sdk` client over the child's stdio, with a stream tee that records method and variant metadata only (no content) and counts SDK-dropped variants |
+| `acp/connection.ts` | `@agentclientprotocol/sdk` client over the child's stdio, with a stream tee that records method and variant metadata only (no content) and counts SDK-dropped variants; lines above the 4 MiB metadata limit pass through without metadata, under the SDK's own message limit |
 | `acp/session.ts` | `initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/set_config_option`; engine-neutral ACP only |
 | `grok/process.ts` | Spawn `grok --no-auto-update agent --no-leader stdio` in its own process group with the env below; SIGTERM, grace, SIGKILL of the owned group only |
 | `grok/events.ts` | ACP `session/update` and `_x.ai/session_notification` to common `AdapterEvent`, log and result |
@@ -319,6 +319,8 @@ signal other processes:
    child disappears. Background-task survival is documented as an observed
    vendor behavior, not asserted because the model chooses backgrounding.
    Close/SIGTERM must remove an active tool child (item 4)
+   Background-task cancellation is tracked in
+   [issue #594](https://github.com/sakuraiyuta/kaoiro/issues/594).
 4. `close()` and SIGTERM: no owned process remains after the grace period
 5. Permission: a policy-escalated `session/request_permission` reaches the
    PermissionBroker; the state is `waiting_permission` only while that request

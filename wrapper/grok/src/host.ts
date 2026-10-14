@@ -7,6 +7,7 @@ import {
   makeResult,
   makeStateChange,
   stepState,
+  writeRedactedStderr,
   type AdapterEvent,
   type EngineAdapter,
   type Envelope,
@@ -28,7 +29,9 @@ import {
   sandboxProfile,
   type PermissionPolicyExt,
 } from "./grok/policy.js";
-import { readTurnWatchdogSettings } from "./settings.js";
+import { formatTurnWatchdogLine } from "@kaoiro/wrapper-core";
+import { resolveTurnWatchdogSettings } from "./settings.js";
+import { GrokLaunchError } from "./grok/errors.js";
 import { ToolHost } from "./toolhost.js";
 
 export interface GrokHostOptions {
@@ -95,11 +98,15 @@ export class GrokHost implements EngineAdapter {
 
   constructor(options: GrokHostOptions) {
     this.#options = options;
-    this.#settings = readTurnWatchdogSettings(
+    const resolved = resolveTurnWatchdogSettings(
       options.env ?? process.env,
-      () => {},
+      writeRedactedStderr,
       options.config,
     );
+    this.#settings = resolved.settings;
+    writeRedactedStderr(formatTurnWatchdogLine(
+      "grok", process.pid, resolved, options.config.permission_timeout_ms,
+    ));
   }
 
   get state() {
@@ -244,6 +251,14 @@ export class GrokHost implements EngineAdapter {
           metadata: (metadata) => this.#options.onMetadata?.(metadata),
         });
         this.#session = new AcpSession(connection);
+        void connection.closed.then(() => {
+          if (!this.#closing) {
+            this.#failure = new Error(
+              "grok ACP connection closed unexpectedly",
+            );
+            this.close();
+          }
+        });
         const failed = this.#process.exited.then(() => {
           throw new Error("grok child exited before session initialization");
         });
@@ -299,6 +314,12 @@ export class GrokHost implements EngineAdapter {
     } catch (error) {
       const stopping = this.#closing && !this.#failure;
       if (!stopping) this.#state("error");
+      if (error instanceof GrokLaunchError) {
+        this.#options.send(makeLog(
+          config, this.state, new Date().toISOString(),
+          { kind: "system", text: error.message },
+        ));
+      }
       this.close();
       await this.closed;
       if (!stopping) throw error;

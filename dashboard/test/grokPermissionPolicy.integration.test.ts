@@ -19,7 +19,7 @@ afterEach(async () => {
   document.body.innerHTML = "";
   vi.restoreAllMocks();
 });
-async function render(policy: unknown) {
+async function render(policy: unknown, engine: string | undefined = "grok") {
   const target = document.createElement("div");
   document.body.append(target);
   const envelope: Envelope = {
@@ -31,7 +31,7 @@ async function render(policy: unknown) {
     payload: {},
     persona: { id: "default", name: "Default", sprite_set: "default" },
     ext: {
-      engine: "grok",
+      ...(engine ? { engine } : {}),
       model: "default",
       permission: {
         sandbox: "workspace-write",
@@ -103,3 +103,16 @@ it.each(["failed", "timed out", "unknown shape"])(
     }
   },
 );
+
+it.each([undefined, "other-engine"])(
+  "renders policy with an unrelated or absent engine %s",
+  async (engine) => {
+    const target = await render({ inspect: "unavailable" }, engine ?? "");
+    expect(target.querySelector(".grok-permission-policy")?.textContent)
+      .toContain("permission sources unknown");
+  },
+);
+it("omits the policy component when the field is absent", async () => {
+  const target = await render(undefined);
+  expect(target.querySelector(".grok-permission-policy")).toBeNull();
+});

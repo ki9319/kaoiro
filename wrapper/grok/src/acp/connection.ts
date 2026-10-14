@@ -11,6 +11,7 @@ export interface WireMetadata {
   request_id?: string;
   hook_event?: string;
   sdk_diagnostic?: boolean;
+  oversized_lines?: number;
 }
 type Observer = (metadata: WireMetadata) => void;
 const observers = new Set<Observer>();
@@ -69,17 +70,35 @@ function filterSdkConsole(observer: Observer): () => void {
 
 export function metadataTee(direction: "in" | "out", observer: Observer) {
   let buffer = "";
+  let bytes = 0;
+  let oversized = false;
   const decoder = new TextDecoder();
   return new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
-      buffer += decoder.decode(chunk, { stream: true });
-      if (Buffer.byteLength(buffer) > 4 * 1024 * 1024) {
-        throw new Error("ACP frame exceeds the metadata reader limit");
-      }
-      let newline: number;
-      while ((newline = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
+      const text = decoder.decode(chunk, { stream: true });
+      let offset = 0;
+      while (offset < text.length) {
+        const newline = text.indexOf("\n", offset);
+        const end = newline < 0 ? text.length : newline;
+        if (!oversized) {
+          const part = text.slice(offset, end);
+          bytes += Buffer.byteLength(part);
+          if (bytes > 4 * 1024 * 1024) {
+            buffer = "";
+            oversized = true;
+            try {
+              observer({ direction, oversized_lines: 1 });
+            } catch {
+              /* Diagnostics must not interrupt the protocol transport. */
+            }
+          } else buffer += part;
+        }
+        if (newline < 0) break;
+        const line = oversized ? "" : buffer;
+        buffer = "";
+        bytes = 0;
+        oversized = false;
+        offset = newline + 1;
         try {
           const msg = JSON.parse(line);
           if (!msg || typeof msg !== "object") continue;

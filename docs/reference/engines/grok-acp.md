@@ -90,7 +90,8 @@ after cancel. Close and wrapper SIGTERM remove active tool children.
 The wrapper preserves the resident session and does not discover or kill
 tool PGIDs. Background survival is recorded as a vendor behavior; tests do
 not assert it because the model chooses whether to background a task.
-Per-task cancellation through `_x.ai/task/kill` needs follow-up measurement.
+Per-task cancellation through `_x.ai/task/kill` is tracked in
+[issue #594](https://github.com/sakuraiyuta/kaoiro/issues/594).
 See the [dated evidence](../../evidence/grok/2026-10-14-premises.md).
 
 ## Diagnostics and shutdown
@@ -98,8 +99,11 @@ See the [dated evidence](../../evidence/grok/2026-10-14-premises.md).
 ACP diagnostic records contain bounded method, variant and identifier
 metadata, never prompt or tool-result content. SDK diagnostics that include
 raw messages are filtered. Unknown variants are counted without emitting
-their bodies. Normal protocol logs/results still carry display content.
+their bodies. Lines above the 4 MiB diagnostic-reader limit pass through
+without parsing; only their count is recorded. The SDK owns the protocol
+message limit. Normal protocol logs/results still carry display content.
 
-Close aborts ToolHost handlers, closes ACP and stdin, sends SIGTERM to the
+Unexpected ACP closure fails the host and closes its owned child, allowing
+the runner to recover the peer. Close aborts ToolHost handlers, closes ACP and stdin, sends SIGTERM to the
 owned process group and escalates after 3000 ms, below the runner's 5000 ms
 reset grace. Process-signal tests run in an isolated namespace.

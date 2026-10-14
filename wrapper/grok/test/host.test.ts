@@ -11,6 +11,7 @@ import {
 } from "@kaoiro/agent-common";
 import { GrokHost, type GrokHostOptions } from "../src/host.js";
 import { GrokProcess } from "../src/grok/process.js";
+import * as events from "../src/grok/events.js";
 const executable = fileURLToPath(
   new URL("./fixtures/grok.mjs", import.meta.url),
 );
@@ -52,6 +53,80 @@ async function started(options: Partial<GrokHostOptions> = {}) {
   return { host, envelopes, run };
 }
 describe("resident ACP host", () => {
+  it("fails when stdout ends without exiting", async () => {
+    const path = mkdtempSync(join(tmpdir(), "kaoiro-grok-eof-"));
+    scratch.push(path);
+    const pidFile = join(path, "pid");
+    const { host, run } = await started({
+      env: { ...process.env, KAOIRO_TEST_GROK_PID_FILE: pidFile },
+    });
+    const pid = host.processId!;
+    const turn = host.send("close-output");
+    await expect(turn).rejects.toThrow();
+    await vi.waitFor(() => expect(host.state).toBe("error"), {
+      timeout: 4500,
+    });
+    await expect(run).rejects.toThrow("connection closed unexpectedly");
+    expect(Number(readFileSync(pidFile, "utf8"))).toBe(pid);
+    await expect(host.send("next turn")).rejects.toThrow("closed");
+    expect(() => process.kill(pid, 0)).toThrow();
+  });
+  it("keeps large tool updates on the real SDK session", async () => {
+    let receivedBytes = 0;
+    const original = events.updateEvents;
+    vi.spyOn(events, "updateEvents").mockImplementation((notification) => {
+      const update = notification.update;
+      if (update.sessionUpdate === "tool_call_update") {
+        for (const entry of update.content ?? []) {
+          if (entry.type === "content" && entry.content.type === "text") {
+            if (entry.content.text.startsWith("LARGE_TOOL_BODY_MARKER"))
+              receivedBytes = Buffer.byteLength(entry.content.text);
+          }
+        }
+      }
+      return original(notification);
+    });
+    const metadata: unknown[] = [];
+    const { host, envelopes } = await started({
+      onMetadata: (m) => metadata.push(m),
+    });
+    await host.send("large-tool");
+    expect(receivedBytes).toBeGreaterThan(5 * 1024 * 1024);
+    expect(metadata).toContainEqual({ direction: "in", oversized_lines: 1 });
+    expect(JSON.stringify(metadata)).not.toContain("LARGE_TOOL_BODY_MARKER");
+    await host.send("next turn");
+    expect(envelopes.filter((e) => e.type === "result").at(-1)?.payload.text)
+      .toBe("next turn");
+    expect(host.state).toBe("waiting_input");
+  });
+  it("sends only trusted static launch rejection messages", async () => {
+    const envelopes: Envelope[] = [];
+    const host = new GrokHost({
+      config: { ...config, network_access: false },
+      cwd: process.cwd(), personaPrompt: "", executable,
+      send: (e) => envelopes.push(e),
+      decidePermission: async () => ({ allow: false }),
+    });
+    hosts.push(host);
+    await expect(host.run()).rejects.toThrow("sandbox/network");
+    expect(envelopes.filter((e) => e.type === "log").map((e) => e.payload))
+      .toEqual([{ kind: "system", text:
+        "unsupported grok sandbox/network pair" }]);
+    const ordinaryLogs: Envelope[] = [];
+    const ordinary = new GrokHost({
+      config, cwd: process.cwd(), personaPrompt: "",
+      executable,
+      env: { ...process.env, KAOIRO_TEST_GROK_INITIALIZE_FAIL: "1" },
+      send: (e) => ordinaryLogs.push(e),
+      decidePermission: async () => ({ allow: false }),
+    });
+    hosts.push(ordinary);
+    await expect(ordinary.run()).rejects.toThrow();
+    expect(ordinaryLogs.filter((e) => e.type === "log")).toEqual([]);
+    expect(JSON.stringify(ordinaryLogs)).not.toContain("LAUNCH_ERROR_BODY");
+
+  });
+
   it("aborts startup inspect on close", async () => {
     const path = mkdtempSync(join(tmpdir(), "kaoiro-grok-inspect-"));
     scratch.push(path);
@@ -301,7 +376,9 @@ describe("resident ACP host", () => {
   it("fails a turn and leaves running when the child exits", async () => {
     const { host, run } = await started();
     await expect(host.send("exit")).rejects.toThrow();
-    await expect(run).rejects.toThrow("exited unexpectedly");
+    await expect(run).rejects.toThrow(
+      /(?:exited|connection closed) unexpectedly/,
+    );
     expect(["thinking", "tool_running"]).not.toContain(host.state);
   });
   it("cancels and closes the owned tool subtree", async () => {

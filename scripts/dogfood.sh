@@ -152,7 +152,7 @@ if [[ ! -f "$runner_config" ]]; then
   "server_url": "ws://localhost:4000/runner",
   "blocked_personas": [],
   "cwd_allowlist": ["$root"],
-  "capabilities": ["claude-code", "codex", "antigravity", "grok", "grok"]
+  "capabilities": ["claude-code", "codex", "antigravity", "grok"]
 }
 JSON
 fi

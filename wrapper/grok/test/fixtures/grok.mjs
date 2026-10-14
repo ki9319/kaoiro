@@ -111,6 +111,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     const msg = JSON.parse(line);
     switch (msg.method) {
       case "initialize":
+        if (process.env.KAOIRO_TEST_GROK_INITIALIZE_FAIL === "1") {
+          process.stdout.write(JSON.stringify({
+            jsonrpc: "2.0", id: msg.id,
+            error: { code: -32603, message: "LAUNCH_ERROR_BODY_MARKER" },
+          }) + "\n");
+          break;
+        }
         reply(msg.id, {
           protocolVersion: 1,
           agentCapabilities: {},
@@ -133,6 +140,37 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       case "session/prompt": {
         prompt = msg.id;
         const text = msg.params.prompt[0].text;
+        if (text === "close-output") {
+          if (process.env.KAOIRO_TEST_GROK_PID_FILE)
+            writeFileSync(process.env.KAOIRO_TEST_GROK_PID_FILE,
+              String(process.pid));
+          process.stdout.end();
+          setInterval(() => {}, 1000);
+          break;
+        }
+        if (text === "fail-turn") {
+          process.stdout.write(JSON.stringify({
+            jsonrpc: "2.0", id: msg.id,
+            error: { code: -32603, message: "TURN_FAILURE_BODY_MARKER" },
+          }) + "\n");
+          prompt = undefined;
+          break;
+        }
+        if (text === "large-tool") {
+          update({
+            sessionUpdate: "tool_call", toolCallId: "large",
+            title: "large result", kind: "other", status: "in_progress",
+          });
+          update({
+            sessionUpdate: "tool_call_update", toolCallId: "large",
+            status: "completed", content: [{ type: "content", content: {
+              type: "text",
+              text: "LARGE_TOOL_BODY_MARKER" + "x".repeat(5 * 1024 * 1024),
+            } }],
+          });
+          finish(msg.id, "large tool completed");
+          break;
+        }
         if (text === "exit") {
           process.exit(9);
         }

@@ -3211,7 +3211,7 @@
               </dd>
             </div>
           {/if}
-          {#if engineFrom(envelope) === "grok"}
+          {#if envelope.ext?.permission_policy}
             <div class="cc-row"><dt>grok policy</dt><dd>
               <GrokPermissionPolicy policy={envelope.ext?.permission_policy} />
             </dd></div>
