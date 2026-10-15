@@ -5,7 +5,7 @@
 // never the whole file.
 import { closeSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import {
   clipText,
   isFormattedInterAgentMessage,
@@ -65,6 +65,8 @@ export function sessionDirectory(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
   if (!SESSION_ID.test(sessionId)) return undefined;
+  // A relative cwd encodes to itself, and ".." would leave the sessions directory.
+  if (!isAbsolute(cwd)) return undefined;
   const root = join(env.GROK_HOME ?? join(env.HOME ?? homedir(), ".grok"), "sessions");
   const name = groupName(cwd);
   if (Buffer.byteLength(name) <= MAX_GROUP_NAME_BYTES) {
@@ -143,7 +145,10 @@ interface Join {
   ts: string;
   key: unknown;
   text: string;
+  /** The UTF-8 size of `text`, as it will be when sent. */
   bytes: number;
+  /** Text arrived after the join was full and was not kept. */
+  dropped: boolean;
 }
 
 /**
@@ -174,21 +179,29 @@ export function reconstructHistory(
     join = undefined;
     if (!current) return;
     if (current.kind === "assistant") {
-      emit(current.ts, logEntryToPayload({ kind: "assistant", text: current.text }, toolNames));
+      const payload = logEntryToPayload({ kind: "assistant", text: current.text }, toolNames);
+      emit(current.ts, current.dropped ? { ...payload, truncated: true } : payload);
       return;
     }
     // The structured inter-agent envelope is the display source of truth.
     if (isFormattedInterAgentMessage(current.text)) return;
     const { text, truncated } = clipText(current.text);
-    emit(current.ts, truncated ? { kind: "user", text, truncated: true } : { kind: "user", text });
+    emit(current.ts, truncated || current.dropped ? { kind: "user", text, truncated: true } : { kind: "user", text });
   };
-  // A join stops taking text once it holds more than a log line can show.
+  // A join stops taking text once it holds as much as a log line can show,
+  // and then says that it left text out.
   const chunk = (kind: Join["kind"], ts: string, key: unknown, text: string) => {
     if (join && (join.kind !== kind || join.key !== key)) flush();
-    join ??= { kind, ts, key, text: "", bytes: 0 };
-    if (join.bytes > MAX_LOG_BYTES) return;
+    join ??= { kind, ts, key, text: "", bytes: 0, dropped: false };
+    if (join.bytes >= MAX_LOG_BYTES) {
+      if (text !== "") join.dropped = true;
+      return;
+    }
+    // A pair of surrogates split between two chunks is two replacement
+    // characters (3 bytes each) apart and one character (4 bytes) together.
+    const split = /[\ud800-\udbff]$/.test(join.text) && /^[\udc00-\udfff]/.test(text);
     join.text += text;
-    join.bytes += Buffer.byteLength(text);
+    join.bytes += Buffer.byteLength(text) - (split ? 2 : 0);
   };
   const toolResult = (update: Record<string, unknown>): string => {
     const texts: string[] = [];
@@ -243,7 +256,8 @@ export function reconstructHistory(
         }
         case "tool_call": {
           const id = update.toolCallId;
-          const input = update.rawInput ?? {};
+          // Absent is an empty input; a null or any other shape is not.
+          const input = update.rawInput === undefined ? {} : update.rawInput;
           if (typeof id !== "string" || id === "" || typeof update.title !== "string" || !plainObject(input)) {
             skip("invalid_tool");
             break;

@@ -150,6 +150,8 @@ describe("what is skipped", () => {
     ["an empty tool call id", toolCall("")],
     ["a title that is not a string", toolCall("c1", 5)],
     ["a rawInput array", toolCall("c1", "probe", [1])],
+    ["a null rawInput", toolCall("c1", "probe", null)],
+    ["a scalar rawInput", toolCall("c1", "probe", "text")],
     ["a final update without an id", toolDone(undefined)],
   ])("counts %s as an invalid tool record", (_name, text) => {
     expect(run([text])).toEqual({ envelopes: [], skipped: { invalid_tool: 1 } });
@@ -199,6 +201,33 @@ describe("what is skipped", () => {
       { kind: "assistant", text: "x".repeat(16 * 1024), truncated: true },
     ]);
   }, 60_000);
+
+  describe.each([
+    ["assistant", (text: string, t = T0) => assistant(text, t)],
+    ["user", (text: string, t = T0) => user(text, 0, t)],
+  ] as const)("a %s message past the bound", (kind, chunk) => {
+    const entry = (text: string, truncated: boolean) =>
+      ({ kind, text, ...(truncated ? { truncated: true } : {}) });
+    const body = "\u{1F600}".repeat(5000);
+    const clipped = "\u{1F600}".repeat(4096);
+    // Three UTF-16 units per chunk cuts every other surrogate pair in two.
+    const split = (text: string) => Array.from({ length: Math.ceil(text.length / 3) },
+      (_, i) => chunk(text.slice(i * 3, i * 3 + 3)));
+
+    it("is clipped to the same 16 KiB whether or not a chunk splits a surrogate pair", () => {
+      expect(payloads([chunk(body)])).toEqual([entry(clipped, true)]);
+      expect(payloads(split(body))).toEqual([entry(clipped, true)]);
+    });
+
+    it("keeps a message of exactly 16 KiB whole, however it is chunked", () => {
+      expect(payloads(split("\u{1F600}".repeat(4096)))).toEqual([entry(clipped, false)]);
+    });
+
+    it("says it left text out when more text follows a full join", () => {
+      expect(payloads([chunk("x".repeat(16 * 1024)), chunk("y")])).toEqual([entry("x".repeat(16 * 1024), true)]);
+      expect(payloads([chunk("x".repeat(16 * 1024)), chunk("")])).toEqual([entry("x".repeat(16 * 1024), false)]);
+    });
+  });
 
   it("clips a long user message the way the live path does", () => {
     expect(payloads([user("y".repeat(20_000), 0)])).toEqual([
@@ -287,6 +316,19 @@ describe("the file and its directory", () => {
     }
     expect(readGrokHistory(cwd, "../secret-group/secret-session", config, env(home))).toEqual([]);
     expect(readGrokHistory(cwd, SESSION, config, env(join(home, "absent")))).toEqual([]);
+  });
+
+  it("refuses a cwd that is not absolute, whose group name would leave the sessions directory", () => {
+    const home = grokHome();
+    // `<home>/<id>/updates.jsonl` is what a cwd of ".." would reach.
+    const outside = join(home, SESSION);
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, "updates.jsonl"), text(assistant("OUTSIDE")));
+    mkdirSync(join(home, "sessions"), { recursive: true });
+    for (const bad of ["..", ".", "", "relative/dir", "../escape"]) {
+      expect(sessionDirectory(bad, SESSION, env(home)), bad).toBeUndefined();
+      expect(readGrokHistory(bad, SESSION, config, env(home)), bad).toEqual([]);
+    }
   });
 
   it("does not leave the sessions directory through a hostile cwd", () => {
