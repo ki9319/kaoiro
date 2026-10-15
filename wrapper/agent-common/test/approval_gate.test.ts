@@ -18,6 +18,7 @@ function rig(options: {
     signal?: AbortSignal,
   ) => Promise<PermissionDecision>;
   autonomous?: () => boolean;
+  onAutonomous?: () => void;
   toolName?: string;
   validate?: (input: Record<string, unknown>) => { ok: true } | { ok: false; message: string };
 } = {}) {
@@ -41,6 +42,7 @@ function rig(options: {
         return decision.promise;
       }),
     ...(options.autonomous === undefined ? {} : { autonomous: options.autonomous }),
+    ...(options.onAutonomous === undefined ? {} : { onAutonomous: options.onAutonomous }),
     ...(options.toolName !== undefined ? { toolName: options.toolName } : {}),
     ...(options.validate !== undefined ? { validate: options.validate } : {}),
   });
@@ -127,19 +129,23 @@ describe("engine approval policy", () => {
       if (policy === "throws") throw new Error("unknown policy");
       return false;
     };
-    const r = rig(autonomous === undefined ? {} : { autonomous });
+    const onAutonomous = vi.fn();
+    const r = rig({ onAutonomous, ...(autonomous === undefined ? {} : { autonomous }) });
     const call = r.gated.handler({});
     expect(r.asked).toHaveLength(1);
     r.decision.resolve({ allow: true });
     await call;
     expect(r.calls).toHaveLength(1);
+    expect(onAutonomous).not.toHaveBeenCalled();
   });
 
   it("autonomous policy runs without the broker", async () => {
-    const r = rig({ autonomous: () => true });
+    const onAutonomous = vi.fn();
+    const r = rig({ autonomous: () => true, onAutonomous });
     expect((await r.gated.handler({})).isError).not.toBe(true);
     expect(r.asked).toHaveLength(0);
     expect(r.calls).toHaveLength(1);
+    expect(onAutonomous).toHaveBeenCalledTimes(1);
   });
 
   it("abandoned calls do not validate or evaluate autonomy", async () => {
@@ -155,8 +161,10 @@ describe("engine approval policy", () => {
 
   it("an abort during the autonomous decision prevents reservation", async () => {
     const controller = new AbortController();
-    const r = rig({ autonomous: () => { controller.abort();return true; } });
+    const onAutonomous = vi.fn();
+    const r = rig({ autonomous: () => { controller.abort();return true; }, onAutonomous });
     expect((await r.gated.handler({}, { signal: controller.signal })).isError).toBe(true);
+    expect(onAutonomous).not.toHaveBeenCalled();
     expect(r.asked).toHaveLength(0);
     expect(r.calls).toHaveLength(0);
   });

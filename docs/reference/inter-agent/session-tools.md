@@ -108,9 +108,10 @@ on a live turn, a failed policy read, `untrusted`, or `on-request` asks through
 A stricter mid-turn selection affects the next call; loosening waits for the
 next turn. Antigravity keeps its per-call broker approval.
 
-The tool describes this as: "Depending on the engine and approval policy, the
-operator may be asked first and may refuse." Cancellation notices likewise
-leave the next call's approval to the engine and policy.
+The tool describes this as: "When the engine and approval policy permit
+autonomous reset, the reservation is made at once without an operator dialog;
+otherwise the operator is asked first and may refuse." Cancellation notices
+likewise leave the next call's approval to the engine and policy.
 
 | item | content |
 |---|---|

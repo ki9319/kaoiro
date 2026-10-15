@@ -12,6 +12,8 @@ import type {
 export interface ApprovalGateOptions {
   /** Optional engine policy; missing, false or failed evaluation still asks. */
   autonomous?: () => boolean;
+  /** Reports autonomous approval only after the final cancellation check. */
+  onAutonomous?: () => void;
   /** Asks the operator; normally `PermissionBroker#decide`. Receives the
    *  call's lifetime signal so a late answer cannot resolve a dead call. */
   decide: (
@@ -72,6 +74,7 @@ export function operatorApprovalGated(
       // turn. Re-check before acting: an effect that outlives the call must
       // not be created for a call nobody can answer any more.
       if (signal?.aborted) return cancelled(descriptor.name);
+      if (autonomous) options.onAutonomous?.();
       return descriptor.handler(input, context);
     },
   };

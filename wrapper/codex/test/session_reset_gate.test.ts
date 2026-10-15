@@ -180,6 +180,7 @@ async function makeRig(
   const link = {
     close: () => {},
     currentSessionId: () => null,
+    reportPermissionLifecycle: vi.fn(),
     send: (envelope: Envelope) => sent.push(envelope),
     requestSessionReset: async (mode: string, reason?: string) => {
       requestSnapshots.push({
@@ -309,6 +310,7 @@ describe("codex request_session_reset gate (issue #347)", () => {
       const turnToken = await startToolTurn(rig, ["conv-completed"]);
       const bridge = await rig.bridge();
       await reserveReset(rig, bridge);
+      expect(stderr.mock.calls.some(([text]) => String(text).includes("approved by the agent"))).toBe(true);
       expect(rig.requests).toHaveLength(0);
       const policy = rig.host.bridgeToolApproval(turnToken);
       expect(rig.threadOptions.at(-1)?.approvalPolicy).toBe("never");
@@ -329,6 +331,62 @@ describe("codex request_session_reset gate (issue #347)", () => {
     } finally {
       await finish(rig);
     }
+  });
+
+  it("exec ignores replayed strict approval when the approval axis is off", async () => {
+    const script: TurnScript = { tool: true, ending: deferred<Ending>() };
+    const rig = await makeRig([script], { sandbox: "read-only", network_access: false });
+    try {
+      const stored = { revision: 3, requested: {
+        sandbox: "read-only", network_access: false, approval: "on-request",
+      } };
+      rig.linkOptions.permissionSync.onNegotiated(true);
+      rig.linkOptions.permissionSync.onSync({ version: "0", next: stored,
+        control: { ...stored, status: "pending", constraints: { approval: "never", enforcement: "os" } },
+      });
+      const token = await startToolTurn(rig);
+      const bridge = await rig.bridge();
+      try {
+        expect(rig.threadOptions.at(-1)?.approvalPolicy).toBe("never");
+        expect(rig.host.bridgeToolApproval(token)).toEqual({ turn: "never", next: "never", blocked: false });
+        await reserveReset(rig, bridge);
+        script.ending.resolve("completed");
+        await vi.waitFor(() => expect(rig.requests).toHaveLength(1));
+      } finally { bridge.destroy(); }
+    } finally { await finish(rig); }
+  });
+
+  it("exec asks when permission becomes blocked during a live never turn", async () => {
+    const script: TurnScript = { tool: true, ending: deferred<Ending>() };
+    const rig = await makeRig([script], { sandbox: "read-only", network_access: false });
+    const broker = vi.spyOn(PermissionBroker.prototype, "decide");
+    try {
+      const selection = { revision: 3, requested: { sandbox: "read-only", network_access: false } };
+      rig.linkOptions.permissionSync.onNegotiated(true);
+      rig.linkOptions.permissionSync.onSync({ version: "0", next: selection,
+        control: { ...selection, status: "pending", constraints: { approval: "never", enforcement: "os" } },
+      });
+      const token = await startToolTurn(rig);
+      const bridge = await rig.bridge();
+      try {
+        rig.linkOptions.permissionSync.onSync({ version: "0", next: selection,
+          control: { ...selection, status: "failed", reason: "policy_mismatch",
+            constraints: { approval: "never", enforcement: "os" } },
+        });
+        expect(rig.host.bridgeToolApproval(token)).toEqual({ turn: "never", next: "never", blocked: true });
+        const call = bridge.call("request_session_reset", { mode: "new" });
+        await vi.waitFor(() => expect(permissionRequests(rig.sent)).toHaveLength(1));
+        expect(broker).toHaveBeenCalledTimes(1);
+        expect(rig.sent.some(e => e.state === "waiting_permission" && pendingPermissionOf(e) !== undefined)).toBe(true);
+        const request = permissionRequests(rig.sent)[0]!.payload as { request_id: string };
+        rig.linkOptions.onPermissionDecision({ request_id: request.request_id, allow: false });
+        expect(JSON.stringify(await call)).toContain("not approved");
+        expect(rig.requests).toHaveLength(0);
+        script.ending.resolve("completed");
+        await vi.waitFor(() => expect(rig.turnEnds).toHaveLength(1));
+        expect(rig.requests).toHaveLength(0);
+      } finally { bridge.destroy(); }
+    } finally { broker.mockRestore();await finish(rig); }
   });
 
   it("turn.failed is an authoritative terminal too: the reservation is sent", async () => {
