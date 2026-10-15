@@ -479,9 +479,9 @@ After the initial state publication, a fresh or restored session reads once
 when it has no initial prompt. A supplied initial prompt skips that read and
 uses turn finalization instead. Every successful, failed or cancelled turn
 requests a refresh without delaying turn dispatch. A permission replacement
-starts without a reading. An idle replacement with no pending turn publishes
-its state and reads once; if a turn is already queued, that turn's finalization
-supplies the next refresh. There is no idle polling. The wrapper coalesces
+retires the old reading while a turn is queued; that turn's finalization
+supplies the replacement generation's first refresh. There is no idle polling.
+The wrapper coalesces
 concurrent triggers, allows one outstanding RPC per generation,
 waits at most 20 seconds, waits at least 60 seconds between successful
 readings, and retries a settled transient failure no sooner than five

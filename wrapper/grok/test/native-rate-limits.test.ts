@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -20,7 +20,6 @@ const buildInfo = {
   revision: "unknown", dirty: false, built_at: "unknown", version: "unknown", channel: "dev" as const,
 };
 const dirs: string[] = [];
-let openedSession: string | undefined;
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -31,12 +30,7 @@ function check(condition: boolean, reason: string): void {
   if (!condition) throw new Error(`native rate-limit check failed: ${reason}`);
 }
 
-function sessionGroup(cwd: string): string {
-  return encodeURIComponent(cwd).replace(/[!'()*]/g, (character) =>
-    `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
-}
-
-it.skipIf(!live)("native Grok CLI publishes weekly rate limits through whoami and list_agents", async () => {
+it.skipIf(!live)("native Grok reports its own weekly window and renders a peer directory", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "kaoiro-momo660-native-rates-"));
   dirs.push(cwd);
   const envelopes: Envelope[] = [];
@@ -53,7 +47,7 @@ it.skipIf(!live)("native Grok CLI publishes weekly rate limits through whoami an
         queueMicrotask(() => options.onPersonaPrompt?.("Use the requested tools and reply briefly."));
         const link = {
           send: (envelope: Envelope) => envelopes.push(envelope),
-          setSessionId: (id: string) => { openedSession = id; },
+          setSessionId: () => {},
           requestDirectory: async () => {
             directoryReads += 1;
             return { agents: [{ agent_id: "native-peer", display_name: "Native peer", state: "idle",
@@ -98,11 +92,8 @@ it.skipIf(!live)("native Grok CLI publishes weekly rate limits through whoami an
     await run;
     await probe;
   } finally {
-    if (openedSession && /^[A-Za-z0-9-]{1,128}$/.test(openedSession)) {
-      const grokHome = process.env.GROK_HOME ?? join(homedir(), ".grok");
-      const sessionDirectory = join(grokHome, "sessions", sessionGroup(cwd), openedSession);
-      if (existsSync(sessionDirectory)) rmSync(sessionDirectory, { recursive: true, force: true });
-    }
-    openedSession = undefined;
+    const grokHome = process.env.GROK_HOME ?? join(homedir(), ".grok");
+    const sessionDirectory = join(grokHome, "sessions", encodeURIComponent(cwd));
+    rmSync(sessionDirectory, { recursive: true, force: true });
   }
 }, 120_000);

@@ -48,6 +48,17 @@ function eventRows(path: string): { event: string }[] {
   return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
 
+function observeReadResults(): Promise<GrokRateLimitRead>[] {
+  const results: Promise<GrokRateLimitRead>[] = [];
+  const read = GrokRateLimitReader.prototype.read;
+  vi.spyOn(GrokRateLimitReader.prototype, "read").mockImplementation(function (this: GrokRateLimitReader) {
+    const result = read.call(this);
+    results.push(result);
+    return result;
+  });
+  return results;
+}
+
 it("publishes one allowlisted snapshot on idle startup and shares it with whoami", async () => {
   const { host, envelopes, events } = await start();
   await vi.waitFor(() => expect(host.statusSnapshot()).toHaveProperty("rate_limits.seven_day"));
@@ -86,6 +97,65 @@ it("omits unsupported and malformed readings without affecting host readiness", 
   await vi.waitFor(() => expect(eventRows(malformed.events)
     .some(({ event }) => event === "_x.ai/billing")).toBe(true));
   expect(malformed.host.statusExtSnapshot()).not.toHaveProperty("rate_limits");
+});
+
+it.each([
+  { outcome: "auth", kind: "auth_failed" },
+  { outcome: "transport", kind: "transport_error" },
+  { outcome: "hang", kind: "timeout" },
+].flatMap(scenario => [false, true].map(expired => ({ ...scenario, expired }))))(
+  "retains the stored window after $outcome (expired=$expired)", async ({ outcome, kind, expired }) => {
+    const reads = observeReadResults();
+    const realNow = Date.now;
+    let elapsed = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => realNow() + elapsed);
+    const { host, envelopes, events } = await start(undefined, `${expired ? "expired" : "valid"}-then-${outcome}`);
+    await vi.waitFor(() => expect(host.statusSnapshot()).toHaveProperty("rate_limits.seven_day"));
+    const stored = host.statusSnapshot().rate_limits;
+    expect(stored).toEqual({ seven_day: {
+      utilization: 0.125, resets_at: expired ? 1_577_836_800 : 4_102_358_400,
+    } });
+
+    const before = envelopes.length;
+    elapsed = 60_001;
+    await host.send("chunks");
+    await vi.waitFor(() => expect(reads).toHaveLength(2));
+    await expect(reads[1]).resolves.toEqual({ kind });
+    expect(eventRows(events).filter(({ event }) => event === "_x.ai/billing")).toHaveLength(2);
+    expect(host.state).toBe("waiting_input");
+    expect(host.statusSnapshot().rate_limits).toEqual(stored);
+    expect(host.statusExtSnapshot().rate_limits).toEqual(stored);
+    const states = envelopes.slice(before).filter(envelope => envelope.type === "state_change");
+    expect(states.length).toBeGreaterThan(0);
+    for (const state of states) expect(state.ext.rate_limits).toEqual(stored);
+  }, 30_000,
+);
+
+it.each([
+  { outcome: "malformed", kind: "invalid_shape" },
+  { outcome: "unsupported", kind: "unsupported" },
+])("withdraws the stored window once after $outcome", async ({ outcome, kind }) => {
+  const reads = observeReadResults();
+  const realNow = Date.now;
+  let elapsed = 0;
+  vi.spyOn(Date, "now").mockImplementation(() => realNow() + elapsed);
+  const { host, envelopes, events } = await start(undefined, `valid-then-${outcome}`);
+  await vi.waitFor(() => expect(host.statusSnapshot()).toHaveProperty("rate_limits.seven_day"));
+  const before = envelopes.length;
+  elapsed = 60_001;
+  await host.send("chunks");
+  await vi.waitFor(() => expect(reads).toHaveLength(2));
+  await expect(reads[1]).resolves.toEqual({ kind });
+
+  expect(eventRows(events).filter(({ event }) => event === "_x.ai/billing")).toHaveLength(2);
+  expect(host.state).toBe("waiting_input");
+  expect(host.statusSnapshot()).not.toHaveProperty("rate_limits");
+  expect(host.statusExtSnapshot()).not.toHaveProperty("rate_limits");
+  const withdrawals = envelopes.slice(before).filter(envelope =>
+    envelope.type === "state_change" && envelope.ext.rate_limits === undefined);
+  expect(withdrawals).toHaveLength(1);
+  expect(withdrawals[0]?.state).toBe("waiting_input");
+  expect(envelopes.at(-1)?.ext).not.toHaveProperty("rate_limits");
 });
 
 it("does not let a retired generation overwrite its successor's snapshot", async () => {

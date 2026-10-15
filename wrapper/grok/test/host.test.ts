@@ -53,6 +53,7 @@ async function started(options: Partial<GrokHostOptions> = {}) {
   await vi.waitFor(() => expect(host.state).toBe("waiting_input"), {
     timeout: 5_000,
   });
+  await vi.waitFor(() => expect(host.statusSnapshot()).toHaveProperty("rate_limits.seven_day"));
   return { host, envelopes, run };
 }
 function assistantLogs(envelopes: Envelope[]) {
@@ -219,8 +220,7 @@ describe("assistant log projection", () => {
 });
 describe("state_change publication", () => {
   const states = (envelopes: Envelope[], from = 0) =>
-    envelopes.slice(from).filter(e => e.type === "state_change").map(e => e.state)
-      .filter((state, index, all) => index === 0 || state !== all[index - 1]);
+    envelopes.slice(from).filter(e => e.type === "state_change").map(e => e.state);
   it("publishes the first waiting_input at startup", async () => {
     const { envelopes } = await started();
     expect(states(envelopes)[0]).toBe("waiting_input");
@@ -442,9 +442,8 @@ describe("resident ACP host", () => {
     const { host, envelopes } = await started();
     const start = envelopes.length;
     await host.send("parallel");
-    const states = envelopes.slice(start).filter(e => e.type === "state_change")
-      .map(e => e.state);
-    expect(states.filter((state, index) => index === 0 || state !== states[index - 1])).toEqual([
+    expect(envelopes.slice(start).filter(e => e.type === "state_change")
+      .map(e => e.state)).toEqual([
         "sending", "tool_running", "thinking", "done", "waiting_input",
       ]);
     expect(envelopes.filter(e => e.type === "log" && e.payload.kind === "assistant")
