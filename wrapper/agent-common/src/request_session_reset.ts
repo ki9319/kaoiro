@@ -72,7 +72,7 @@ function classifyRefusal(reason: string): ResetRefusalOutcome {
 }
 
 const REQUEST_SESSION_RESET_DESCRIPTION =
-  "Ask the operator to approve starting this session over from empty. REQUIRED argument `mode`, exactly one of \"new\" or \"clear\" (a call without it fails and reserves nothing): `mode: \"new\"` keeps the operator's visible transcript and begins a fresh session below it; `mode: \"clear\"` also blanks your pane, leaving only the boundary marker. Either way the new session starts with NO memory of this conversation — unlike compaction, nothing is summarized and nothing is carried across. Write down anything you still need BEFORE calling this: a file, WORKLOG, an issue, a message to a peer. Work that exists only in this conversation is gone once the reset runs. The call returns as soon as the reset is RESERVED; it is applied at the end of the current turn, not immediately, and the server can still refuse it then (you are told in the next turn if it does). Use this when the conversation itself has become the problem — accumulated dead ends, a finished task whose context is now noise — rather than as routine hygiene.";
+  "Request that this session be started over from empty. Depending on the engine and approval policy, the operator may be asked first and may refuse. REQUIRED argument `mode`, exactly one of \"new\" or \"clear\" (a call without it fails and reserves nothing): `mode: \"new\"` keeps the operator's visible transcript and begins a fresh session below it; `mode: \"clear\"` also blanks your pane, leaving only the boundary marker. Either way the new session starts with NO memory of this conversation — unlike compaction, nothing is summarized and nothing is carried across. Write down anything you still need BEFORE calling this: a file, WORKLOG, an issue, a message to a peer. Work that exists only in this conversation is gone once the reset runs. The call returns as soon as the reset is RESERVED; it is applied at the end of the current turn, not immediately, and the server can still refuse it then (you are told in the next turn if it does). Use this when the conversation itself has become the problem — accumulated dead ends, a finished task whose context is now noise — rather than as routine hygiene.";
 
 /** Appended only where `request_compact` is actually registered (Claude);
  *  codex has no compaction path and must not be pointed at a tool it
@@ -92,7 +92,7 @@ const REQUEST_SESSION_RESET_INPUT_SCHEMA: Record<string, unknown> = {
     reason: {
       type: "string",
       description:
-        "One sentence on why a fresh session is warranted now. Shown to the operator in the approval dialog.",
+        "One sentence on why a fresh session is warranted now. Shown in the approval dialog when required, and in the session lifecycle event.",
     },
   },
   required: ["mode"],
@@ -369,7 +369,7 @@ export class SessionResetCoordinator {
       outcome === "unchanged"
         ? `[kaoiro] The session reset you reserved (mode: ${mode}) was cancelled: ${why}. ` +
           "Your context is unchanged, so continue as you were. You may request it " +
-          "again at a better moment; the operator has to approve it again."
+          "again at a better moment; the engine and approval policy determine whether the operator must approve it again."
         : `[kaoiro] The session reset you reserved (mode: ${mode}) was cancelled: ${why}. ` +
           "Only this later reservation was dropped; the earlier reset request is " +
           "still being carried out and its outcome is not known yet. Do not request " +
@@ -461,7 +461,7 @@ export class SessionResetCoordinator {
         "both outcomes: make sure anything you still need is written somewhere durable."
       : `[kaoiro] The session reset you requested (mode: ${mode}) was not carried out. ` +
         `The server refused it: ${reason}. Your context is unchanged, so continue as you were. ` +
-        "You may request it again at a better moment; the operator has to approve it again.";
+        "You may request it again at a better moment; the engine and approval policy determine whether the operator must approve it again.";
     await this.#options.notify(text).catch((err: unknown) => {
       this.#options.log(
         `セッションリセット結果の通知を注入できませんでした: ${String(err)}`,

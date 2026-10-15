@@ -7,6 +7,7 @@
 // against a real AntigravityHost in session_reset_gate.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Envelope, ToolDescriptor, WrapperConfig } from "@kaoiro/agent-common";
+import * as common from "@kaoiro/agent-common";
 import { runAntigravityCli } from "../src/cli.js";
 
 const config: WrapperConfig = {
@@ -66,7 +67,13 @@ describe("Antigravity CLI session-reset availability (issue #396)", () => {
   afterEach(() => vi.useRealTimers());
 
   it("exposes request_session_reset on the bridge, gated, and never request_compact", async () => {
-    const { descriptors } = await compose();
+    const gate = vi.spyOn(common, "operatorApprovalGated");
+    let descriptors: ToolDescriptor[];
+    try {
+      ({ descriptors } = await compose());
+      expect(gate).toHaveBeenCalledTimes(1);
+      expect(gate.mock.calls[0]![1]).not.toHaveProperty("autonomous");
+    } finally { gate.mockRestore(); }
     const names = descriptors.map((descriptor) => descriptor.name);
     expect(names).toContain("request_session_reset");
     expect(names).toContain("ask_user_question");

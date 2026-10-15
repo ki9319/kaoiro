@@ -1,6 +1,6 @@
 ---
 title: Transition observability and resume support for the Codex engine
-description: There is no way to observe Codex compaction, so Codex support for session_lifecycle and resume_prompt is deferred.
+description: Codex compaction registration and lifecycle acceptance remain deferred pending issue 662.
 status: deferred
 urgency: low
 blocks: []
@@ -49,3 +49,14 @@ descriptor carries over. Candidate for a separate issue.
 B (operator ruling 2026-08-31: treat this, including surrounding unimplemented
 and unsupported areas, as a future task. Claude-only support is sufficient for a
 while).
+
+## App-server follow-up (2026-10-15)
+
+The designer of [issue #661](https://github.com/sakuraiyuta/kaoiro/issues/661#issuecomment-6187334587)
+reported `thread/compact/start` and `thread/compacted` symbols in CLI 0.160.0.
+This is a reported binary-symbol observation, not independent verification of
+runtime semantics or of the repository's 0.161.0 pin. Re-measure on the pinned
+CLI and establish completion, cancellation, resume, and lifecycle behavior in
+[issue #662](https://github.com/sakuraiyuta/kaoiro/issues/662). Codex
+`request_compact` remains unregistered. Its eventual bridge registration can
+use the same engine-policy gate as `request_session_reset`.

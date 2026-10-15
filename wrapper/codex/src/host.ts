@@ -14,7 +14,7 @@ import { AppServerAdmissionError, AppServerHostRuntime, type AppServerHostRuntim
 import { AppServerSession } from "./app_server_session.js";
 import { AppServerConnectionError, type RpcWriteState } from "./app_server_rpc.js";
 import { AppServerTurnStartUnknownError, type AppServerApprovalOptions, type AppServerForeignTurn } from "./app_server_transport.js";
-import { APPROVAL_POLICIES, isApprovalPolicy } from "./app_server_approval.js";
+import { APPROVAL_POLICIES, isApprovalPolicy, type ApprovalPolicy } from "./app_server_approval.js";
 import { SteerRecord, type SteerOutcome, type SteerResponse } from "./app_server_steer.js";
 import type { AppServerRateLimits } from "./app_server_telemetry.js";
 import { codexAccountRateLimits, readStartupRateLimits, type StartupRateLimitTransportFactory } from "./startup_rate_limits.js";
@@ -780,6 +780,7 @@ export class CodexHost implements EngineAdapter {
   #turnAbandoned: TurnAbandonment | null = null;
   /** Present only while the SDK is executing one host turn. */
   #activeTurnToken: string | null = null;
+  #bridgeTurnApproval: { token: string; approval: ApprovalPolicy } | null = null;
   #activeTurnConversationIds: readonly string[] = [];
   #closed = false;
   #watchdogFailStopped = false;
@@ -1154,6 +1155,18 @@ export class CodexHost implements EngineAdapter {
    * turn's pending inbound lease. */
   activeInterAgentTurnToken(): string | null {
     return this.#activeTurnToken;
+  }
+
+  bridgeToolApproval(token: string | null): {
+    turn: ApprovalPolicy | null; next: NonNullable<PermissionSelection["requested"]["approval"]>; blocked: boolean;
+  } {
+    const record = this.#bridgeTurnApproval;
+    return {
+      turn: token !== null && token === this.#activeTurnToken && record?.token === token
+        ? record.approval : null,
+      next: this.#permissionState.next.requested.approval ?? "never",
+      blocked: this.#permissionState.blocked !== null,
+    };
   }
 
   async interrupt(): Promise<void> {
@@ -1758,6 +1771,8 @@ export class CodexHost implements EngineAdapter {
           this.#contextMeter.begin(identity.threadId, turnToken, attempt.prepared.model ?? runtime.baseline?.model ?? null);
           this.#appFirstDispatch = false;started = true;
           this.#activeTurnToken = turnToken;this.#activeTurnConversationIds = conversationIds;
+          this.#bridgeTurnApproval = attempt.bridgeApproval === null
+            ? null : { token: turnToken, approval: attempt.bridgeApproval };
           this.#turnScope = new AbortController();this.#turnAbandoned = null;
           attempted = { ...attempt.pending, appServer: { ...(attempt.prepared.effort === undefined ? {} : { resolvedEffort: attempt.prepared.effort }) },
             accountDefault: attempt.pending.model === null && (this.#model === null || this.#modelSource === "default"),
@@ -1839,12 +1854,12 @@ export class CodexHost implements EngineAdapter {
     }
   }
 
-  #threadOptions(attempted: AttemptedTurnSettings): ThreadOptions {
+  #threadOptions(attempted: AttemptedTurnSettings): ThreadOptions & { approvalPolicy: "never" } {
     const { model: modelPending, effort: effortPending, effortReset } = attempted;
     const requestedPermission = attempted.permission?.submission.requested;
     const sandbox = requestedPermission?.sandbox ?? this.#sandbox;
     const networkAccess = requestedPermission?.network_access ?? this.#networkAccess;
-    const options: ThreadOptions = {
+    const options: ThreadOptions & { approvalPolicy: "never" } = {
       approvalPolicy: "never",
       sandboxMode: sandbox,
       workingDirectory: this.#cwd,
@@ -2000,6 +2015,8 @@ export class CodexHost implements EngineAdapter {
     // rollout for that classification to mean anything about.
     const resumeSessionId = this.#sessionId;
     const isResumeAttempt = resumeSessionId !== null;
+    const threadOptions = this.#threadOptions(attempted);
+    this.#bridgeTurnApproval = { token: turnToken, approval: threadOptions.approvalPolicy };
     // A resume already CONFIRMED permanently corrupted for THIS session id
     // is skipped — re-spawning `codex exec` would just re-read the same
     // broken rollout and fail identically, the silent exit-1 retry loop
@@ -2023,10 +2040,10 @@ export class CodexHost implements EngineAdapter {
         : isResumeAttempt
           ? codex.resumeThread(
               resumeSessionId,
-              this.#threadOptions(attempted),
+              threadOptions,
             )
           : codex.startThread(
-              this.#threadOptions(attempted),
+              threadOptions,
             );
     // Creating/resuming the SDK thread is the last synchronous boundary
     // before the SDK call. Confirm #237 delivery here, never when its

@@ -33,7 +33,7 @@ export interface AppServerTurnInput {
   beforeDispatch?: (settings: AppServerPreparedSettings) => Promise<void>;
   /** Synchronous admission and input preparation immediately before turn/start.
    * Returning an input replaces the queued value; throwing sends no turn. */
-  onDispatch?: (identity: AppServerDispatchIdentity, settings: AppServerPreparedSettings) => string | void;
+  onDispatch?: (identity: AppServerDispatchIdentity, settings: AppServerPreparedSettings, approvalPolicy?: ApprovalPolicy) => string | void;
 }
 
 export type AppServerDispatchIdentity = Pick<AppServerTurnIdentity, "threadId" | "hostTurnToken" | "clientUserMessageId">;
@@ -320,9 +320,9 @@ export class AppServerTransport {
       });
       if (input.beforeDispatch) await this.#beforeDispatch(() => input.beforeDispatch!(prepared));
       if (this.#failure) throw this.#failure;
-      const preparedInput = input.onDispatch?.(dispatch, prepared);
-      const wireInput = appServerInput(preparedInput ?? input.input);
       const approvalPolicy = this.#approvalPolicy(input.settings);
+      const preparedInput = input.onDispatch?.(dispatch, prepared, approvalPolicy);
+      const wireInput = appServerInput(preparedInput ?? input.input);
       active.owner.approvalPolicy = approvalPolicy;
       ticket = this.#rpc.request("turn/start", {
         ...settings, threadId: dispatch.threadId,

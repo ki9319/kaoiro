@@ -2,7 +2,7 @@
 title: Inter-agent tool authorization
 description: Which engine gate decides each kaoiro inter-agent MCP tool call (send_to_agent / list_agents / whoami and the session companions), and when a send_to_agent call reaches the operator.
 status: accepted
-last_updated: 2026-09-26
+last_updated: 2026-10-15
 ---
 
 # Inter-agent tool authorization
@@ -37,14 +37,16 @@ Per-engine authorization of the kaoiro inter-agent MCP tools (`send_to_agent` / 
   Antigravity expose the tools through their own bridge and host, so this
   concerns Claude peers only.
 
-- Codex has no canUseTool and auto-approves every kaoiro bridge tool
-  (`default_tools_approval_mode: "approve"`), so a tool that needs per-use
-  approval there asks on its own behalf: `operatorApprovalGated`
-  (`wrapper/agent-common/src/approval_gate.ts`) calls the same
-  `PermissionBroker.decide/3` from inside the MCP call and runs the wrapped
-  handler only after allow. The wait is bound to the calling turn and capped
-  at 300 s (ADR-0043, 2026-09-14 amendment). Currently gated this way:
-  `request_session_reset`.
+- Codex auto-approves kaoiro bridge calls at the engine boundary, so
+  `request_session_reset` uses the wrapper's `operatorApprovalGated` helper.
+  It skips `PermissionBroker.decide` only when both the dispatched turn's
+  normalized wire approval and the latest operator selection are `never`,
+  with no blocked permission state. Missing or failed policy evaluation
+  asks. Tightening applies to the next call; loosening waits for the next
+  turn. A call with no live turn cancels before either policy evaluation
+  or the broker. The optional wait is bounded at 300 seconds and both paths
+  retain turn ownership (ADR-0043, 2026-10-15 addendum). Antigravity passes
+  no autonomy predicate and keeps per-call broker approval.
 
 ## MCP (`mcp__kaoiro__send_to_agent`)
 
