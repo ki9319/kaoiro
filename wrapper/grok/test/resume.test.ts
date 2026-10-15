@@ -224,6 +224,15 @@ describe("projection and persistence", () => {
     expect(ext.effective?.model).toBeUndefined();
   });
 
+  it("publishes no effective at all while nothing is known, so the stored effort survives", () => {
+    const host = new GrokHost({ config: { ...base }, cwd: homedir(), personaPrompt: "fixture", executable,
+      send: () => {}, decidePermission: async () => ({ allow: false }) });
+    const ext = host.statusExtSnapshot() as Record<string, any>;
+    expect(ext).not.toHaveProperty("effective");
+    const { stored } = persisted([ext], { effort: "low", effort_source: "launch" });
+    expect(stored).toEqual({ effort: "low", effort_source: "launch" });
+  });
+
   it("stamps the resume snapshot and its drift", async () => {
     const t = await launch({ options: { resumeSessionId: "fixture-session",
       resumeSnapshot: { model: "grok-4.6", model_source: "default", sandbox: "workspace-write", network_access: true } } });
