@@ -724,6 +724,7 @@ defmodule KaoiroServerWeb.WrapperChannel do
     peer_index = ConversationStates.peer_index()
     {deliveries, _incomplete?} = DeliveryStates.wire_projection()
     states = AgentStates.snapshot()
+    directory = AgentDirectory.all()
     build_infos = WrapperBuildInfos.snapshot()
     reply_modes = KaoiroServer.InterAgentReplyBasis.snapshot()
     delivery_modes = WorkStore.modes_snapshot()
@@ -735,6 +736,7 @@ defmodule KaoiroServerWeb.WrapperChannel do
         directory_entry(
           id,
           env,
+          Map.get(directory, id),
           Map.get(activities, id),
           Map.get(peer_index, id, []),
           Map.get(deliveries, id),
@@ -746,7 +748,7 @@ defmodule KaoiroServerWeb.WrapperChannel do
 
     # issue #259 仕様5: AgentStates 側を優先。同一 agent_id を重複させない。
     directory_only =
-      AgentDirectory.all()
+      directory
       |> Map.drop(Map.keys(states))
       |> Enum.map(fn {id, entry} ->
         directory_only_entry(id, entry, Map.get(peer_index, id, []))
@@ -1789,45 +1791,25 @@ defmodule KaoiroServerWeb.WrapperChannel do
     end
   end
 
-  defp directory_entry(id, envelope, activity, peers, delivery, build_info) do
+  defp directory_entry(id, envelope, directory, activity, peers, delivery, build_info) do
     persona =
       case envelope do
         %{"persona" => %{} = p} -> Map.take(p, ["id", "name", "sprite_set"])
         _ -> %{}
       end
 
-    # issue #209 D19/D26 (ADR-0021 F6-3): `display_name` rides the same
-    # envelope top-level field this module's after-join persona_sync/
-    # display_name_sync pushes keep in sync (see `push_persona_sync/2`),
-    # so it is always fresh for a live agent. `persona{id,name,sprite_set}`
-    # above stays the pack canonical value — unaffected by rename
-    # (issue #209 D19) — so a peer sees BOTH the stable identity and the
-    # current, possibly-renamed, label. Absent only for a not-yet-updated
-    # legacy wrapper build; `maybe_put_directory_field/3` drops the key
-    # entirely rather than emitting an empty string.
-    #
-    # advisory (issue #209, クロエ実測検証): reuses `valid_display_name/1`
-    # — the same 1-64-grapheme / no-control-char bound `user_entry/1`
-    # already applies to a user's `display_name` — rather than a bare
-    # `is_binary/1` check. issue #209 made this field the UI label's
-    # authoritative source while D24 tightened the pack `name` field's
-    # own validation; leaving THIS projection unvalidated would have made
-    # the authoritative label source the one unvalidated field in the
-    # peer-directory contract. Not a regression (the prior `Map.take/2`
-    # era did not validate `persona.name` either), but worth aligning now
-    # that this field carries the weight D19 gave it. An out-of-bound
-    # value (from a compromised/buggy wrapper) is dropped like an absent
-    # one, not truncated or passed through.
-    display_name =
-      case envelope do
-        %{"display_name" => name} ->
-          case valid_display_name(name) do
-            {:ok, trimmed} -> trimmed
-            :error -> nil
-          end
+    # Rename commits before the wrapper echo. Reading the authoritative row
+    # also prevents a delayed old envelope from rolling the name back.
+    name =
+      case directory do
+        nil -> Map.get(envelope, "display_name")
+        entry -> Map.get(entry, :display_name)
+      end
 
-        _ ->
-          nil
+    display_name =
+      case valid_display_name(name) do
+        {:ok, trimmed} -> trimmed
+        :error -> nil
       end
 
     state =

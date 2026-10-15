@@ -1,7 +1,7 @@
 ---
 title: Peer directory
 status: provisional
-last_updated: 2026-09-28
+last_updated: 2026-10-15
 ---
 
 # Peer directory
@@ -35,7 +35,7 @@ report peers that have been inactive for a long time.
 |---|---|---|---|
 | `agent_id` | string | destination identifier | MUST (always present) |
 | `persona` | `{id?: string, name?: string, sprite_set?: string}` | canonical identity when resolved; directory-only unresolved entries use `{id: persona_id}` (below); `name`, when available, is stable within a session (issue #209 D19) | MUST (object always present; individual fields may be absent) |
-| `display_name` | string | mutable runtime name used for display (issue #209 D19/D26, ADR-0021 F6-3) | old wrapper did not report it |
+| `display_name` | string | mutable runtime name used for display (issue #209 D19/D26, ADR-0021 F6-3) | no valid authoritative name, or no directory row and no valid envelope name |
 | `state` | string | current state | MUST |
 | `engine` / `model` / `effort` | string | execution characteristics (#99) | not a non-empty string |
 | `context` | `{used_tokens, max_tokens, used_percentage}` | context usage | capability gate fails, unreported, malformed, or disconnected |
@@ -69,6 +69,31 @@ metadata, not a signed artifact attestation or an authorization input.
 
 - MUST (issue #167): Closed conversations are inactive in `peer_index` and in
   disconnect unresponsive notices.
+
+##### Display-name authority
+
+For each `directory_request`, the server reads one AgentDirectory snapshot.
+Its persisted `display_name` takes precedence over the last AgentStates
+envelope, including for a disconnected agent still present in AgentStates.
+A completed rename is visible on the next directory read without waiting for
+the wrapper's state echo. A delayed old envelope cannot replace that name.
+Canonical `persona` fields and the other live fields still come from the
+live projection.
+
+Only an agent without an AgentDirectory row falls back to the envelope's
+validated name. If the authoritative row contains an invalid name, omit
+`display_name`; do not substitute an old envelope name for authoritative
+state. This intentionally differs from dashboard presentation, which may
+fall back to a live label when a directory label is unusable. The directory
+API omits an invalid field rather than asserting a stale name as current.
+
+The wrapper receives the persisted name through `display_name_sync` (or the
+legacy `persona_sync`) on join and rename. All engine CLIs retain the newest
+sync received before host construction, then apply it through the same
+revision guard as a live rename. Equal or older revisions cannot roll back
+the synchronized config. `whoami` continues to expose canonical
+`persona.name`, not a mutable `display_name`; rename does not change persona
+identity.
 
 ##### Directory-only entry (issue #259)
 

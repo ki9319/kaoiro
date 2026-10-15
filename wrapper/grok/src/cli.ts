@@ -24,6 +24,7 @@ import {
   loadWrapperBuildInfo,
   parseCliArgs,
   ServerLink,
+  type ServerLinkOptions,
 } from "@kaoiro/wrapper-core";
 import { GrokHost, type GrokHostOptions } from "./host.js";
 import type { GrokWireMetadata } from "./grok/wire.js";
@@ -160,7 +161,7 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
     config, host?.state ?? "idle", new Date().toISOString(),
     { kind: "system", text: "grok turn failed" },
   ));
-  const options = acknowledgements.withServerLinkOptions({
+  const options = acknowledgements.withServerLinkOptions<Omit<ServerLinkOptions, "onInterAgentDeliveryStatus">>({
     personaId: config.persona.id,
     ...(config.server_token ? { token: config.server_token } : {}),
     ...(config.transition_id ? { transitionId: config.transition_id } : {}),
@@ -217,7 +218,7 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
       else pendingPermissions.push({ kind: "relay", value });
     },
     onSetPermissionMode: () => controlFailure("permission mode switching"),
-    onDisplayNameSync: (name: string, revision: number) => {
+    onRenameDisplayName: (name: string, revision: number) => {
       if (host) host.renameDisplayName(name, revision);
       else
         pendingName = mergePendingDisplayNameSync(pendingName, name, revision);

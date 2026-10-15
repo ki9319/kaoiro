@@ -7,6 +7,7 @@ import {
   InterAgentTool,
   makeLog,
   makeStateChange,
+  mergePendingDisplayNameSync,
   operatorApprovalGated,
   PermissionBroker,
   QuestionBroker,
@@ -26,6 +27,7 @@ import {
   loadWrapperBuildInfo,
   parseCliArgs,
   ServerLink,
+  type ServerLinkOptions,
 } from "@kaoiro/wrapper-core";
 import type { PermissionSyncMessage } from "@kaoiro/protocol";
 import { AntigravityHost } from "./host.js";
@@ -147,6 +149,7 @@ export async function runAntigravityCli(
   applyAntigravitySources(config, { modelSource, effortSource });
 
   let host: AntigravityHost | undefined;
+  let pendingDisplayNameSync: { displayName: string; revision: number } | undefined;
   const pendingWorkNotices: string[] = [];
   let link: ServerLink | undefined;
   // issue #359 M1: permission_sync negotiation state. onSync can fire before the
@@ -380,7 +383,7 @@ export async function runAntigravityCli(
     deliveryIdentity,
   );
   const buildInfo = loadBuildInfo(fileURLToPath(new URL("../dist/build-info.json", import.meta.url)));
-  link = createServerLink(config.server_url, config.agent_id, deliveryAcknowledgementRuntime.withServerLinkOptions({
+  link = createServerLink(config.server_url, config.agent_id, deliveryAcknowledgementRuntime.withServerLinkOptions<Omit<ServerLinkOptions, "onInterAgentDeliveryStatus">>({
     noticeAttribution: "v1",
     personaId: config.persona.id,
     ...(config.server_token === undefined ? {} : { token: config.server_token }),
@@ -431,7 +434,13 @@ export async function runAntigravityCli(
       });
     },
     onSetPermissionMode: () => writeRedactedStderr("antigravity: permission-mode switching is unsupported; use set_permission (ADR-0057 F4c)\n"),
-    onRenameDisplayName: (displayName, revision) => host?.renameDisplayName(displayName, revision),
+    onRenameDisplayName: (displayName, revision) => {
+      if (host === undefined) {
+        pendingDisplayNameSync = mergePendingDisplayNameSync(pendingDisplayNameSync, displayName, revision);
+      } else {
+        host.renameDisplayName(displayName, revision);
+      }
+    },
     onInterAgentMessage: (envelope) => {
       // The handler awaits before it classifies the envelope; the join
       // identity must be captured before that await can span a rejoin.
@@ -735,6 +744,9 @@ export async function runAntigravityCli(
   );
   for (const notice of pendingWorkNotices.splice(0)) {
     instructionChain = instructionChain.then(() => host!.send(notice)).catch(() => {});
+  }
+  if (pendingDisplayNameSync !== undefined) {
+    host.renameDisplayName(pendingDisplayNameSync.displayName, pendingDisplayNameSync.revision);
   }
   dependencies.onHostCreated?.(host);
   // issue #359 M1: apply a permission_sync that arrived before the host existed.
