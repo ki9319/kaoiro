@@ -113,8 +113,10 @@ resume and the session picker are supported (see
 Live model and effort switching and context usage are supported when Grok
 lists its configuration options (see
 [Model and effort switching](#model-and-effort-switching) and
-[Context usage](#context-usage)). Attachments, history replay and quota
-reporting are unsupported. Unsupported controls reject explicitly.
+[Context usage](#context-usage)). The dashboard history of a resumed session
+is replayed from Grok's log (see
+[Dashboard history on resume](#dashboard-history-on-resume)). Attachments and
+quota reporting are unsupported. Unsupported controls reject explicitly.
 
 ## Cold resume and session discovery
 
@@ -144,6 +146,54 @@ permission switch still uses `session/load`. Every status carries `ext.cwd`.
 The runner's same-session lock (F4) covers the agents it manages. Grok itself
 lets a second process resume a session another process holds, so a Grok TUI or
 another host on the same session is outside that lock.
+
+## Dashboard history on resume
+
+`session/resume` replays nothing, so a resumed agent's dashboard history is
+rebuilt from Grok's own conversation log. When the server asks for a replay
+(the join verdict, on startup and on every later reconnect) or, for a server
+that sends no verdict, once at startup of a resumed session, the wrapper reads
+the session's `updates.jsonl` and sends the newest 200 entries between the
+history reset and the replay completion. A session with no readable file, and
+a fresh session, still get the reset and the completion with no entries.
+
+Where the file is. The session directory is
+`<GROK_HOME or ~/.grok>/sessions/<group>/<session id>/`. The group is the cwd
+in RFC 3986 percent-encoding: `encodeURIComponent` leaves `! ' ( ) *` alone and
+Grok escapes them as `%21 %27 %28 %29 %2A`. When the encoded name would exceed
+255 bytes, Grok names the group `<hex>-<hex>` and writes the cwd, with no
+newline, to a `.cwd` file in it; the wrapper then finds the group whose `.cwd`
+equals the cwd exactly. A session id other than letters, digits and hyphens
+(at most 128) finds nothing.
+
+What is read. The last 8 MiB of the file, starting at the first line boundary
+inside that window, and each line up to 1 MiB; a longer line is skipped. A
+line counts only when it is a JSON object with a string `method`, an object
+`params` and a `timestamp` that is an integer number of epoch seconds
+(`1e9 <= t < 1e11`). Seconds become an ISO time; a string, a float or a
+millisecond-sized value skips the line and the reader never falls back to the
+current time. Only `session/update` with a string `sessionUpdate` is mapped.
+
+| Record | Entry |
+|---|---|
+| `user_message_chunk` (text) | `user`, built with `clipText`; chunks with the same `_meta.promptIndex` are joined. A formatted inter-agent turn is dropped, because the structured inter-agent envelope shows it |
+| `agent_message_chunk` (text) | `assistant`, consecutive chunks joined |
+| `tool_call` | `tool_use` with `tool_use_id` (the `toolCallId`), `tool_name` (the `title`, as the live path names it) and `input` (`rawInput`, `{}` when absent; an oversized input is dropped as live) |
+| `tool_call_update` with `status` `completed` or `failed` | `tool_result` with the same id; its text content items joined with a newline, and the tool name taken from the `tool_use` |
+| every other `session/update` variant, `_x.ai/session/update` and any other method | skipped |
+
+A join ends only at a recognized record of another kind, never at a skipped
+line, and takes the time of its first chunk. A join stops taking text once it
+holds more than 16 KiB and is then clipped, so a huge reply costs bounded
+memory. Each line is handled on its own: a line that fails is skipped and
+counted by reason (`invalid_json`, `invalid_shape`, `bad_timestamp`,
+`oversize_line`, `invalid_chunk`, `invalid_tool`) and never fails the file. The
+counts go to stderr in one line with no content. A tool call whose result is
+empty still gets an empty `tool_result`.
+
+The live log path publishes a `tool_use` without its id or input and no
+`tool_result`, so the replayed history shows more than the live log did. See
+the [dated evidence](../../evidence/grok/2026-10-15-history-replay.md).
 
 ## Start selection and restore hold
 

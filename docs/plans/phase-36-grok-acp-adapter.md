@@ -79,7 +79,8 @@ Mapping:
 | model / effort | catalog from `initialize` `_meta.modelState`, selection from `session/new` and `session/load` `configOptions`; live switching through `session/set_config_option` (work unit 4) | measured, see the [unit 4 evidence](../evidence/grok/2026-10-15-unit4-premises.md): the switch applies at once, also inside a running turn, and the selection lives in the session |
 | context | `ext.context` from the last `response_completed` prompt size (work unit 4) | measured against the TUI `/context`, same evidence |
 | cold resume and session discovery | `session/resume` in the wrapper's first lane; the runner pages `session/list {cwd}` in a short-lived grok (work unit 3a) | measured, see the [resume evidence](../evidence/grok/2026-10-15-resume-and-discovery.md) |
-| rate limits, attachments, history replay | capability false or field omitted | — |
+| dashboard history on resume | the session's `updates.jsonl`, normalized and replayed by `HistoryReplayer` (work unit 3b) | measured, see the [history evidence](../evidence/grok/2026-10-15-history-replay.md) |
+| rate limits, attachments | capability false or field omitted | — |
 
 ### Unsupported operations
 
@@ -397,7 +398,7 @@ permission pages, the runner configuration page, and an ADR for the engine
 | 1b. Keep vendor extensions out of `acp/` (before unit 2) | [#597](https://github.com/sakuraiyuta/kaoiro/issues/597) | ✅ landed 0ad1ee5b |
 | 1c. Serve the kaoiro tools over authenticated HTTP MCP (before unit 2) | [#604](https://github.com/sakuraiyuta/kaoiro/issues/604) | ✅ landed 8011fb0e |
 | 2. Permission and sandbox enforcement | [#591](https://github.com/sakuraiyuta/kaoiro/issues/591) | ✅ landed 6e7f7b7b |
-| 3. Resume, history replay and catalog probe | [#592](https://github.com/sakuraiyuta/kaoiro/issues/592) | split: 3a [#644](https://github.com/sakuraiyuta/kaoiro/issues/644) in review (after unit 4), 3b [#645](https://github.com/sakuraiyuta/kaoiro/issues/645) ⏳, 3c [#646](https://github.com/sakuraiyuta/kaoiro/issues/646) ⏳ |
+| 3. Resume, history replay and catalog probe | [#592](https://github.com/sakuraiyuta/kaoiro/issues/592) | split: 3a [#644](https://github.com/sakuraiyuta/kaoiro/issues/644) in review (after unit 4), 3b [#645](https://github.com/sakuraiyuta/kaoiro/issues/645) in review, 3c [#646](https://github.com/sakuraiyuta/kaoiro/issues/646) ⏳ |
 | 4. Context usage, live model and effort switching | [#593](https://github.com/sakuraiyuta/kaoiro/issues/593) | in review |
 | 5. Parity as a delegated peer (rate limits, early delivery, reply basis, attachments) | [#628](https://github.com/sakuraiyuta/kaoiro/issues/628) | ⏳ |
 
