@@ -1,0 +1,17 @@
+{
+  "mode": "txt2img",
+  "prompt": "score_9, score_8_up, safe, 1girl, solo, chibi, full body, girl, light green hair, pale yellow-green hair, bob cut, short hair, leaf hair ornament, green eyes, japanese clothes, hat, round cloth cap, brown cap, haori, short haori, yellow-green haori, light green haori, kimono, off-white kimono, obi, green obi, white tabi, zouri, standing, half-closed eyes, tired, yawning, hat slipping, drooping shoulders, holding paper strip, tanzaku, blank paper, looking at viewer, simple background, white background, clean lineart, flat colors, soft colors, a quick cheerful little haiku poet girl with a soft yellow-green bob and a young-leaf hair clip, dressed like an Edo-period haikai master: a soft round brown cloth cap of a haiku master (sosho zukin) and a short bright fresh yellow-green (moegi, the color of new spring leaves, clearly green not yellow) jittoku jacket over an off-white kimono with a green obi, white tabi socks and zori sandals",
+  "negative": "worst quality, low quality, score_1, score_2, score_3, artist name, realistic, multiple views, logo, glowing, text, emblem, patch, letter, number, writing, neon colors, fluorescent, mismatched footwear, sneakers, olive, mustard, yellow ochre",
+  "model": "animality_ap3.safetensors",
+  "architecture": "anima",
+  "seed": 217943772727955,
+  "steps": 30,
+  "width": 1024,
+  "height": 1024,
+  "cfg": 4.0,
+  "denoise": null,
+  "generated_at": "2026-10-15T22:35:23.174546+09:00",
+  "job_id": "fe50889e84e04e7daf4ad7403dcff30a",
+  "source_job_id": null,
+  "postprocess": "rembg birefnet-portrait -a -af 240 -ab 10 -ae 10; interior alpha >= 200 forced opaque; normalized to 512x512 (premultiplied LANCZOS)"
+}

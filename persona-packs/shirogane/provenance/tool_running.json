@@ -1,0 +1,17 @@
+{
+  "mode": "txt2img",
+  "prompt": "score_9, score_8_up, safe, 1boy, solo, chibi, full body, boy, silver hair, white hair, short hair, messy hair, black streak in hair, narrow eyes, tsurime, grey eyes, black jacket, flight jacket, bomber jacket, star pin, white towel around neck, white t-shirt, black shorts, black and white sneakers, squatting, holding toy rocket, holding screwdriver, tinkering, focused, concentrating, looking down, looking at viewer, simple background, white background, clean lineart, flat colors, a witty sharp-tongued boy with messy bright silver hair and one black streak, wearing a short black flight jacket with a single small silver star-shaped pin on the chest and a plain white towel draped loosely around his neck",
+  "negative": "worst quality, low quality, score_1, score_2, score_3, artist name, realistic, multiple views, logo, glowing, text, emblem, patch, letter, number",
+  "model": "animality_ap3.safetensors",
+  "architecture": "anima",
+  "seed": 158040230296173,
+  "steps": 30,
+  "width": 1024,
+  "height": 1024,
+  "cfg": 4.0,
+  "denoise": null,
+  "generated_at": "2026-10-15T21:47:27.573329+09:00",
+  "job_id": "b1516942d6c14a998f3ee8fc17612ff1",
+  "source_job_id": null,
+  "postprocess": "rembg birefnet-portrait -a -af 240 -ab 10 -ae 10; interior alpha >= 200 forced opaque; normalized to 512x512 (premultiplied LANCZOS)"
+}
