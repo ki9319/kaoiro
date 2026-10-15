@@ -2529,13 +2529,13 @@ export class ServerLink {
     return new Promise((resolve) => {
       this.#pushVersioned("directory_request", { scope: "self" })
         .receive("ok", (payload: unknown) => {
-          if (!isObject(payload) || !isObject(payload.self) ||
-              payload.self.agent_id !== this.#agentId) {
+          const identity = isObject(payload) ? payload["self"] : undefined;
+          if (!isObject(identity) || identity.agent_id !== this.#agentId) {
             resolve(null);
             return;
           }
-          const name = typeof payload.self.display_name === "string"
-            ? validDisplayNameOrNull(payload.self.display_name) : null;
+          const name = typeof identity.display_name === "string"
+            ? validDisplayNameOrNull(identity.display_name) : null;
           resolve({ agent_id: this.#agentId,
             ...(name === null ? {} : { display_name: name }) });
         })

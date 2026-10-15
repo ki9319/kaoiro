@@ -1,7 +1,7 @@
 defmodule KaoiroServerWeb.DisplayNameProjectionTest do
   use KaoiroServerWeb.ChannelCase, async: false
 
-  alias KaoiroServer.{AgentDirectory, AgentStates, Auth}
+  alias KaoiroServer.{AgentDirectory, AgentStates, Auth, TestTimeouts}
   alias KaoiroServerWeb.{AgentsChannel, ClientSocket, WrapperChannel, WrapperSocket}
 
   @persona %{"id" => "default", "name" => "Default", "sprite_set" => "default"}
@@ -151,7 +151,7 @@ defmodule KaoiroServerWeb.DisplayNameProjectionTest do
     assert_reply push(caller, "directory_request", %{"version" => "0", "scope" => "self"}),
                  :error,
                  %{reason: "self_identity_too_large"},
-                 5000
+                 10 * TestTimeouts.slow_path()
   end
 
   defp assert_self_name(socket, id, name) do
