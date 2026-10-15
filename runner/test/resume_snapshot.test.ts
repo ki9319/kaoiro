@@ -136,6 +136,42 @@ describe("applyResumeSnapshot (藤 D1/D2 engine-aware apply)", () => {
     expect(next).toEqual(parsed);
   });
 
+  // Grok work unit 3a (issue #644): the five pair cases for the grok engine,
+  // with the permission pair applied beside them.
+  describe("engine=grok", () => {
+    const grok = (snapshot: Parameters<typeof applyResumeSnapshot>[1]) =>
+      applyResumeSnapshot({ ...makeParsed("grok"), model: "stale", modelSource: "launch" }, snapshot, "grok");
+
+    test("applies sandbox and network_access", () => {
+      const next = grok({ sandbox: "read-only", network_access: false });
+      expect(next.sandbox).toBe("read-only");
+      expect(next.networkAccess).toBe(false);
+    });
+    test("case 1: no pair clears the model", () => {
+      const next = grok({ sandbox: "workspace-write" });
+      expect(next.model).toBeUndefined();
+      expect(next.modelSource).toBeUndefined();
+    });
+    test("case 2: a default-source pair is not pinned", () => {
+      const next = grok({ model: "grok-4.6", model_source: "default", effort: "low", effort_source: "default" });
+      expect(next.model).toBeUndefined();
+      expect(next.effort).toBeUndefined();
+    });
+    test.each(["launch", "env", "config"] as const)("case 3: an explicit %s source is kept", (source) => {
+      const next = grok({ model: "grok-4.6", model_source: source, effort: "low", effort_source: source });
+      expect(next).toMatchObject({ model: "grok-4.6", modelSource: source, effort: "low", effortSource: source });
+    });
+    test("case 4: a legacy value without a source becomes config", () => {
+      const next = grok({ model: "grok-4.6", effort: "low" });
+      expect(next).toMatchObject({ model: "grok-4.6", modelSource: "config", effort: "low", effortSource: "config" });
+    });
+    test("case 5: a source without a value is dropped", () => {
+      const next = grok({ model_source: "env" });
+      expect(next.model).toBeUndefined();
+      expect(next.modelSource).toBeUndefined();
+    });
+  });
+
   describe("engine=codex", () => {
     test("snapshot.sandbox / network_access を parsed に上書き", () => {
       const parsed: ParsedSpawn = {
