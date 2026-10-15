@@ -401,7 +401,7 @@ permission pages, the runner configuration page, and an ADR for the engine
 | 1b. Keep vendor extensions out of `acp/` (before unit 2) | [#597](https://github.com/sakuraiyuta/kaoiro/issues/597) | ✅ landed 0ad1ee5b |
 | 1c. Serve the kaoiro tools over authenticated HTTP MCP (before unit 2) | [#604](https://github.com/sakuraiyuta/kaoiro/issues/604) | ✅ landed 8011fb0e |
 | 2. Permission and sandbox enforcement | [#591](https://github.com/sakuraiyuta/kaoiro/issues/591) | ✅ landed 6e7f7b7b |
-| 3. Resume, history replay and catalog probe | [#592](https://github.com/sakuraiyuta/kaoiro/issues/592) | split: 3a [#644](https://github.com/sakuraiyuta/kaoiro/issues/644) ✅ landed 6a3f5e76, 3b [#645](https://github.com/sakuraiyuta/kaoiro/issues/645) ✅ landed 53831e55, 3c [#646](https://github.com/sakuraiyuta/kaoiro/issues/646) in review |
+| 3. Resume, history replay and catalog probe | [#592](https://github.com/sakuraiyuta/kaoiro/issues/592) | split: 3a [#644](https://github.com/sakuraiyuta/kaoiro/issues/644) ✅ landed 6a3f5e76, 3b [#645](https://github.com/sakuraiyuta/kaoiro/issues/645) ✅ landed 53831e55, 3c [#646](https://github.com/sakuraiyuta/kaoiro/issues/646) ✅ landed bf1337a3 |
 | 4. Context usage, live model and effort switching | [#593](https://github.com/sakuraiyuta/kaoiro/issues/593) | ✅ landed e61f40e5 |
 | 5. Parity as a delegated peer (rate limits, early delivery, reply basis, attachments) | [#628](https://github.com/sakuraiyuta/kaoiro/issues/628) | ⏳ |
 
