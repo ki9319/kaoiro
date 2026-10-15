@@ -751,7 +751,7 @@ export async function runAntigravityCli(
     ),
   );
   // Must follow the initial state: the probe result re-publishes state.
-  if (prompt === undefined) host.probeRateLimits();
+  if (prompt === undefined) host.probeRateLimits?.();
   process.on("SIGINT", () => {
     void host?.interrupt().finally(() => host?.close());
   });
