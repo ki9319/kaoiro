@@ -4,7 +4,7 @@ description: Add Grok Build as engine `grok` — wrapper/grok package hosting a 
 status: in_progress
 phase: 36
 depends_on: [phase-34-antigravity-adapter]
-related: [issue-589, issue-590, issue-591, issue-592, issue-593, issue-594, issue-597, issue-604, issue-628]
+related: [issue-589, issue-590, issue-591, issue-592, issue-593, issue-594, issue-597, issue-604, issue-628, issue-660]
 last_updated: 2026-10-15
 ---
 
@@ -83,7 +83,8 @@ Mapping:
 | cold resume and session discovery | `session/resume` in the wrapper's first lane; the runner pages `session/list {cwd}` in a short-lived grok (work unit 3a) | measured, see the [resume evidence](../evidence/grok/2026-10-15-resume-and-discovery.md) |
 | dashboard history on resume | the session's `updates.jsonl`, normalized and replayed by `HistoryReplayer` (work unit 3b) | measured, see the [history evidence](../evidence/grok/2026-10-15-history-replay.md) |
 | launch catalog | the runner reads `initialize` `_meta.modelState` in a short-lived grok at register time and keeps the last good reading (work unit 3c) | measured on 1.0.52: no model request, see the [catalog evidence](../evidence/grok/2026-10-15-catalog-and-quota.md); measure again when grok is upgraded |
-| rate limits, attachments | capability false or field omitted | — |
+| weekly account rate limits | `_x.ai/billing` normalized to `seven_day.utilization` and `resets_at`, then published on both peer status and whoami | measured on Grok Build 1.0.52 and ACP SDK 1.8.0; remeasure on either upgrade |
+| attachments | capability false or field omitted | unsupported |
 
 ### Unsupported operations
 

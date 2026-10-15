@@ -105,6 +105,7 @@ const invalidParams = (id) =>
 // last call, the first call and the turn's sum all differ.
 let turnCalls = 0;
 let turnModel = model;
+let billingCalls = 0;
 const modelCall = (n) => {
   turnCalls = n;
   record("model_call", { model, call: n });
@@ -194,6 +195,35 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       }
     }
     switch (msg.method) {
+      case "_x.ai/billing": {
+        billingCalls += 1;
+        const mode = process.env.KAOIRO_TEST_GROK_BILLING ?? "valid";
+        if (mode === "hang") break;
+        if (mode === "delay")
+          await new Promise((resolve) => setTimeout(resolve,
+            Number(process.env.KAOIRO_TEST_GROK_BILLING_DELAY_MS ?? 10)));
+        if (mode === "unsupported" || mode === "auth") {
+          process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id,
+            error: mode === "unsupported"
+              ? { code: -32601, message: "Method not found" }
+              : { code: -32000, message: "fixture auth error", data: { status: 401 } } }) + "\n");
+          break;
+        }
+        if (mode === "malformed") {
+          reply(msg.id, { config: { creditUsagePercent: 12.5,
+            currentPeriod: { type: "USAGE_PERIOD_TYPE_MONTHLY", end: "2099-12-31T00:00:00Z" } } });
+          break;
+        }
+        const percent = mode === "sequence" ? 10 + billingCalls : 12.5;
+        reply(msg.id, { config: {
+          creditUsagePercent: percent,
+          currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY", start: "2099-12-24T00:00:00Z",
+            end: "2099-12-31T00:00:00Z" },
+          billingPeriodEnd: "PRIVATE_BILLING_FIELD",
+          subscription: { amount: 999 },
+        } });
+        break;
+      }
       case "initialize":
         if (process.env.KAOIRO_TEST_GROK_INITIALIZE_FAIL === "1") {
           process.stdout.write(JSON.stringify({
@@ -598,18 +628,20 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             content: "UNKNOWN_BODY_MARKER",
           });
         }
-        if (text === "tool" || text === "error-tool" || text === "hang-tool") {
+        if (["tool", "error-tool", "hang-tool", "whoami", "list-agents"].includes(text)) {
+          const name = text === "whoami" ? "whoami"
+            : text === "list-agents" ? "list_agents" : "probe";
           update({
             sessionUpdate: "tool_call",
             toolCallId: "mcp",
-            title: "probe",
+            title: name,
             status: "in_progress",
             kind: "other",
           });
           await connecting;
           const result = await client.callTool({
-            name: "probe",
-            arguments: { value: 7 },
+            name,
+            arguments: name === "probe" ? { value: 7 } : {},
           });
           update({
             sessionUpdate: "tool_call_update",
