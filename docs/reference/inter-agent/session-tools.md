@@ -2,7 +2,7 @@
 title: Inter-agent session tools
 description: Exact contract for agent-requested compaction, context threshold notices, and session reset.
 status: provisional
-last_updated: 2026-09-18
+last_updated: 2026-10-15
 related: [protocol, inter-agent-messaging]
 ---
 
@@ -15,9 +15,11 @@ Leaving it out of default allowedTools triggers canUseTool and asks the operator
 through `permission_broker` each time ([#158](https://github.com/sakuraiyuta/kaoiro/issues/158)
 P2, same shape as [ADR-0028](../../adr/0028-external-human-messaging.md) D4).
 
-**Approval effectiveness depends on the agent's permission mode**
-([ADR-0043](../../adr/0043-agent-initiated-session-reset.md) D4 addendum, verified
-on hardware 2026-07-28). The canUseTool → `permission_broker` dialog appears
+**Approval depends on the engine and its approval policy.** Claude uses its
+permission mode; Codex reset uses the dispatched turn and latest approval-axis
+selection as described below; Antigravity reset always asks. Claude behavior
+is documented in [ADR-0043](../../adr/0043-agent-initiated-session-reset.md) D4 addendum, verified
+on hardware 2026-07-28. The canUseTool → `permission_broker` dialog appears
 only in SDK modes that consult canUseTool (`default` family). In `auto`,
 `dontAsk`, or `bypassPermissions`, the SDK auto-approves by mode semantics, so
 no dialog appears. This applies to every canUseTool tool, including
@@ -95,22 +97,29 @@ deferred until dogfooding.
 
 #### `request_session_reset` (phase-28 C2)
 
-Tool for an agent to ask the operator to rebuild its own session
-([ADR-0043](../../adr/0043-agent-initiated-session-reset.md)). Like
-`request_compact` it requires per-call approval, but its **effect occurs at a
-different point** — and unlike `request_compact` it is registered on **both
-engines**: Claude gates it through canUseTool, Codex through the wrapper-side
-`operatorApprovalGated` handler that calls the same `PermissionBroker` from
-inside the bridge tool call (ADR-0043 2026-09-14 amendment, issue #347).
+Tool for an agent to request rebuilding its own session
+([ADR-0043](../../adr/0043-agent-initiated-session-reset.md)). Its effect is
+reserved until the owning turn ends. Claude uses canUseTool and its permission
+mode. Codex uses `operatorApprovalGated`: it skips the broker only when the
+normalized approval actually sent for the calling turn and the latest operator
+selection are both `never`, and permission state is not blocked. Missing policy
+on a live turn, a failed policy read, `untrusted`, or `on-request` asks through
+`PermissionBroker`. Exec and app-server with the axis off submit `never`.
+A stricter mid-turn selection affects the next call; loosening waits for the
+next turn. Antigravity keeps its per-call broker approval.
+
+The tool describes this as: "Depending on the engine and approval policy, the
+operator may be asked first and may refuse." Cancellation notices likewise
+leave the next call's approval to the engine and policy.
 
 | item | content |
 |---|---|
 | input | `{ mode: "new" \| "clear", reason?: string }`; `mode` is required. |
 | approval | Wrapper returns a **reservation only**; execution follows that turn's `result` processing. |
 | turn boundary | Wrapper sends `session_reset_request {mode, reason?}` to the server, which applies the same capability/pending-lock/state/cooldown gates as operator requests. In both Codex SDK and app-server paths, the ready `state_change` is sent on the same socket before `session_reset_request`, following [ADR-0043 D3](../../adr/0043-agent-initiated-session-reset.md)'s requirement to process the result first. |
-| denial | Claude: the SDK returns a deny message as the tool result. Codex: the gated handler returns an `isError` result in the same turn. Either way no reservation is created. |
-| Codex lifetime | The approval wait is bounded at 300 s (`CODEX_APPROVAL_TIMEOUT_MS`, below codex's 310 s `tool_timeout_sec`) and denies on timeout. It is also bound to the calling turn: interrupt, a stream ending without a terminal, a rejected run, watchdog stop or host close deny a pending wait, and drop an already-made reservation with a notice to the agent. Only `turn.completed` / `turn.failed` is the boundary that sends `session_reset_request`, and a terminal delivered after the turn was abandoned from outside (operator interrupt, watchdog, host close) does not count. |
-| engine | Both. Claude via canUseTool → PermissionBroker; Codex via the wrapper-side `operatorApprovalGated` handler inside the bridge tool call (ADR-0043 2026-09-14 amendment). |
+| denial | Broker deny or approval timeout returns an error without a reservation. Server refusals arrive after reservation as a notice: `agent_busy` is retried once and may then succeed; unsupported/runner-unavailable replies confirm refusal. A push timeout or pending reset leaves the outcome unconfirmed. |
+| Codex lifetime | A call with no live turn is cancelled before the approval setting is consulted. Autonomous approval also checks cancellation before reserving. When required, the approval wait is bounded at 300 s (`CODEX_APPROVAL_TIMEOUT_MS`, below codex's 310 s `tool_timeout_sec`) and denies on timeout. It is also bound to the calling turn: interrupt, a stream ending without a terminal, a rejected run, watchdog stop or host close deny a pending wait, and drop an already-made reservation with a notice to the agent. Only `turn.completed` / `turn.failed` is the boundary that sends `session_reset_request`, and a terminal delivered after the turn was abandoned from outside (operator interrupt, watchdog, host close) does not count. |
+| engine | Claude via canUseTool and its permission mode; Codex via the policy-aware wrapper gate (ADR-0043 2026-10-15 addendum); Antigravity via its per-call wrapper broker. Codex `request_compact` is not registered. |
 
 Rules:
 

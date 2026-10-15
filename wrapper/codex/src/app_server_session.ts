@@ -165,8 +165,8 @@ export class AppServerSession {
     this.#originPending = pending;
     try {
       const turn = await this.#transport.startTurn({ ...input,
-        onDispatch: (identity, settings) => {
-          const result = input.onDispatch?.(identity, settings);
+        onDispatch: (identity, settings, approvalPolicy) => {
+          const result = input.onDispatch?.(identity, settings, approvalPolicy);
           pending.signal = this.#turnSignal() ?? AbortSignal.abort();
           pending.signal.addEventListener("abort", () => pending.resolve(), { once: true });
           return result;

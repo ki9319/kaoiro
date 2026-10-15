@@ -108,12 +108,26 @@ is common to all tools through canUseTool, including `request_compact` /
 
 ### D4 Addendum (2026-09-14 — Codex has no mode-derived auto-allow)
 
-The mode-dependence above is a property of the Claude SDK's canUseTool. On
+~~The mode-dependence above is a property of the Claude SDK's canUseTool. On
 Codex the approval is asked by the tool handler itself (see the Neutral
 amendment below) and no permission mode can pre-approve it: every
 `request_session_reset` call on Codex opens the operator dialog. This is an
 independent clause — it neither changes the Claude semantics above nor
-introduces a kaoiro-owned auto-allow.
+introduces a kaoiro-owned auto-allow.~~
+
+### D4 Addendum (2026-10-15 — Codex follows its approval setting)
+
+The operator decision in [issue #661](https://github.com/sakuraiyuta/kaoiro/issues/661)
+supersedes the September clause above. The wrapper skips the broker only when
+the dispatched turn's normalized wire approval and the latest operator
+selection are both `never`, and permission state is not blocked. Exec and
+app-server without the approval axis submit `never`. A stricter selection
+affects the next tool call immediately; loosening applies on the next turn.
+Unknown policy on a live turn still asks. A call outside a live turn is
+cancelled before policy evaluation. Both approval paths retain the same
+turn-bound reservation and server checks. Claude is unchanged; Antigravity
+continues to ask on every reset. Codex compaction registration is separate
+([issue #662](https://github.com/sakuraiyuta/kaoiro/issues/662)).
 
 ### D5 — Do not mechanize handoff; encourage externalization in the tool description
 
@@ -159,6 +173,8 @@ generalize embedded compact summaries to new/clear.
   issue #246. `codex exec` has its approval axis fixed at `never` and no per-request
   approval path (`wrapper/codex/src/host.ts`); exposing it would allow a self-reset
   without operator approval. Reconsider once Codex has an approval path.
+- The 2026-10-15 D4 addendum changes when the following Codex gate asks;
+  its call lifetime and reservation rules remain in force.
 - Amendment (2026-09-14, issue #347): `request_session_reset` is exposed to
   Codex through a **wrapper-side approval gate**. The Codex tool handler
   (`operatorApprovalGated`, `wrapper/agent-common/src/approval_gate.ts`)

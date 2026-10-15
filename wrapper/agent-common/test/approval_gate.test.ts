@@ -1,6 +1,4 @@
-// operatorApprovalGated (issue #347): the wrapped handler runs only after an
-// explicit allow, and never for a call whose lifetime signal has fired.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { operatorApprovalGated } from "../src/approval_gate.js";
 import type { PermissionDecision } from "../src/permission.js";
 import type { ToolDescriptor } from "../src/tooling.js";
@@ -19,6 +17,7 @@ function rig(options: {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ) => Promise<PermissionDecision>;
+  autonomous?: () => boolean;
   toolName?: string;
   validate?: (input: Record<string, unknown>) => { ok: true } | { ok: false; message: string };
 } = {}) {
@@ -41,6 +40,7 @@ function rig(options: {
         asked.push({ toolName, signal });
         return decision.promise;
       }),
+    ...(options.autonomous === undefined ? {} : { autonomous: options.autonomous }),
     ...(options.toolName !== undefined ? { toolName: options.toolName } : {}),
     ...(options.validate !== undefined ? { validate: options.validate } : {}),
   });
@@ -118,5 +118,54 @@ describe("operatorApprovalGated", () => {
     expect(result.content[0]!.text).toContain("bad mode");
     expect(asked).toHaveLength(0);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("engine approval policy", () => {
+  it.each(["absent", "false", "throws"])("%s policy asks", async policy => {
+    const autonomous = policy === "absent" ? undefined : () => {
+      if (policy === "throws") throw new Error("unknown policy");
+      return false;
+    };
+    const r = rig(autonomous === undefined ? {} : { autonomous });
+    const call = r.gated.handler({});
+    expect(r.asked).toHaveLength(1);
+    r.decision.resolve({ allow: true });
+    await call;
+    expect(r.calls).toHaveLength(1);
+  });
+
+  it("autonomous policy runs without the broker", async () => {
+    const r = rig({ autonomous: () => true });
+    expect((await r.gated.handler({})).isError).not.toBe(true);
+    expect(r.asked).toHaveLength(0);
+    expect(r.calls).toHaveLength(1);
+  });
+
+  it("abandoned calls do not validate or evaluate autonomy", async () => {
+    const autonomous = vi.fn(() => true);
+    const validate = vi.fn(() => ({ ok: true as const }));
+    const r = rig({ autonomous, validate });
+    expect((await r.gated.handler({}, { signal: AbortSignal.abort() })).isError).toBe(true);
+    expect(validate).not.toHaveBeenCalled();
+    expect(autonomous).not.toHaveBeenCalled();
+    expect(r.asked).toHaveLength(0);
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it("an abort during the autonomous decision prevents reservation", async () => {
+    const controller = new AbortController();
+    const r = rig({ autonomous: () => { controller.abort();return true; } });
+    expect((await r.gated.handler({}, { signal: controller.signal })).isError).toBe(true);
+    expect(r.asked).toHaveLength(0);
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it("invalid input never evaluates autonomy", async () => {
+    const autonomous = vi.fn(() => true);
+    const r = rig({ autonomous, validate: () => ({ ok: false, message: "bad" }) });
+    expect((await r.gated.handler({})).isError).toBe(true);
+    expect(autonomous).not.toHaveBeenCalled();
+    expect(r.calls).toHaveLength(0);
   });
 });

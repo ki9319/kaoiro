@@ -38,6 +38,11 @@ export function watchdogClock() {
 // Host/Session, Unix ToolHost, ServerLink, brokers, IA and reset coordinator run.
 export async function cliAppFixture(permissionSync = false, backend: "exec" | "app-server" = "app-server", replyBasis: "v1" | "legacy" = "legacy",
   fixtureOptions: {
+    approvalAxis?: boolean;
+    resume?: string;
+    beforeDispatch?: () => Promise<void>;
+    omitDispatchedApproval?: boolean;
+    permissionTimeoutMs?: number;
     stages?: boolean;
     turnStart?: () => "reply" | "exit" | "reject";
     rateLimitRead?: unknown;
@@ -59,10 +64,11 @@ export async function cliAppFixture(permissionSync = false, backend: "exec" | "a
   const stdin = new Writable({ write(chunk, _encoding, cb) {
     const request = JSON.parse(String(chunk)) as RpcObject;sent.push(request);
     if (request.method === "initialize") reply(request, { userAgent: "fixture/0.153.4" });
-    if (request.method === "thread/start") {
+    if (request.method === "thread/start" || request.method === "thread/resume") {
       socketPath = ((request.params as any).config.mcp_servers.kaoiro.env.KAOIRO_BRIDGE_SOCKET as string);
       reply(request, { thread: { id: "thread" }, model: "gpt-5.6-sol", reasoningEffort: "medium" });
     }
+    if (request.method === "thread/read") reply(request, { thread: { id: "thread", turns: [] } });
     if (request.method === "account/rateLimits/read") {
       if (fixtureOptions.holdRateLimitRead) pendingRateLimitRead = request;
       else if (Object.hasOwn(fixtureOptions, "rateLimitRead")) reply(request, fixtureOptions.rateLimitRead);
@@ -97,21 +103,25 @@ export async function cliAppFixture(permissionSync = false, backend: "exec" | "a
   vi.stubEnv("KAOIRO_CODEX_TURN_WATCHDOG_ABORT_GRACE_MS", "1000");
   let host!: CodexHost;
   let link!: ServerLink, session: AppServerSession | undefined;
+  let permissionDecision: ((decision: { request_id: string; allow: boolean }) => void) | undefined;
   let permissionWaits = 0;
   let nextInbound: { enter: () => void; pending: Promise<void> } | undefined;
   const received: number[] = [], finalized: string[] = [], queued: string[] = [];
   let callbacks!: CodexHostOptions;
   const running = runCodexCli({ backend, watchdogClock: clock,
-    parseCliArgs: () => ({ configPath: "fixture", prompt: undefined, resume: undefined }),
-    loadConfig: () => ({ agent_id: agentId, persona: { id: "p", name: "P", sprite_set: "p" }, display_name: "P", server_url: wire.url, model: "gpt-5.6-sol" }),
-    createServerLink: (url, id, options) => (link = new ServerLink(url, id, { ...options,
+    parseCliArgs: () => ({ configPath: "fixture", prompt: undefined, resume: fixtureOptions.resume }),
+    loadConfig: () => ({ agent_id: agentId, persona: { id: "p", name: "P", sprite_set: "p" }, display_name: "P", server_url: wire.url, model: "gpt-5.6-sol", approval_axis: fixtureOptions.approvalAxis ?? false, ...(fixtureOptions.permissionTimeoutMs === undefined ? {} : { permission_timeout_ms: fixtureOptions.permissionTimeoutMs }) }),
+    createServerLink: (url, id, options) => {
+      permissionDecision = options.onPermissionDecision;
+      return (link = new ServerLink(url, id, { ...options,
       onInterAgentMessage: async envelope => {
         const held = nextInbound;nextInbound = undefined;
         if (held) { held.enter();await held.pending; }
         await options.onInterAgentMessage?.(envelope);
         received.push((envelope as typeof envelope & { delivery_seq: number }).delivery_seq);
       },
-    })),
+    }));
+    },
     createHost: (config, options) => { callbacks = options;host = new CodexHost(config, { ...options,
       startupRateLimitResolver: async () => new Map(),
       waitForPermissionSync: () => { permissionWaits += 1;return options.waitForPermissionSync!(); },
@@ -122,9 +132,24 @@ export async function cliAppFixture(permissionSync = false, backend: "exec" | "a
         yield { type: "thread.started" as const, thread_id: "thread" };await execTerminal;
         yield { type: "turn.completed" as const, usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0, cache_write_input_tokens: 0 } };
       })() }; } };return { startThread: () => thread, resumeThread: () => thread }; },
-      appServerSessionFactory: async options => (session = await AppServerSession.create({ ...options, transport: {
-        spawnChild: () => { spawned += 1;return child; }, shutdownTimeoutMs: fixtureOptions.shutdownTimeoutMs ?? 20,
-      } })),
+      appServerSessionFactory: async options => {
+        session = await AppServerSession.create({ ...options, transport: {
+          spawnChild: () => { spawned += 1;return child; }, shutdownTimeoutMs: fixtureOptions.shutdownTimeoutMs ?? 20,
+        } });
+        if (fixtureOptions.beforeDispatch || fixtureOptions.omitDispatchedApproval) {
+          const start = session.startProjectedTurn.bind(session);
+          session.startProjectedTurn = request => start({ ...request,
+            beforeDispatch: async settings => {
+              await request.beforeDispatch?.(settings);
+              await fixtureOptions.beforeDispatch?.();
+            },
+            onDispatch: (identity, settings, approval) => request.onDispatch?.(
+              identity, settings, fixtureOptions.omitDispatchedApproval ? undefined : approval,
+            ),
+          });
+        }
+        return session;
+      },
     });
       const send = host.send.bind(host);
       host.send = async (...args) => { await send(...args);queued.push(args[0]); };
@@ -135,6 +160,7 @@ export async function cliAppFixture(permissionSync = false, backend: "exec" | "a
   await vi.waitFor(() => expect(host).toBeDefined());
   const envelopes = (type: string) => wire.received.filter(e => e.event === "envelope" && e.payload.type === type).map(e => e.payload);
   return {
+    permissionDecision: (id: string, allow: boolean) => permissionDecision?.({ request_id: id, allow }),
     rejectNextSend: (error: Record<string, unknown>) => { rejection = error; },
     clock, wire, host, callbacks, sent, send, terminal, exit, releaseChildClose: exit, running, envelopes, releaseExec, finalized, queued,
     get spawned() { return spawned; }, get permissionWaits() { return permissionWaits; }, get rateLimits() { return session?.rateLimits; },
@@ -163,9 +189,11 @@ export async function cliAppFixture(permissionSync = false, backend: "exec" | "a
         payload: { to: agentId, conversation_id: cid, turn_number: number, kind: "inform", body } });
       await vi.waitFor(() => expect(received).toContain(seq));
     },
-    tool(name: string, input: Record<string, unknown> = {}): Promise<any> {
+    tool(name: string, input: Record<string, unknown> = {}, observeSocket?: (socket: ReturnType<typeof createConnection>) => void): Promise<any> {
       return new Promise((resolve, reject) => {
         const socket = createConnection(socketPath);let buffer = "";
+        observeSocket?.(socket);
+        socket.on("close", () => reject(new Error("Fixture bridge closed")));
         socket.setEncoding("utf8");socket.setTimeout(2000, () => socket.destroy(new Error("Fixture tool timeout")));
         socket.on("error", reject);socket.on("data", data => { buffer += data;if (buffer.includes("\n")) { socket.end();resolve(JSON.parse(buffer.split("\n")[0]!)); } });
         socket.on("connect", () => socket.write(JSON.stringify({ id: 1, method: "call_tool", name, input, metadata: { "x-codex-turn-metadata": { thread_id: "thread", turn_id: `turn-${turn}` } } }) + "\n"));

@@ -117,6 +117,12 @@ above). The exec backend ignores both variables. The wrapper logs
 [Codex app-server transport](../engines/codex-app-server.md#approval-requests-adr-0064)
 and [ADR-0064](../../adr/0064-codex-app-server-approval-requests.md).
 
+Selecting `untrusted` or `on-request` also requires an operator dialog for
+`request_session_reset`. The dialog is skipped only when both the dispatched
+turn and latest selection are `never` and permission state is unblocked;
+loosening a running strict turn takes effect on its next turn. Exec and
+app-server with the axis off use `never`.
+
 ## Claude phase-2 delivery controls
 
 `KAOIRO_CLAUDE_PHASE2_DELIVERY=1` in the Claude wrapper process environment

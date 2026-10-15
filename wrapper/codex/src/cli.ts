@@ -1261,11 +1261,8 @@ export async function runCodexCli(dependencies: CodexCliDependencies = {}): Prom
     toolDescriptors: [
       ...interAgent.descriptors(),
       askUserQuestionDescriptor((questions) => questionBroker!.decide(questions)),
-      // ADR-0043 Neutral amendment (issue #347): exposed to codex behind the
-      // wrapper-owned approval wait. `offerCompact: false` — codex has no
-      // compaction path, so the description must not point at
-      // request_compact. The reservation carries the turn that made it so
-      // the coordinator can refuse to ride any other turn's end.
+      // The reservation carries its owner turn so it cannot ride a later
+      // turn's end. See ADR-0043 for engine-specific approval policy.
       operatorApprovalGated(
         requestSessionResetDescriptor({
           reserve: (mode, reason) =>
@@ -1281,6 +1278,14 @@ export async function runCodexCli(dependencies: CodexCliDependencies = {}): Prom
             permissionBroker!.decide(toolName, input, signal),
           toolName: REQUEST_SESSION_RESET_TOOL_FQN,
           validate: validateRequestSessionResetInput,
+          autonomous: () => {
+            const approval = host.bridgeToolApproval(host.activeInterAgentTurnToken());
+            const autonomous = !approval.blocked && approval.turn === "never" && approval.next === "never";
+            if (autonomous) writeRedactedStderr(
+              "request_session_reset: approved by the agent's approval setting (never); no operator dialog\n",
+            );
+            return autonomous;
+          },
         },
       ),
     ],

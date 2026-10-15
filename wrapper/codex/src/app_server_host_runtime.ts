@@ -39,6 +39,7 @@ export interface AppServerHostRuntimeOptions {
   onRateLimits?: (snapshot: AppServerRateLimits) => void;
 }
 export interface AppServerRuntimeAttempt {
+  bridgeApproval: ApprovalPolicy | null;
   pending: AppServerPendingSettings;
   prepared: AppServerPreparedSettings;
   permission: AppServerPermissionAttempt | null;
@@ -183,7 +184,7 @@ export class AppServerHostRuntime {
               ...(approvalOf(selection) === undefined ? {} : { approval: approvalOf(selection)! }),
             } },
             beforeDispatch: () => cancellable(waitForAdmission(), active.abort.signal),
-            onDispatch: (identity, prepared) => {
+            onDispatch: (identity, prepared, approvalPolicy) => {
               if (active.abort.signal.aborted || this.#closed) throw new AppServerAdmissionError("interrupted");
               const current = hooks.snapshot();
               if (!canSubmitPermission(current.permission, selection) || current.pending.model !== pending.model ||
@@ -192,7 +193,7 @@ export class AppServerHostRuntime {
               }
               const preparedInput = hooks.prepareInput?.();
               if (preparedInput === null) throw new AppServerAdmissionError("input_skipped");
-              attempt = { pending, prepared, permission: current.permission.syncSupported
+              attempt = { pending, prepared, bridgeApproval: approvalPolicy ?? null, permission: current.permission.syncSupported
                 ? captureAppServerPermission(this.#options.rolloutRoot ?? codexRolloutsRoot(), current.permission, selection, identity, this.#fresh) : null };
               active.dispatched = true;
               this.#fresh = false;

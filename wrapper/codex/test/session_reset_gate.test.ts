@@ -1,15 +1,8 @@
-// issue #347 — request_session_reset on codex behind the wrapper-owned
-// approval wait (ADR-0043 Neutral amendment). These pins run the REAL
-// composition: `runCodexCli` glue, a real CodexHost driven by a scripted
-// SDK thread, the real ToolHost unix socket with a fake bridge client, the
-// real PermissionBroker and the real SessionResetCoordinator. A mock host
-// with a hand-called onTurnEnd could not verify what is at stake here —
-// that the approval wait and the reservation live exactly as long as the
-// engine turn that made the call (review M1 / M2).
+// Scripted SDK turns drive the production CLI, bridge and reset coordinator.
 import { createConnection, type Socket } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CodexOptions, ThreadEvent } from "@openai/codex-sdk";
-import type { Envelope, WrapperConfig } from "@kaoiro/agent-common";
+import type { CodexOptions, ThreadEvent, ThreadOptions } from "@openai/codex-sdk";
+import { PermissionBroker, type Envelope, type WrapperConfig } from "@kaoiro/agent-common";
 import { runCodexCli } from "../src/cli.js";
 import { CodexHost } from "../src/host.js";
 import type { CodexClientLike, CodexHostOptions, CodexThreadLike } from "../src/host.js";
@@ -60,7 +53,7 @@ function turnCompleted(): ThreadEvent {
   };
 }
 
-function makeThread(scripts: TurnScript[]): CodexClientLike {
+function makeThread(scripts: TurnScript[], options: ThreadOptions[]): CodexClientLike {
   const thread: CodexThreadLike = {
     async runStreamed(_input, turnOptions) {
       const script = scripts.shift();
@@ -105,8 +98,8 @@ function makeThread(scripts: TurnScript[]): CodexClientLike {
     },
   };
   return {
-    startThread: () => thread,
-    resumeThread: () => thread,
+    startThread: value => { options.push(value ?? {});return thread; },
+    resumeThread: (_id, value) => { options.push(value ?? {});return thread; },
   };
 }
 
@@ -154,6 +147,7 @@ class FakeBridge {
 }
 
 interface Rig {
+  threadOptions: ThreadOptions[];
   sent: Envelope[];
   requests: { mode: string; reason?: string }[];
   requestSnapshots: { sentCount: number; state: string | undefined }[];
@@ -181,7 +175,8 @@ async function makeRig(
   let hostOptions!: Record<string, any>;
   let host!: CodexHost;
   let captured: CodexOptions | null = null;
-  const client = makeThread(scripts);
+  const threadOptions: ThreadOptions[] = [];
+  const client = makeThread(scripts, threadOptions);
   const link = {
     close: () => {},
     currentSessionId: () => null,
@@ -229,6 +224,7 @@ async function makeRig(
   });
   await vi.waitFor(() => expect(host).toBeDefined());
   return {
+    threadOptions,
     sent,
     requests,
     requestSnapshots,
@@ -283,20 +279,16 @@ async function startToolTurn(rig: Rig, conversationIds?: readonly string[]): Pro
   return rig.turnTokens[before]!;
 }
 
-async function askForReset(
-  rig: Rig,
-  bridge: FakeBridge,
-): Promise<{ reply: Promise<Record<string, unknown>>; requestId: string }> {
-  const seen = permissionRequests(rig.sent).length;
-  const reply = bridge.call("request_session_reset", { mode: "new", reason: "tired" });
-  await vi.waitFor(() =>
-    expect(permissionRequests(rig.sent).length).toBe(seen + 1),
-  );
-  const request = permissionRequests(rig.sent)[seen]!;
-  return {
-    reply,
-    requestId: (request.payload as { request_id: string }).request_id,
-  };
+async function reserveReset(rig: Rig, bridge: FakeBridge): Promise<void> {
+  const broker = vi.spyOn(PermissionBroker.prototype, "decide");
+  let result: Record<string, unknown>;
+  try {
+    result = await bridge.call("request_session_reset", { mode: "new", reason: "tired" });
+    expect(broker).not.toHaveBeenCalled();
+  } finally { broker.mockRestore(); }
+  expect(JSON.stringify(result)).toContain("reserved");
+  expect(permissionRequests(rig.sent)).toHaveLength(0);
+  expect(rig.sent.some(e => e.state === "waiting_permission" || pendingPermissionOf(e) !== undefined)).toBe(false);
 }
 
 async function finish(rig: Rig): Promise<void> {
@@ -310,40 +302,18 @@ describe("codex request_session_reset gate (issue #347)", () => {
     stderr.mockClear();
   });
 
-  it("allow → reserve → turn.completed sends session_reset_request once, in the right states", async () => {
+  it("autonomous → reserve → turn.completed sends session_reset_request once, in the right states", async () => {
     const script: TurnScript = { tool: true, ending: deferred<Ending>() };
     const rig = await makeRig([script]);
     try {
       const turnToken = await startToolTurn(rig, ["conv-completed"]);
       const bridge = await rig.bridge();
-      const { reply, requestId } = await askForReset(rig, bridge);
-
-      // permission_request goes out BEFORE the ext-bearing state_change, so
-      // the dashboard's last-rendered envelope is the one with the record.
-      const requestIndex = rig.sent.findIndex((e) => e.type === "permission_request");
-      const waiting = rig.sent
-        .slice(requestIndex)
-        .find((e) => e.type === "state_change" && e.state === "waiting_permission");
-      expect(waiting).toBeDefined();
-      expect(pendingPermissionOf(waiting!)).toMatchObject({
-        request_id: requestId,
-        tool_name: "mcp__kaoiro__request_session_reset",
-        input: { mode: "new", reason: "tired" },
-      });
+      await reserveReset(rig, bridge);
       expect(rig.requests).toHaveLength(0);
-
-      rig.linkOptions.onPermissionDecision({ request_id: requestId, allow: true });
-      const result = await reply;
-      expect(result.result).toMatchObject({ content: [{ type: "text" }] });
-      expect((result.result as { isError?: boolean }).isError).toBeUndefined();
-      expect(String((result.result as { content: { text: string }[] }).content[0]!.text))
-        .toContain("reserved");
-      // Nothing is sent before the SDK's own terminal.
-      expect(rig.requests).toHaveLength(0);
-      const resumed = rig.sent.at(-1)!;
-      expect(resumed.state).toBe("tool_running");
-      expect(pendingPermissionOf(resumed)).toBeUndefined();
-
+      const policy = rig.host.bridgeToolApproval(turnToken);
+      expect(rig.threadOptions.at(-1)?.approvalPolicy).toBe("never");
+      expect(policy).toEqual({ turn: rig.threadOptions.at(-1)?.approvalPolicy, next: "never", blocked: false });
+      expect(rig.host.bridgeToolApproval("other-token").turn).toBeNull();
       script.ending.resolve("completed");
       await vi.waitFor(() => expect(rig.requests).toEqual([{ mode: "new", reason: "tired" }]));
       const snapshot = rig.requestSnapshots[0]!;
@@ -367,9 +337,7 @@ describe("codex request_session_reset gate (issue #347)", () => {
     try {
       const turnToken = await startToolTurn(rig, ["conv-failed"]);
       const bridge = await rig.bridge();
-      const { reply, requestId } = await askForReset(rig, bridge);
-      rig.linkOptions.onPermissionDecision({ request_id: requestId, allow: true });
-      await reply;
+      await reserveReset(rig, bridge);
       script.ending.resolve("failed");
       await vi.waitFor(() => expect(rig.requests).toHaveLength(1));
       const snapshot = rig.requestSnapshots[0]!;
@@ -388,7 +356,7 @@ describe("codex request_session_reset gate (issue #347)", () => {
   });
 
   for (const ending of ["eof", "throw"] as const) {
-    it(`allow → reserve → ${ending} without a terminal drops the reservation, and the next turn's completion sends nothing`, async () => {
+    it(`autonomous → reserve → ${ending} without a terminal drops the reservation, and the next turn's completion sends nothing`, async () => {
       const script: TurnScript = { tool: true, ending: deferred<Ending>() };
       // The cancellation notice itself becomes a turn; give it a plain
       // completion so the "next unrelated turn end" case is exercised.
@@ -397,9 +365,7 @@ describe("codex request_session_reset gate (issue #347)", () => {
       try {
         await startToolTurn(rig);
         const bridge = await rig.bridge();
-        const { reply, requestId } = await askForReset(rig, bridge);
-        rig.linkOptions.onPermissionDecision({ request_id: requestId, allow: true });
-        await reply;
+        await reserveReset(rig, bridge);
         script.ending.resolve(ending);
         // The notice turn ran to its own authoritative completion.
         await vi.waitFor(() => expect(rig.turnTokens).toHaveLength(2));
@@ -423,16 +389,14 @@ describe("codex request_session_reset gate (issue #347)", () => {
   // then ends quietly (terminal-less EOF) or rejects (run_streamed_rejected).
   // Both must drop the reservation AND name the operator (issue #349).
   for (const onAbort of ["eof", "throw"] as const) {
-    it(`allow → reserve → interrupt (${onAbort}) drops the reservation and names the operator`, async () => {
+    it(`autonomous → reserve → interrupt (${onAbort}) drops the reservation and names the operator`, async () => {
       const script: TurnScript = { tool: true, ending: deferred<Ending>(), onAbort };
       const notice: TurnScript = { tool: false, ending: deferred<Ending>() };
       const rig = await makeRig([script, notice]);
       try {
         await startToolTurn(rig);
         const bridge = await rig.bridge();
-        const { reply, requestId } = await askForReset(rig, bridge);
-        rig.linkOptions.onPermissionDecision({ request_id: requestId, allow: true });
-        await reply;
+        await reserveReset(rig, bridge);
         (rig.linkOptions.onInterrupt as () => void)();
         await vi.waitFor(() => expect(rig.turnTokens).toHaveLength(2));
         await vi.waitFor(() =>
@@ -453,101 +417,17 @@ describe("codex request_session_reset gate (issue #347)", () => {
     });
   }
 
-  it("allow → reserve → watchdog fail-stop sends nothing", async () => {
+  it("autonomous → reserve → watchdog fail-stop sends nothing", async () => {
     const script: TurnScript = { tool: true, ending: deferred<Ending>() };
     const rig = await makeRig([script]);
     try {
       const token = await startToolTurn(rig);
       const bridge = await rig.bridge();
-      const { reply, requestId } = await askForReset(rig, bridge);
-      rig.linkOptions.onPermissionDecision({ request_id: requestId, allow: true });
-      await reply;
+      await reserveReset(rig, bridge);
       expect(rig.host.failStopTurnForWatchdog(token)).toBe(true);
       // A late terminal from the stuck stream is not admitted after a stop.
       script.ending.resolve("completed");
       await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(rig.requests).toHaveLength(0);
-      bridge.destroy();
-    } finally {
-      await finish(rig);
-    }
-  });
-
-  it("deny answers in the same turn and reserves nothing", async () => {
-    const script: TurnScript = { tool: true, ending: deferred<Ending>() };
-    const rig = await makeRig([script]);
-    try {
-      await startToolTurn(rig);
-      const bridge = await rig.bridge();
-      const { reply, requestId } = await askForReset(rig, bridge);
-      rig.linkOptions.onPermissionDecision({ request_id: requestId, allow: false });
-      const result = await reply;
-      expect((result.result as { isError?: boolean }).isError).toBe(true);
-      expect(String((result.result as { content: { text: string }[] }).content[0]!.text))
-        .toContain("not approved");
-      script.ending.resolve("completed");
-      await vi.waitFor(() =>
-        expect(rig.sent.filter((e) => e.type === "result")).toHaveLength(1),
-      );
-      expect(rig.requests).toHaveLength(0);
-      bridge.destroy();
-    } finally {
-      await finish(rig);
-    }
-  });
-
-  it("turn end with the bridge socket still open denies the pending wait; a late allow reserves nothing", async () => {
-    const script: TurnScript = { tool: true, ending: deferred<Ending>() };
-    const later: TurnScript = { tool: false, ending: deferred<Ending>() };
-    const rig = await makeRig([script, later]);
-    try {
-      await startToolTurn(rig);
-      const bridge = await rig.bridge();
-      const { reply, requestId } = await askForReset(rig, bridge);
-      // codex dies (EOF) while the bridge connection — which outlives the
-      // call on the real bridge too — stays open.
-      script.ending.resolve("eof");
-      const result = await reply;
-      expect((result.result as { isError?: boolean }).isError).toBe(true);
-      // The record is gone from the resting state, so the dialog is gone.
-      await vi.waitFor(() =>
-        expect(rig.sent.filter((e) => e.type === "result")).toHaveLength(1),
-      );
-      const resting = rig.sent.filter((e) => e.type === "state_change").at(-1)!;
-      expect(pendingPermissionOf(resting)).toBeUndefined();
-      expect(resting.state).toBe("waiting_input");
-
-      rig.linkOptions.onPermissionDecision({ request_id: requestId, allow: true });
-      // The next, unrelated turn completes: still nothing to send.
-      await (rig.linkOptions.onInstruction as (text: string) => void)("carry on");
-      await vi.waitFor(() =>
-        expect(rig.sent.filter((e) => e.type === "result")).toHaveLength(2),
-      );
-      expect(rig.requests).toHaveLength(0);
-      bridge.destroy();
-    } finally {
-      await finish(rig);
-    }
-  });
-
-  it("an operator interrupt in the same task as the allow wins: nothing is reserved (review R1)", async () => {
-    const script: TurnScript = { tool: true, ending: deferred<Ending>() };
-    const later: TurnScript = { tool: false, ending: deferred<Ending>() };
-    const rig = await makeRig([script, later]);
-    try {
-      await startToolTurn(rig);
-      const bridge = await rig.bridge();
-      const { reply, requestId } = await askForReset(rig, bridge);
-      rig.linkOptions.onPermissionDecision({ request_id: requestId, allow: true });
-      // The production entry point, not the watchdog helper: host.interrupt()
-      // must invalidate the allow before its first await.
-      (rig.linkOptions.onInterrupt as () => void)();
-      const result = await reply;
-      expect((result.result as { isError?: boolean }).isError).toBe(true);
-      await (rig.linkOptions.onInstruction as (text: string) => void)("carry on");
-      await vi.waitFor(() =>
-        expect(rig.sent.filter((e) => e.type === "result")).toHaveLength(2),
-      );
       expect(rig.requests).toHaveLength(0);
       bridge.destroy();
     } finally {
@@ -590,9 +470,7 @@ describe("codex request_session_reset gate (issue #347)", () => {
         try {
           const token = await startToolTurn(rig);
           const bridge = await rig.bridge();
-          const { reply, requestId } = await askForReset(rig, bridge);
-          rig.linkOptions.onPermissionDecision({ request_id: requestId, allow: true });
-          await reply;
+          await reserveReset(rig, bridge);
           // The SDK terminal is ready before the abort can win the race, so
           // the host still observes turn.${ending} after the abandonment.
           script.ending.resolve(ending);
@@ -638,77 +516,5 @@ describe("codex request_session_reset gate (issue #347)", () => {
     }
   });
 
-  it("closing the bridge connection denies the wait; a late allow reserves nothing", async () => {
-    const script: TurnScript = { tool: true, ending: deferred<Ending>() };
-    const rig = await makeRig([script]);
-    try {
-      await startToolTurn(rig);
-      const bridge = await rig.bridge();
-      const { requestId } = await askForReset(rig, bridge);
-      bridge.destroy();
-      await vi.waitFor(() => {
-        const latest = rig.sent.filter((e) => e.type === "state_change").at(-1)!;
-        expect(pendingPermissionOf(latest)).toBeUndefined();
-      });
-      rig.linkOptions.onPermissionDecision({ request_id: requestId, allow: true });
-      script.ending.resolve("completed");
-      await vi.waitFor(() =>
-        expect(rig.sent.filter((e) => e.type === "result")).toHaveLength(1),
-      );
-      expect(rig.requests).toHaveLength(0);
-    } finally {
-      await finish(rig);
-    }
-  });
 
-  it("the wait times out as a deny", async () => {
-    const script: TurnScript = { tool: true, ending: deferred<Ending>() };
-    const rig = await makeRig([script], { permission_timeout_ms: 30 });
-    try {
-      await startToolTurn(rig);
-      const bridge = await rig.bridge();
-      const { reply, requestId } = await askForReset(rig, bridge);
-      const result = await reply;
-      expect((result.result as { isError?: boolean }).isError).toBe(true);
-      expect(String((result.result as { content: { text: string }[] }).content[0]!.text))
-        .toContain("timed out");
-      rig.linkOptions.onPermissionDecision({ request_id: requestId, allow: true });
-      script.ending.resolve("completed");
-      await vi.waitFor(() =>
-        expect(rig.sent.filter((e) => e.type === "result")).toHaveLength(1),
-      );
-      expect(rig.requests).toHaveLength(0);
-      bridge.destroy();
-    } finally {
-      await finish(rig);
-    }
-  });
-
-  it("host close denies the pending wait and severs the live bridge connection", async () => {
-    const script: TurnScript = { tool: true, ending: deferred<Ending>() };
-    const rig = await makeRig([script]);
-    let bridge: FakeBridge | null = null;
-    try {
-      await startToolTurn(rig);
-      bridge = await rig.bridge();
-      const { reply, requestId } = await askForReset(rig, bridge);
-      rig.host.close();
-      // The turn scope settles the wait as a deny at close; whatever the
-      // handler still manages to write is that deny, never a reservation.
-      const result = await reply;
-      expect((result.result as { isError?: boolean }).isError).toBe(true);
-      // ToolHost.close() must destroy accepted sockets, not only stop
-      // listening — otherwise this connection would outlive the host.
-      let severed = false;
-      void bridge.closed.promise.then(() => {
-        severed = true;
-      });
-      await vi.waitFor(() => expect(severed).toBe(true), { timeout: 2000 });
-      rig.linkOptions.onPermissionDecision({ request_id: requestId, allow: true });
-      expect(rig.requests).toHaveLength(0);
-    } finally {
-      bridge?.destroy();
-      await finish(rig);
-    }
-  });
 });

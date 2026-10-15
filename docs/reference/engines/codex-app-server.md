@@ -183,6 +183,14 @@ on the turn's reservation and is the only policy the gate reads, so a
 selection changed mid-turn cannot open it. The exec backend and a
 non-opted-in persona write `never`.
 
+The separate bridge-tool gate for `request_session_reset` reads the same
+normalized dispatched policy, bound to the host turn token, plus the latest
+operator selection. Both must be `never` and permission state must be unblocked
+to omit the operator dialog. Thus tightening applies to the next bridge call,
+while loosening waits for the next turn. Calls without a live turn cancel;
+missing policy on a live turn asks. This does not change command/file approval
+routing below or the reset reservation's turn-boundary timing.
+
 ### Routing and admission
 
 `AppServerRpc` hands every server request with a fresh typed id (`n:1` and
