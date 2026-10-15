@@ -28,6 +28,8 @@ kaoiro — a system that visualizes the state of multiple CLI AI agents as chara
   the runner startup path or the wrapper turn lifecycle, check
   [high-risk-change-release.md](docs/operations/high-risk-change-release.md)
   to determine whether the change is high risk.
+- [docs/release/](docs/release/README.md) — one note per production release;
+  whoever prepares a production release writes it.
 - [docs/evidence/](docs/evidence/) — dated measurement records.
 - [docs/contributing/](docs/contributing/) — change procedures. For document
   placement, see [documentation.md](docs/contributing/documentation.md).

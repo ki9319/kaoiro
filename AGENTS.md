@@ -14,7 +14,8 @@ is engine-independent, so read the same file.
 
 Before changing the runner startup path or the wrapper turn lifecycle,
 check [docs/operations/high-risk-change-release.md](docs/operations/high-risk-change-release.md)
-to determine whether the change is high risk.
+to determine whether the change is high risk. When preparing a production
+release, write its note under [docs/release/](docs/release/README.md).
 
 Keep these six points in mind even before opening the source of truth.
 
