@@ -105,6 +105,7 @@ config :kaoiro_server, start_quagmire_watch: true
 config :kaoiro_server, KaoiroServerWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
+  http: [http_2_options: [enabled: false]],
   render_errors: [
     formats: [json: KaoiroServerWeb.ErrorJSON],
     layout: false

@@ -68,6 +68,23 @@ mix dashboard.build   # cd ../dashboard && pnpm build → server/priv/static へ
 ソケットエンドポイント: `/wrapper/websocket`(ラッパー)、
 `/client/websocket`(クライアント)、`/runner/websocket`(ランナー)。
 
+### HTTP transport
+
+The Bandit HTTP listener serves HTTP/1.1 only as a temporary mitigation for
+[GHSA-69m6-wcv4-rwcf](https://github.com/mtrudel/bandit/security/advisories/GHSA-69m6-wcv4-rwcf).
+HTTP/2 prior-knowledge connections are closed without an HTTP error response.
+The three WebSocket endpoints continue to use HTTP/1.1 Upgrade. A front proxy
+may serve HTTP/2 to clients, but must use HTTP/1.1 upstream to this server.
+If a native `https:` listener is introduced, apply the same
+`http_2_options: [enabled: false]` there to prevent HTTP/2 through TLS ALPN.
+
+Bandit remains pinned to 1.12.5, so dependency fetching still reports the
+advisory. Once a patched Hex release is available, update it and verify the
+protocol and WebSocket paths before removing this restriction in a reviewed
+follow-up. The setting is compiled into the release; rollback uses the
+previous release, rather than an environment-variable toggle. See
+[server update and rollback](../docs/operations/server-update-and-rollback.md).
+
 ## セットアップ / 運用
 
 ### 認証(必読、issue #28)
