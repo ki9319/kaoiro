@@ -1,7 +1,7 @@
 ---
 title: "Runner configuration"
 status: implemented
-last_updated: 2026-10-10
+last_updated: 2026-10-15
 ---
 
 # Runner configuration
@@ -282,6 +282,7 @@ reload, compatibility, and rollback contract is in
   bypass entitlement — declaring a model the account cannot actually use
   still hits the SDK's usual 400/404, surfaced as the existing
   `switch_error` rollback (or a launch failure for a fresh spawn).
+
   ```json
   "extra_models": [
     { "value": "gpt-6-astra", "display_name": "GPT-6-Astra",
@@ -289,6 +290,7 @@ reload, compatibility, and rollback contract is in
       "default_effort": "low" }
   ]
   ```
+
 - `internal_subagents` (boolean, default `true`) — whether Codex internal
   subagents may be spawned. A strict boolean (not merely truthy) where `true` is
   force-enable, `false` disables them, and omission yields the effective default
@@ -338,6 +340,7 @@ settings (phase-34 Stage B6, issue #292).
   register (LaunchDialog) and to the wrapper's own catalog (`ext.models`,
   `setModel`), and is re-applied on every live probe refresh so a
   refreshed catalog does not silently drop a declared model.
+
   ```json
   "antigravity": {
     "extra_models": [
@@ -357,6 +360,7 @@ settings (phase-34 Stage B6, issue #292).
   launch value is a contradiction and is rejected at spawn. Relayed to the
   wrapper as `WrapperConfig.max_sandbox` / `max_approval` /
   `max_network_access`.
+
   ```json
   "antigravity": {
     "max_sandbox": "workspace-write",
@@ -378,4 +382,6 @@ block supports `turn_watchdog_inactivity_ms` and `turn_watchdog_abort_grace_ms`
 through the same behaviour registry; deprecated environment overrides are
 `KAOIRO_GROK_TURN_WATCHDOG_INACTIVITY_MS` and
 `KAOIRO_GROK_TURN_WATCHDOG_ABORT_GRACE_MS`. The Grok CLI must be on PATH.
-Session enumeration is empty and cold resume is rejected in work unit 1.
+Session enumeration and the resume existence check run a short-lived Grok
+over ACP `session/list` (see the
+[Grok engine reference](../engines/grok-acp.md#cold-resume-and-session-discovery)).

@@ -8,7 +8,8 @@ last_updated: 2026-10-15
 # Grok Build ACP engine
 
 The `grok` engine requires Grok Build on `PATH`. The wrapper launches
-`grok --no-auto-update agent --no-leader stdio` once, initializes one ACP session and
+`grok --no-auto-update agent --no-leader stdio` once, initializes one ACP session
+(`session/new`, or `session/resume` for a cold resume) and
 uses `session/prompt` for each queued turn. It does not launch `grok -p`
 per turn. The ACP SDK is pinned to 1.8.0.
 
@@ -104,12 +105,70 @@ normal peer messages and dispatch confirmation. Early and yield delivery
 are explicitly `none`. Reply-basis v1 is not negotiated: Grok MCP calls do
 not carry turn-origin identity, so the MCP server cannot prove it.
 
-The launch catalog contains only `default` (account default); launch-time
-model selection is not supported. Live model and effort switching and context
-usage are supported when Grok lists its configuration options (see
+The runner's launch catalog contains only `default` (account default). A
+launch pick or a resumed pair is applied when the session starts (see
+[Start selection and restore hold](#start-selection-and-restore-hold)). Cold
+resume and the session picker are supported (see
+[Cold resume and session discovery](#cold-resume-and-session-discovery)).
+Live model and effort switching and context usage are supported when Grok
+lists its configuration options (see
 [Model and effort switching](#model-and-effort-switching) and
-[Context usage](#context-usage)). Attachments, cold resume, history replay
-and quota reporting are unsupported. Unsupported controls reject explicitly.
+[Context usage](#context-usage)). Attachments, history replay and quota
+reporting are unsupported. Unsupported controls reject explicitly.
+
+## Cold resume and session discovery
+
+The runner discovers sessions with a short-lived
+`grok --no-auto-update agent --no-leader stdio` in its own process group: it
+sends `initialize`, pages `session/list {cwd}` and kills the group. A probe
+has a 10 s deadline and reads at most 20 pages. Any failure gives an empty
+list and a failed existence check (`session_not_found`); a partial list is
+never returned. Every supervisor caller that starts a probe owns its abort:
+a pending resume spawn, a pending `switch_session` check, the latest session
+enumeration and `stopAll`. A stop, a newer request or shutdown aborts the
+probe and kills its process group. Grok writes a new session to disk a moment
+after `session/new`, so a session created a moment ago may not be listed yet.
+
+The wrapper's first lane attaches with `session/resume` (session id, launch
+cwd, the fresh MCP server) instead of `session/new`. Resume replays no
+history. Grok answers `-32603` for an unknown id and for a session bound to
+another cwd; the start then fails with `grok could not resume the session`.
+Without `sessionCapabilities.resume` the start fails too. Persona rules are not
+sent again: the rules given at creation stay with the session. A later
+permission switch still uses `session/load`. Every status carries `ext.cwd`.
+
+The runner's same-session lock (F4) covers the agents it manages. Grok itself
+lets a second process resume a session another process holds, so a Grok TUI or
+another host on the same session is outside that lock.
+
+## Start selection and restore hold
+
+The launch pick, or the model and effort pair the runner relays with a resume
+(its 5-case source rule), is the start selection. A model of `default` counts
+as no request. It is pending from the first status: `ext.pending_model` and
+`ext.pending_effort` show it, and the server stores no snapshot while they do.
+After the session starts, a value Grok already holds needs no request and
+takes its requested source; a differing one goes through the switch path below
+before the first prompt and keeps its relayed source (`launch`, `env` or
+`config`). Model and effort keep separate sources: an operator switch stamps
+`config` on the axis it changes only.
+
+A start axis that cannot be applied is held: the model is not in the catalog,
+Grok rejects the request, the session offers no usable `configOptions`, or the
+effort was not sent because the model request failed. `switch_error` is still
+published once. While an axis is held, `ext.effective` keeps the requested
+value and source, so every status persists it and the next spawn request
+(resume, restart) retries it. The top-level fields and whoami show what Grok
+runs: the model as `displayed_model` with `model_source: "fallback"` (`default`
+when Grok offers no selection), the effort with `effort_source: "default"`. A
+successful switch of that axis, or a load that finds the requested value,
+releases the hold. A crash restart relays the original start pair from the
+runner's last spawn, as for every engine.
+
+Limits: while an effort is held the dashboard's effort row shows the requested
+effort (it reads `effective.effort`), so the dashboard does not reveal an
+effort hold; whoami and the top-level `effort_source` do. The dashboard's text
+for a `fallback` model is worded for Claude's safety mechanism (issue #649).
 
 ## Permission projection
 
@@ -212,8 +271,12 @@ The catalog and the selection are read from Grok, once per generation.
 description, reasoning-effort levels with the default one, and context window
 (the window stays private). `session/new` and `session/load` `configOptions`
 give the current `model` and `reasoning_effort`. `ext.models`, `ext.model` and
-`ext.effort` mirror them; `model_source` and `effort_source` stay `default`
-until an operator switch succeeds, then read `config`.
+`ext.effort` mirror them. Each axis carries its own source: `default` until a
+start selection or an operator switch sets it (see
+[Start selection and restore hold](#start-selection-and-restore-hold)).
+`ext.effective` carries the model and effort with their sources, next to the
+permission pair when it is known; the server persists it as the resume
+snapshot.
 
 `supports_model_switch`, `supports_effort_switch` and `supports_context_usage`
 are `true` only when both options are `select` options and every model they
