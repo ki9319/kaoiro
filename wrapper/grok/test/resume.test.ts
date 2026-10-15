@@ -289,3 +289,90 @@ describe("projection and persistence", () => {
     expect(again.ext().resume_drift).toEqual([]);
   });
 });
+
+describe("restore hold", () => {
+  const pick = { model: "grok-4.6", model_source: "env", effort: "low", effort_source: "launch" } as const;
+
+  it("keeps the requested pair stored through a rejected restore, an unrelated status and the next turn", async () => {
+    const t = await launch({ config: { ...pick }, env: { KAOIRO_TEST_GROK_MODEL_FAIL: "1" },
+      options: { resumeSessionId: "fixture-session", resumeSnapshot: { ...pick } } });
+    await vi.waitFor(() => expect(t.states().some((ext) => ext.switch_error?.kind === "model")).toBe(true));
+    await t.host.renameDisplayName("Renamed", 1);
+    await t.host.send("hello");
+    const { stored, history } = persisted(t.states(), pick);
+    expect(history.length).toBeGreaterThan(0);
+    for (const entry of history) expect(entry).toMatchObject(pick);
+    expect(stored).toMatchObject(pick);
+    expect(t.ext()).toMatchObject({ model: "grok-4.7", model_source: "fallback", effort: "high", effort_source: "default",
+      effective: pick });
+    expect(t.ext()).not.toHaveProperty("pending_model");
+    expect(t.ext()).not.toHaveProperty("pending_effort");
+    expect(t.ext().resume_drift).toEqual([]);
+    expect(t.host.statusSnapshot()).toMatchObject({ model: "grok-4.7", model_source: "fallback",
+      effort: "high", effort_source: "default" });
+  });
+
+  it("shows Grok's effort while a rejected effort is held", async () => {
+    const t = await launch({ config: { effort: "low", effort_source: "launch" }, env: { KAOIRO_TEST_GROK_EFFORT_FAIL: "1" } });
+    await vi.waitFor(() => expect(t.states().some((ext) => ext.switch_error?.kind === "effort")).toBe(true));
+    expect(t.ext()).toMatchObject({ effort: "high", effort_source: "default",
+      effective: { effort: "low", effort_source: "launch" } });
+    expect(t.host.statusSnapshot()).toMatchObject({ effort: "high", effort_source: "default" });
+  });
+
+  it("holds a start model the catalog lacks, keeps it through a switch of the other axis, releases it on a switch of its own", async () => {
+    const t = await launch({ config: { model: "grok-9", model_source: "launch", effort: "low", effort_source: "env" } });
+    expect(t.requests()).toEqual([]);
+    expect(t.ext()).toMatchObject({ model: "grok-4.7", model_source: "fallback",
+      effective: { model: "grok-9", model_source: "launch", effort: "low", effort_source: "env" } });
+    await t.host.setEffort("medium");
+    await vi.waitFor(() => expect(t.requests()).toEqual([["reasoning_effort", "medium"]]));
+    expect(t.ext().effective).toMatchObject({ model: "grok-9", model_source: "launch" });
+    await t.host.setModel("grok-4.6");
+    await vi.waitFor(() => expect(t.ext().model).toBe("grok-4.6"));
+    expect(t.ext()).toMatchObject({ model_source: "config", effective: { model: "grok-4.6", model_source: "config" } });
+    expect(persisted(t.states()).stored).toMatchObject({ model: "grok-4.6", model_source: "config" });
+  });
+
+  it("retries a held pick on the next start and applies it there", async () => {
+    const first = await launch({ config: { ...pick }, env: { KAOIRO_TEST_GROK_MODEL_FAIL: "1" } });
+    await vi.waitFor(() => expect(first.states().some((ext) => ext.switch_error?.kind === "model")).toBe(true));
+    const { stored } = persisted(first.states(), pick);
+    expect(stored).toMatchObject(pick);
+    first.host.close();
+    await first.host.closed;
+    const again = await launch({ root: first.root, config: { model: stored.model!, model_source: stored.model_source!,
+      effort: stored.effort!, effort_source: stored.effort_source! },
+    options: { resumeSessionId: "fixture-session", resumeSnapshot: stored } });
+    await vi.waitFor(() => expect(again.ext().model).toBe("grok-4.6"));
+    expect(again.requests()).toEqual([["model", "grok-4.6"], ["reasoning_effort", "low"]]);
+    expect(again.ext()).toMatchObject({ ...pick, effective: pick });
+  });
+
+  it("holds the pick when Grok offers no selection, showing the account default", async () => {
+    const t = await launch({ config: { ...pick }, env: { KAOIRO_TEST_GROK_CONFIG: "none" } });
+    expect(t.ext()).toMatchObject({ model: "default", model_source: "fallback", effective: pick });
+    expect(t.ext()).not.toHaveProperty("effort");
+    expect(t.host.statusSnapshot()).not.toHaveProperty("effort");
+  });
+
+  it("keeps a hold across the load of a permission switch while Grok differs", async () => {
+    const t = await launch({ config: { ...pick }, env: { KAOIRO_TEST_GROK_MODEL_FAIL: "1" } });
+    await vi.waitFor(() => expect(t.states().some((ext) => ext.switch_error?.kind === "model")).toBe(true));
+    await t.host.setPermission({ revision: 1, requested: { sandbox: "read-only", network_access: false } });
+    await t.host.send("hello");
+    expect(t.methods()).toContain("session/load");
+    expect(t.ext()).toMatchObject({ model: "grok-4.7", model_source: "fallback", effective: pick });
+  });
+
+  it("releases a hold when the load of a permission switch finds Grok holding the requested values", async () => {
+    const t = await launch({ config: { ...pick }, env: { KAOIRO_TEST_GROK_MODEL_FAIL: "1" } });
+    await vi.waitFor(() => expect(t.states().some((ext) => ext.switch_error?.kind === "model")).toBe(true));
+    // Grok now holds the requested values; the load after the switch reads them.
+    writeFileSync(t.sessionFile, JSON.stringify({ model: "grok-4.6", effort: "low" }));
+    await t.host.setPermission({ revision: 1, requested: { sandbox: "read-only", network_access: false } });
+    await t.host.send("hello");
+    expect(t.methods()).toContain("session/load");
+    expect(t.ext()).toMatchObject({ ...pick, effective: pick });
+  });
+});

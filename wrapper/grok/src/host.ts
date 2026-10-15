@@ -191,6 +191,10 @@ export class GrokHost implements EngineAdapter {
   #inflight: AxisRecord = {};
   // Axes an operator switch has set; resume_drift leaves them out.
   readonly #operatorSwitched = new Set<Axis>();
+  // Start-selection axes that could not be applied (the restore hold, issue
+  // #644). `effective` keeps the requested pair so the next start retries
+  // it; the displayed fields show what Grok actually runs.
+  #held: AxisRecord = {};
   #switchErrorOnce: SwitchErrorExt | undefined;
   #effortResetOnce = false;
   // The model-call prompt size of the running turn, and the last published
@@ -251,7 +255,7 @@ export class GrokHost implements EngineAdapter {
     const { status, permission } = this.#effectiveStatus();
     const switching = this.#platform === "linux" && this.#permissions.syncSupported;
     const pair = this.#ceiling.requested;
-    const envelope = effectiveStatusEnvelopeFields(status);
+    const envelope = this.#showHeldEffort(effectiveStatusEnvelopeFields(status));
     // An empty `effective` would clear the stored effort (the server replaces
     // effort as a pair), so it rides only with something to persist.
     if (Object.keys(status.resolved).length === 0) delete envelope.effective;
@@ -308,12 +312,29 @@ export class GrokHost implements EngineAdapter {
     const effective = observed ? { sandbox: observed.permission.sandbox, network_access: observed.network_access }
       : projectProfile && profile ? { sandbox: projectedSandbox, network_access: profile !== "read-only" } : undefined;
     const selection = this.#switchable ? this.#selection : undefined;
+    const { model: heldModel, effort: heldEffort } = this.#held;
     const resolved: ResolvedSnapshotExt = {
       ...(selection ? { model: selection.model, model_source: this.#modelSource,
         effort: selection.effort, effort_source: this.#effortSource } : {}),
+      ...(heldModel ? { model: heldModel.value, model_source: heldModel.source } : {}),
+      ...(heldEffort ? { effort: heldEffort.value, effort_source: heldEffort.source } : {}),
       ...(effective ?? {}),
     };
-    return { status: { engine: "grok", resolved, ...(permission ? { permission } : {}) }, permission };
+    // A held model shows what Grok runs, as the `fallback` source (the
+    // displayed_model contract of issue #363); without a selection that is
+    // the account default.
+    const displayed = heldModel ? { displayed_model: selection?.model ?? "default" } : {};
+    return { status: { engine: "grok", resolved, ...(permission ? { permission } : {}), ...displayed }, permission };
+  }
+  // The shared projection copies the effort from `resolved`; a held effort
+  // shows Grok's actual one instead, or none when Grok reports no selection.
+  #showHeldEffort<T extends Record<string, unknown>>(fields: T): T {
+    if (!this.#held.effort) return fields;
+    const selection = this.#switchable ? this.#selection : undefined;
+    const shown: Record<string, unknown> = { ...fields };
+    delete shown.effort;
+    delete shown.effort_source;
+    return (selection ? { ...shown, effort: selection.effort, effort_source: "default" } : shown) as T;
   }
   // A field an operator switched on purpose is not drift; neither is a
   // permission after an operator control, nor a value not read yet.
@@ -329,7 +350,7 @@ export class GrokHost implements EngineAdapter {
   }
   statusSnapshot() {
     const ext = this.statusExtSnapshot();
-    const whoami = effectiveStatusWhoamiFields(this.#effectiveStatus().status);
+    const whoami = this.#showHeldEffort({ ...effectiveStatusWhoamiFields(this.#effectiveStatus().status) });
     return {
       ...whoami,
       ...(whoami.model === undefined ? { model: ext.model, model_source: ext.model_source } : {}),
@@ -351,8 +372,8 @@ export class GrokHost implements EngineAdapter {
     if (!selection) {
       return {
         models: [{ value: "default", display_name: "Account default" }],
-        model: "default",
-        model_source: "default",
+        // A held model is already displayed as the fallback.
+        ...(this.#held.model ? {} : { model: "default", model_source: "default" }),
         ...pending,
       };
     }
@@ -996,9 +1017,16 @@ export class GrokHost implements EngineAdapter {
     }
     // A later generation (session/load after a permission switch) keeps each
     // source unless Grok now holds a different value than it last returned.
+    // A held axis is released once Grok holds the requested value.
     for (const axis of ["model", "effort"] as const) {
+      const held = this.#held[axis];
+      if (held?.value === selection[axis]) {
+        this.#release(axis);
+        this.#setSource(axis, held.source);
+        continue;
+      }
       const before = previous?.[axis];
-      if (before !== undefined && before !== selection[axis] && !this.#pending[axis]) {
+      if (before !== undefined && before !== selection[axis] && !this.#pending[axis] && !held) {
         writeRedactedStderr(`[kaoiro] grok holds a different ${axis} after a restart than it returned before\n`);
         this.#setSource(axis, "default");
       }
@@ -1009,6 +1037,16 @@ export class GrokHost implements EngineAdapter {
       const { model: _rejected, ...rest } = this.#pending;
       this.#pending = rest;
       this.#switchErrorOnce = { kind: "model", requested: model.value, reason: "control_rejected", rolled_back_to: selection.model };
+      if (!model.operator) {
+        // The start effort was chosen for that model; it is held with it.
+        this.#holdAxis("model", model);
+        const effort = this.#pending.effort;
+        if (effort && !effort.operator) {
+          const { effort: _effort, ...remaining } = this.#pending;
+          this.#pending = remaining;
+          this.#holdAxis("effort", effort);
+        }
+      }
     }
     // A requested value Grok already holds needs no request; it takes its
     // source now. The effort waits while a model change is pending, because
@@ -1021,8 +1059,16 @@ export class GrokHost implements EngineAdapter {
     if (!request) return;
     const { [axis]: _settled, ...rest } = this.#pending;
     this.#pending = rest;
+    this.#release(axis);
     this.#setSource(axis, request.source);
     if (request.operator) this.#operatorSwitched.add(axis);
+  }
+  #holdAxis(axis: Axis, request: AxisRequest) {
+    this.#held = { ...this.#held, [axis]: request };
+  }
+  #release(axis: Axis) {
+    const { [axis]: _released, ...rest } = this.#held;
+    this.#held = rest;
   }
   #setSource(axis: Axis, source: ModelSource) {
     if (axis === "model") this.#modelSource = source;
@@ -1035,6 +1081,10 @@ export class GrokHost implements EngineAdapter {
     const request = this.#pending.model ?? this.#pending.effort!;
     this.#switchErrorOnce = { kind: this.#pending.model ? "model" : "effort", requested: request.value,
       reason: "control_rejected", rolled_back_to: "default" };
+    for (const axis of ["model", "effort"] as const) {
+      const pending = this.#pending[axis];
+      if (pending && !pending.operator) this.#holdAxis(axis, pending);
+    }
     this.#pending = {};
   }
   // A different model withdraws the context reading until a turn finishes on it.
@@ -1070,8 +1120,12 @@ export class GrokHost implements EngineAdapter {
     if (target !== held.model) {
       const failure = await this.#setOption(generation, "model", target);
       if (failure) {
-        if (failure !== "closing")
+        if (failure !== "closing") {
           this.#switchErrorOnce = { kind: "model", requested: target, reason: "control_rejected", rolled_back_to: held.model };
+          // A start pick that failed is held, with the effort chosen for it.
+          if (claimed.model && !claimed.model.operator) this.#holdAxis("model", claimed.model);
+          if (claimed.effort && !claimed.effort.operator) this.#holdAxis("effort", claimed.effort);
+        }
         return;
       }
     }
@@ -1083,13 +1137,16 @@ export class GrokHost implements EngineAdapter {
     }
     const failure = await this.#setOption(generation, "reasoning_effort", effort);
     if (failure) {
-      if (failure !== "closing")
+      if (failure !== "closing") {
         this.#switchErrorOnce = { kind: "effort", requested: effort,
           reason: reset ? "effort_reset_failed" : "control_rejected", rolled_back_to: now.effort };
+        if (!reset && claimed.effort && !claimed.effort.operator) this.#holdAxis("effort", claimed.effort);
+      }
       return;
     }
     if (reset) {
       // Unit 4's reset contract: the substituted default is a config value.
+      this.#release("effort");
       this.#effortSource = "config";
       this.#effortResetOnce = true;
     } else {
@@ -1097,6 +1154,7 @@ export class GrokHost implements EngineAdapter {
     }
   }
   #confirmAxis(axis: Axis, request: AxisRequest) {
+    this.#release(axis);
     this.#setSource(axis, request.source);
     if (request.operator) this.#operatorSwitched.add(axis);
   }
