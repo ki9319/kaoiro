@@ -1,9 +1,10 @@
 // The Grok launch catalog, read at register time from a short-lived
-// `initialize` (issue #646). `initialize` creates no session and sends no
-// model request; the quota verifier (wrapper/grok/test/catalog-quota.native
-// .test.ts) measures the second claim. Grok answers with a built-in list when
-// it cannot fetch its own, and nothing in the answer marks it, so such a list
-// is taken as it comes.
+// `initialize` (issue #646). That the probe sends `initialize` and nothing
+// else is pinned by grok-catalog.test.ts; that `initialize` creates no
+// session and attempts no model request is a dated measurement of Grok
+// 1.0.52 (docs/evidence/grok/2026-10-15-catalog-and-quota.md). Grok answers
+// with a built-in list when it cannot fetch its own, and nothing in the
+// answer marks it, so such a list is taken as it comes.
 
 import type { EngineModelInfo } from "@kaoiro/protocol";
 import { parseModelState } from "@kaoiro/grok";

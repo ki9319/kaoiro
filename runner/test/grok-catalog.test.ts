@@ -6,6 +6,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   GROK_DEFAULT_ENTRY, GrokCatalog, GrokCatalogInvalid, grokCatalogFromInitialize, probeGrokCatalog,
 } from "../src/grok-catalog.js";
+import { grokSessionExists, listGrokSessions } from "../src/grok_sessions.js";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-grok-acp.mjs", import.meta.url));
 const CWD = mkdtempSync(join(tmpdir(), "kaoiro-grok-catalog-cwd-"));
@@ -105,6 +106,21 @@ describe("probeGrokCatalog", () => {
     const f = fake({ initMeta: meta() });
     expect((await probeGrokCatalog(f.options)).map((m) => m.value)).toEqual(["default", "grok-4.7", "grok-4.6"]);
     expect(f.methods()).toEqual(["initialize"]);
+  }, 10_000);
+});
+
+// What the runner's probes send is what the quota measurement covers
+// (docs/evidence/grok/2026-10-15-catalog-and-quota.md); any other request,
+// a prompt above all, falls outside it.
+describe("the session-list probes", () => {
+  it("send initialize and session/list only", async () => {
+    const page = { sessions: [{ sessionId: "a-1", cwd: CWD, title: "t", updatedAt: "2026-10-15T00:00:00Z" }] };
+    const listing = fake({ pages: { __first__: page } });
+    expect(await listGrokSessions(CWD, listing.options)).toHaveLength(1);
+    expect(listing.methods()).toEqual(["initialize", "session/list"]);
+    const lookup = fake({ pages: { __first__: page } });
+    expect(await grokSessionExists(CWD, "a-1", lookup.options)).toBe(true);
+    expect(lookup.methods()).toEqual(["initialize", "session/list"]);
   }, 10_000);
 });
 

@@ -15,7 +15,9 @@ Tracking: [issue #589](https://github.com/sakuraiyuta/kaoiro/issues/589)
 [#593](https://github.com/sakuraiyuta/kaoiro/issues/593)). Basis: kaoiro
 `develop` 64aa00ae. Grok Build 1.0.52. The premise measurements are summarised
 in the issue #589 comment "Premise measurements"; work unit 1 moves them to
-`docs/evidence/grok/` in general form.
+`docs/evidence/grok/` in general form. The launch catalog's quota premise
+(work unit 3c) is a measurement of this version only: measure it again when
+grok is upgraded.
 
 ## Problem and rationale
 
@@ -80,7 +82,7 @@ Mapping:
 | context | `ext.context` from the last `response_completed` prompt size (work unit 4) | measured against the TUI `/context`, same evidence |
 | cold resume and session discovery | `session/resume` in the wrapper's first lane; the runner pages `session/list {cwd}` in a short-lived grok (work unit 3a) | measured, see the [resume evidence](../evidence/grok/2026-10-15-resume-and-discovery.md) |
 | dashboard history on resume | the session's `updates.jsonl`, normalized and replayed by `HistoryReplayer` (work unit 3b) | measured, see the [history evidence](../evidence/grok/2026-10-15-history-replay.md) |
-| launch catalog | the runner reads `initialize` `_meta.modelState` in a short-lived grok at register time and keeps the last good reading (work unit 3c) | measured: no model request, see the [catalog evidence](../evidence/grok/2026-10-15-catalog-and-quota.md) |
+| launch catalog | the runner reads `initialize` `_meta.modelState` in a short-lived grok at register time and keeps the last good reading (work unit 3c) | measured on 1.0.52: no model request, see the [catalog evidence](../evidence/grok/2026-10-15-catalog-and-quota.md); measure again when grok is upgraded |
 | rate limits, attachments | capability false or field omitted | — |
 
 ### Unsupported operations

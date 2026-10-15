@@ -1,9 +1,9 @@
 ---
-title: Grok launch catalog and the quota check
+title: Grok launch catalog and its quota measurement
 date: 2026-10-15
 ---
 
-# Grok launch catalog and the quota check
+# Grok launch catalog and its quota measurement
 
 Linux measurements with Grok Build 1.0.52 (`grok 1.0.52 (0920c8169e27)
 [stable]`) for work unit 3c
@@ -73,22 +73,55 @@ all to the recorder, and 1 `AF_UNIX` connect to the system bus socket: a
 network namespace leaves filesystem Unix sockets reachable, so the claim is
 no IP connection to anything but the recorder.
 
-## The committed check
+## Recorder runs on 2026-10-15
 
-`runner/test/grok-catalog-quota.native.test.ts` runs the production
-`probeGrokCatalog` and `listGrokSessions` with only their executable replaced
-by a launcher that enters a new network namespace, starts the recorder there
-and then becomes Grok. One run on 2026-10-15:
+These runs are the acceptance measurement of work unit 3c. They are not a
+committed test: the native verifier that ran them was removed after review
+(issue #646), and only what the probes send is pinned by
+`runner/test/grok-catalog.test.ts`.
+
+The method was the same in both runs. The production `probeGrokCatalog` and
+`listGrokSessions` ran with only their executable replaced. The replacement
+was a launcher that entered a new user and network namespace, brought
+loopback up, started a recorder there and then became Grok, so the probe's
+process group held both. Grok's two base URLs and all six proxy variables
+pointed at the recorder, with `NO_PROXY` empty. The recorder logged the
+method and the normalized pathname of each request (the query dropped, an
+absolute-form target reduced to its path), and only the fact of a `CONNECT`.
+It answered 503 with no body and refused `CONNECT`.
+
+First a positive control ran: `session/new` and one prompt, watched until the
+first model request or 45 s. A run counted only if it saw at least one model
+request (`POST /v1/responses`). Then the catalog and list probes ran, each
+with its own recorder.
 
 | Run | Requests | Model requests | `CONNECT` | Outside the GET set |
 |---|---:|---:|---:|---:|
-| positive control: `session/new` + one prompt, until the first model request | 12 | 2 | 2 | 4 |
-| catalog probe (`initialize`; the reading passed validation) | 6 | 0 | 0 | 0 |
-| list probe (`initialize` + `session/list`) | 6 | 0 | 0 | 0 |
+| run 1, positive control | 12 | 2 | 2 | 4 |
+| run 1, catalog probe (the reading passed validation) | 6 | 0 | 0 | 0 |
+| run 1, list probe | 6 | 0 | 0 | 0 |
+| run 2, positive control | 14 | 2 | 2 | 4 |
+| run 2, catalog probe (the reading passed validation) | 7 | 0 | 0 | 0 |
+| run 2, list probe | 8 | 0 | 0 | 0 |
 
-Both mutations fail the check: with the base-URL override removed, the
-positive control sees 0 model requests; with a catalog probe that sends
-`session/new` and one prompt, the catalog probe's run has model requests and
-requests outside the set. The test leaves Grok's memory workspace for its
-scratch cwd in place (issue #650) and removes the cwd and its session
-directory.
+Two mutations each failed the measurement, in both runs:
+
+- with the base-URL overrides removed, the positive control saw 0 model
+  requests;
+- with a catalog probe that also sent `session/new` and a prompt, the catalog
+  probe's run showed model requests and requests outside the set.
+
+The recorder could not see some request attempts:
+
+- a second request pipelined on one connection, since it logged only the
+  first request of a connection;
+- bytes still in a socket's receive queue when the probe's teardown ended
+  the recorder;
+- a connection completed after the recorder stopped accepting.
+
+Real Grok was not observed doing any of these, but the runs cannot exclude
+them. Run 2's recorder logged every method and malformed requests;
+run 1's logged only common methods.
+
+Grok's memory workspace for the scratch cwd of each positive control was left
+in place (issue #650); the cwd and its session directory were removed.

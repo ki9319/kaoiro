@@ -220,18 +220,18 @@ Limit: when Grok cannot fetch its model list and has no fresh cache, it
 answers with a built-in list, and nothing in the answer marks it. The runner
 shows that list as Grok reports it, as the running agent does.
 
-The quota check is `runner/test/grok-catalog-quota.native.test.ts`
-(`KAOIRO_LIVE_GROK=1`). It runs Grok in a network namespace that has loopback
-only, next to a recorder that answers 503 on Grok's two base URLs and the six
-proxy variables and refuses `CONNECT`. A prompt must first show at least one
-model request (`POST /v1/responses`). Then the production catalog and
-session-list probes may send only the GETs measured for Grok 1.0.52 (`/`,
-`/v1/models`, `/v1/settings`, `/v1/feedback/config`, `/v1/bundle/archive`,
-`/v1/subagents/bundle`), with no `CONNECT` and no model request. This shows
-that, under that transport, the probes attempt no model request. It does not
-show billed quota, the behaviour of other Grok versions, or traffic that
-ignores both the base URLs and the proxy variables. A later Grok that adds a
-request fails the check until someone measures it again.
+Quota: the committed tests pin what the probes send.
+`runner/test/grok-catalog.test.ts` checks that the catalog probe sends
+`initialize` and nothing else, and that the session-list probes send
+`initialize` and `session/list` only. That these requests attempt no model
+request is a dated measurement of Grok 1.0.52, not a committed test (see the
+[catalog evidence](../../evidence/grok/2026-10-15-catalog-and-quota.md)).
+Grok ran in a network namespace with loopback only, next to a recorder, and a
+prompt first showed its model requests (`POST /v1/responses`) there. The
+catalog and list probes then attempted only the GETs `/`, `/v1/models`,
+`/v1/settings`, `/v1/feedback/config`, `/v1/bundle/archive` and
+`/v1/subagents/bundle`. The measurement says nothing about billed quota or
+other Grok versions, and it has to be repeated when Grok is upgraded.
 
 ## Start selection and restore hold
 
