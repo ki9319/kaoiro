@@ -344,7 +344,8 @@ describe("restore hold", () => {
     const again = await launch({ root: first.root, config: { model: stored.model!, model_source: stored.model_source!,
       effort: stored.effort!, effort_source: stored.effort_source! },
     options: { resumeSessionId: "fixture-session", resumeSnapshot: stored } });
-    await vi.waitFor(() => expect(again.ext().model).toBe("grok-4.6"));
+    // The effort request follows the model's answer; wait for both.
+    await vi.waitFor(() => expect(again.ext()).toMatchObject({ model: "grok-4.6", effort: "low" }));
     expect(again.requests()).toEqual([["model", "grok-4.6"], ["reasoning_effort", "low"]]);
     expect(again.ext()).toMatchObject({ ...pick, effective: pick });
   });
