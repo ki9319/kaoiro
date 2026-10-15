@@ -164,7 +164,7 @@ it.each(["exec", "app-server"] as const)("%s fail-stops once, retires pending an
   } finally { stderr.mockRestore();await f.close(); }
 });
 
-it.each(["completed", "interrupted", "eof", "fail-stop"])("keeps autonomous reset bound to its %s terminal through the real CLI and coordinator", async status => {
+it.each(["completed", "failed", "interrupted", "eof", "fail-stop"])("keeps autonomous reset bound to its %s terminal through the real CLI and coordinator", async status => {
   const f = await cliAppFixture();
   try {
     await f.inbound(1, "reset");await vi.waitFor(() => expect(f.turns()).toHaveLength(1));
@@ -175,7 +175,7 @@ it.each(["completed", "interrupted", "eof", "fail-stop"])("keeps autonomous rese
     if (status === "eof") { f.exit();await f.running; }
     else if (status === "fail-stop") { f.clock.advance(60000);await vi.waitFor(() => expect(f.interrupts()).toHaveLength(1));f.clock.advance(1000);await f.running;expect(f.envelopes("result")).toHaveLength(0); }
     else { f.terminal(status);await vi.waitFor(() => expect(f.envelopes("result")).toHaveLength(1)); }
-    if (status === "completed") await vi.waitFor(() => expect(f.wire.received.filter(e => e.event === "session_reset_request")).toHaveLength(1));
+    if (status === "completed" || status === "failed") await vi.waitFor(() => expect(f.wire.received.filter(e => e.event === "session_reset_request")).toHaveLength(1));
     else {
       if (status === "interrupted") { await vi.waitFor(() => expect(f.finalized).toHaveLength(1));await f.drain(); }
       expect(f.wire.received.filter(e => e.event === "session_reset_request")).toHaveLength(0);
