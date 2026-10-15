@@ -2,7 +2,7 @@
 
 ## Project
 
-kaoiro — 複数の CLI AI エージェントの状態をキャラクターとして可視化するシステム。
+kaoiro — a system that visualizes the state of multiple CLI AI agents as characters.
 
 ## Stack
 
@@ -10,91 +10,100 @@ kaoiro — 複数の CLI AI エージェントの状態をキャラクターと�
   SDK, Codex uses the Codex SDK, Antigravity hosts its CLI, and Grok Build
   hosts resident ACP. The six packages are `core`, `agent-common`,
   `claude-code`, `codex`, `antigravity` and `grok` (ADR-0017/0032/0057).
-- サーバ: Elixir / OTP + Phoenix
-- クライアント: Web(TypeScript)。同梱ダッシュボードは Svelte 5 + Vite
-  (`dashboard/`、pnpm workspace の非メンバで独立ルート・独立 lockfile)
-- ランナー: TypeScript / Node(`@kaoiro/runner`、ホスト常駐の監督層 —
-  ADR-0023)。TS 側は pnpm workspace(共有型は `@kaoiro/protocol`)
+- Server: Elixir / OTP + Phoenix.
+- Client: Web (TypeScript). The bundled dashboard uses Svelte 5 + Vite
+  (`dashboard/`, a separate root with its own lockfile, outside the pnpm workspace).
+- Runner: TypeScript / Node (`@kaoiro/runner`, the host-resident supervision
+  layer — ADR-0023). The TS side uses a pnpm workspace (shared types in
+  `@kaoiro/protocol`).
 
 ## Documentation
 
-- 入口: [docs/README.md](docs/README.md) (役割別の導線) と
-  [docs/architecture/overview.md](docs/architecture/overview.md)
-- [docs/architecture/](docs/architecture/) — 現在の構造と理由(トピック別)
-- [docs/reference/](docs/reference/) — 現行 contract の正本(protocol /
-  configuration / engines / inter-agent / security / ui / storage / deployment)
-- [docs/operations/](docs/operations/) — オペレータ向け runbook。runner の起動
-  path や wrapper の turn lifecycle を変える前に
+- Entry points: [docs/README.md](docs/README.md) (navigation by role) and
+  [docs/architecture/overview.md](docs/architecture/overview.md).
+- [docs/architecture/](docs/architecture/) — current structure and rationale, by topic.
+- [docs/reference/](docs/reference/) — the source of truth for current contracts
+  (protocol / configuration / engines / inter-agent / security / ui / storage / deployment).
+- [docs/operations/](docs/operations/) — operator runbooks. Before changing
+  the runner startup path or the wrapper turn lifecycle, check
   [high-risk-change-release.md](docs/operations/high-risk-change-release.md)
-  で高リスクか確認する
-- [docs/evidence/](docs/evidence/) — 日付付きの測定記録
-- [docs/contributing/](docs/contributing/) — 変更手順。文書の置き場所は
-  [documentation.md](docs/contributing/documentation.md)
-- [docs/specs/](docs/specs/) — 旧 spec。据え置きは personas /
-  agent-operations / protocol-external-human (provisional)、
-  他は移動先への stub([ADR-0060](docs/adr/0060-documentation-taxonomy-and-migration.md))
-- [docs/plans/](docs/plans/) — フェーズ別の実装計画
-- [docs/open-questions/](docs/open-questions/) — 未決の論点
-- [docs/adr/](docs/adr/) — アーキテクチャ決定記録
-- [docs/reference/engines/claude-events.md](docs/reference/engines/claude-events.md#commands-for-manual-verification-canusetool-firing-boundary) 「検証メモ」 — broker 経路の手動 verify で使えるコマンドの境界
+  to determine whether the change is high risk.
+- [docs/evidence/](docs/evidence/) — dated measurement records.
+- [docs/contributing/](docs/contributing/) — change procedures. For document
+  placement, see [documentation.md](docs/contributing/documentation.md).
+  For the rule requiring issue numbers in documents to link to their GitHub
+  issues, follow [Documentation writing rules](docs/contributing/documentation.md#writing-rules).
+- [docs/specs/](docs/specs/) — old specs. The retained pages are personas /
+  agent-operations / protocol-external-human (provisional); the others are
+  stubs pointing to their new locations
+  ([ADR-0060](docs/adr/0060-documentation-taxonomy-and-migration.md)).
+- [docs/plans/](docs/plans/) — implementation plans by phase.
+- [docs/open-questions/](docs/open-questions/) — unresolved questions.
+- [docs/adr/](docs/adr/) — architecture decision records.
+- [docs/reference/engines/claude-events.md](docs/reference/engines/claude-events.md#commands-for-manual-verification-canusetool-firing-boundary)
+  (verification notes) — the command boundary for manually verifying the broker path.
 
 ## Commands
 
 - wrapper (TypeScript): `cd wrapper && pnpm test` / `pnpm typecheck` /
-  `pnpm build`(4 パッケージへの fan-out shim)
+  `pnpm build` (fan-out shim for four packages).
 - runner (TypeScript): `cd runner && pnpm test` / `pnpm typecheck` /
-  `pnpm build`
+  `pnpm build`.
 - dashboard (Svelte): `cd dashboard && pnpm test` / `pnpm check` /
-  `pnpm build`(workspace 非メンバなので個別に `pnpm install`)
+  `pnpm build` (run `pnpm install` separately because it is outside the workspace).
 - server (Elixir/Phoenix): `cd server && mix test` / `mix format` /
-  `mix phx.server`
-- 全層まとめて開発起動: `./scripts/dev.sh`
+  `mix phx.server`.
+- Start all layers for development: `./scripts/dev.sh`.
 
 ## Branch strategy
 
-issue #213 で導入。エージェントの permission gate が `main` 宛の git 操作を
-ブロックするため、統合ブランチ `develop` を挟む。
+Introduced in [issue #213](https://github.com/sakuraiyuta/kaoiro/issues/213).
+Use the integration branch `develop` because agents' permission gates
+block Git operations targeting `main`.
 
-| ブランチ | 役割 | 更新できる主体 |
+| Branch | Role | Who may update it |
 |---|---|---|
-| `main` | リリース / 安定ブランチ。default branch | **オペレータのみ** |
-| `develop` | 統合ブランチ。CI はここでも走る | エージェント可 |
-| `issue-NNN-*` | feature branch | エージェント可 |
+| `main` | Release / stable branch; default branch | **Operator only** |
+| `develop` | Integration branch; CI runs here too | Agents allowed |
+| `issue-NNN-*` | feature branch | Agents allowed |
 
-- feature branch は `develop` から派生し、`develop` へ **fast-forward
-  マージ**して戻す。ここまではエージェントが自動で行える
-- `develop` → `main` は区切りごとに**オペレータが手動**で行う
-- worktree の base は `develop`
+- Create feature branches from `develop` and merge them back into `develop`
+  with a **fast-forward merge**. Agents may automate these steps.
+- The **operator manually** merges `develop` → `main` at each milestone.
+- Use `develop` as the worktree base.
 
 ### Remotes
 
-正本は GitHub (`origin`)。公開以前の self-hosted Gitea リポジトリは
-読み取り専用アーカイブとして現状のまま温存する (オペレータ決定
-2026-09-01)。clone に `gitea` remote が残っていても削除・push しない。
-旧系譜の branch は現履歴と互換がないため、fetch 先を混在させないこと。
+GitHub (`origin`) is the source of truth. Preserve the pre-publication
+self-hosted Gitea repository as a read-only archive, unchanged (operator
+decision, 2026-09-01). If a clone still has a `gitea` remote, do not remove
+it or push to it. Branches from the old lineage are incompatible with the
+current history; do not mix fetch sources.
 
 ## Language
 
-このリポジトリに残る成果物は原則 **英語** で書く (OSS として英語で読まれる
-ため): コミットメッセージ (件名は `type(scope): summary`、本文も英語)、
-issue / PR の題名・本文・コメント、`docs/` 配下の仕様・計画・ADR、コード
-コメント、テスト名、ログ文言。既存の日本語文書を触るときは、変更した節から
-英語に置き換えてよい (全文の書き直しは求めない)。例外は本ファイルと
-AGENTS.md (エージェント向けの指示書として日本語のまま) と、
-`docs/specs/personas.md` 等の日本語そのものが仕様である箇所。オペレータとの
-会話・エージェント間メッセージはセッションの言語設定に従う (英語にしない)。
+As a rule, write artifacts that remain in this repository in **English**
+(because it is read in English as OSS): commit messages (subject:
+`type(scope): summary`, body also in English), issue / PR titles, bodies,
+and comments, specs / plans / ADRs under `docs/`, code comments, test names,
+and log messages. When editing an existing Japanese document, you may
+translate the sections you change into English; a full rewrite is not
+required. Exceptions are places where Japanese itself is the specification,
+such as `docs/specs/personas.md`. Conversations with the operator and
+inter-agent messages follow the session's language setting (do not switch
+these to English).
 
 ## Workflow rules
 
-- git 操作はユーザ承認のもとで行う (`develop` 以下は上記 Branch strategy
-  の範囲で自動可)。
-- docs/plans/ のタスク表・進捗を更新するときは、frontmatter の
-  `status` / `last_updated` も同時に更新する(status drift の予防。
-  2026-07-03 に不整合 3 例を検出した再発防止)。
+- Perform Git operations with user approval (operations on `develop` and
+  its feature branches may be automated within the Branch strategy above).
+- When updating task tables or progress in docs/plans/, also update
+  `status` / `last_updated` in the frontmatter at the same time (to prevent
+  status drift and recurrence of the three inconsistencies found on 2026-07-03).
 
 ## Multi-agent workflow
 
-複数のエージェントが同一 work tree で並行作業する前提の運用則は
-[docs/specs/agent-operations.md](docs/specs/agent-operations.md) が正本
-(実装を受けた側 / dispatch する側)。engine を問わず適用する。Codex 系
-エージェント向けの入口は [AGENTS.md](AGENTS.md)。
+[docs/specs/agent-operations.md](docs/specs/agent-operations.md) is the source
+of truth for operating rules when multiple agents work concurrently in the
+same work tree (both implementers and dispatchers), regardless of engine.
+The entry point for Codex agents is [AGENTS.md](AGENTS.md).

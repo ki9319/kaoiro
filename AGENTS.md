@@ -1,29 +1,38 @@
 # AGENTS.md
 
-kaoiro リポジトリで作業するエージェント向けの入口。
+The entry point for agents working in the kaoiro repository.
 
-**作業を始める前に
-[docs/specs/agent-operations.md](docs/specs/agent-operations.md) を読むこと。**
-複数のエージェントが同一 work tree で並行作業する前提の運用則(実装を受けた
-側 / dispatch する側)の正本で、engine を問わず適用する。
+**Before starting work, read
+[docs/specs/agent-operations.md](docs/specs/agent-operations.md).**
+It is the source of truth for operating rules when multiple agents work
+concurrently in the same work tree (both implementers and dispatchers),
+regardless of engine.
 
-プロジェクトの構成・コマンド・ブランチ運用は [CLAUDE.md](CLAUDE.md) にある。
-ファイル名は Claude Code 由来だが、内容は engine 非依存なので同じものを読む。
+Project structure, commands, and branch operation are in
+[CLAUDE.md](CLAUDE.md). The filename comes from Claude Code, but the content
+is engine-independent, so read the same file.
 
-runner の起動 path や wrapper の turn lifecycle を変える前に、
-[docs/operations/high-risk-change-release.md](docs/operations/high-risk-change-release.md)
-で高リスクか確認すること。
+Before changing the runner startup path or the wrapper turn lifecycle,
+check [docs/operations/high-risk-change-release.md](docs/operations/high-risk-change-release.md)
+to determine whether the change is high risk.
 
-正本を開く前でも、次の 6 点だけは先に頭へ置いておくこと。
+Keep these six points in mind even before opening the source of truth.
 
-1. タスクの実スコープを変える食い違いを見つけたら、**実装の前に** dispatch
-   元へ query を送る。完了報告と同時ではない。
-2. 割り当てられたサブディレクトリの外は触らない。見つけた問題は報告に留める。
-3. 他エージェントの未 commit 変更を revert / stage しない。`git add -A` を
-   使わず、自分の変更ファイルだけを明示 add する。
-4. push 済み commit を amend しない。修正は常に新規 commit。
-5. inter-agent の会話は双方が `done=true` を送って初めて終わる。
-6. リポジトリに残るものは英語で書く: コミットメッセージ (件名は
-   `type(scope): summary`)、issue / PR の題名・本文・コメント、docs、コード
-   コメント。会話とエージェント間メッセージはセッションの言語のまま。
-   詳細は CLAUDE.md の Language。
+1. If you find a discrepancy that changes the task's actual scope, send a
+   query to the dispatch source **before implementation**, not together
+   with the completion report.
+2. Do not touch outside the assigned subdirectory. Report problems found
+   there only.
+3. Do not revert or stage another agent's uncommitted changes. Do not use
+   `git add -A`; explicitly add only files you changed.
+4. Do not amend a pushed commit. Always make corrections as new commits.
+5. An inter-agent conversation ends only after both parties have sent
+   `done=true`.
+6. Write everything that remains in the repository in English: commit
+   messages (subject: `type(scope): summary`), issue / PR titles, bodies,
+   and comments, docs, and code comments. Conversations and inter-agent
+   messages stay in the session language. See Language in CLAUDE.md for
+   details.
+
+For the rule requiring issue numbers in documents to link to their GitHub
+issues, follow [Documentation writing rules](docs/contributing/documentation.md#writing-rules).

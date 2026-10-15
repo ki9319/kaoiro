@@ -1,7 +1,7 @@
 ---
 title: Documentation rules — where a page goes and how it moves
 status: accepted
-last_updated: 2026-09-27
+last_updated: 2026-10-15
 description: The layered docs/ taxonomy (architecture / operations / reference / adr / evidence / contributing), the placement test for a new page, and the sync-then-move order for reorganizing existing pages.
 ---
 
@@ -65,6 +65,8 @@ and the three kept pages (`personas`, `agent-operations`, and provisional
   the evidence line.
 - Do not restate another page; link to it. A code comment points at a
   page (`See docs/reference/...`) rather than paraphrasing it.
+- When a document names an issue by number, link it to the GitHub issue,
+  for example `[issue #368](https://github.com/sakuraiyuta/kaoiro/issues/368)`.
 - Incidents and postmortems go to the issue tracker; only a durable rule
   extracted from them becomes an ADR or a constraint on a page.
 
