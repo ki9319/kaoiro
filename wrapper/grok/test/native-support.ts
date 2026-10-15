@@ -191,12 +191,13 @@ export function removeGrokState(cwd: string): void {
   const home = process.env.GROK_HOME ?? join(homedir(), ".grok");
   rmSync(join(home, "sessions", encodeURIComponent(cwd)), { recursive: true, force: true });
   const workspaces = join(home, "memory-v2", "workspaces");
-  // Grok names a workspace `<cwd basename>-<8 hex>`. Only a scratch cwd made
+  // Grok names a workspace after the cwd basename without its leading dots,
+  // lowercased, plus `-<8 hex>` (measured on 1.0.52). Only a scratch cwd made
   // by mkdtemp under a `.kaoiro-grok-` prefix is matched, and only exactly,
   // so a workspace another test or peer owns can never match.
   const name = basename(cwd);
   if (!/^\.kaoiro-grok-[\w-]+-[A-Za-z0-9]{6}$/.test(name) || !existsSync(workspaces)) return;
-  const own = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-[0-9a-f]{8}$`);
+  const own = new RegExp(`^${name.slice(1).toLowerCase()}-[0-9a-f]{8}$`);
   for (const entry of readdirSync(workspaces))
     if (own.test(entry)) rmSync(join(workspaces, entry), { recursive: true, force: true });
 }

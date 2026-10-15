@@ -142,9 +142,10 @@ describe("removeGrokState", () => {
     try {
       const cwd = join(homedir(), ".kaoiro-grok-resume-AbC123");
       const workspaces = join(home, "memory-v2", "workspaces");
-      const own = ".kaoiro-grok-resume-AbC123-0123abcd";
-      const others = ["work-0123abcd", ".kaoiro-grok-resume-AbC123x-0123abcd",
-        ".kaoiro-grok-resume-AbC123-0123abcd-more", ".kaoiro-grok-resume-AbC12-0123abcd"];
+      const own = "kaoiro-grok-resume-abc123-0123abcd";
+      const others = ["work-0123abcd", "kaoiro-grok-resume-abc123x-0123abcd",
+        "kaoiro-grok-resume-abc123-0123abcd-more", "kaoiro-grok-resume-abc12-0123abcd",
+        ".kaoiro-grok-resume-AbC123-0123abcd"];
       for (const entry of [own, ...others]) mkdirSync(join(workspaces, entry), { recursive: true });
       const sessions = join(home, "sessions");
       mkdirSync(join(sessions, encodeURIComponent(cwd)), { recursive: true });
