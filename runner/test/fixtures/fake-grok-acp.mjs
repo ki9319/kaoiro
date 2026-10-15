@@ -4,6 +4,8 @@
 //   pages:      { "<cursor or __first__>": result | { error: code } }
 //   hang:       never answer session/list
 //   initError:  answer initialize with this JSON-RPC error code
+//   initHang:   never answer initialize
+//   initMeta:   the `_meta` of the initialize result
 //   exitOnList: exit before answering session/list
 //   spawnChild: start a sleeping child in the same process group
 //   stubbornChild: start a child in the group that ignores SIGTERM; the pid
@@ -45,13 +47,15 @@ process.stdin.on("data", (chunk) => {
     buffer = buffer.slice(index + 1);
     if (log) appendFileSync(log, `${JSON.stringify({ method: message.method, params: message.params })}\n`);
     if (message.method === "initialize") {
+      if (scenario.initHang) continue;
       if (scenario.initError) reply(message.id, { error: { code: scenario.initError, message: "no" } });
       else {
         // An unsolicited request and a notification, which the probe must
         // refuse and ignore.
         process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "_x.ai/announcements/update", params: {} })}\n`);
         process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: "srv-1", method: "fs/read_text_file", params: {} })}\n`);
-        reply(message.id, { result: { protocolVersion: 1, agentCapabilities: {} } });
+        reply(message.id, { result: { protocolVersion: 1, agentCapabilities: {},
+          ...(scenario.initMeta === undefined ? {} : { _meta: scenario.initMeta }) } });
       }
     } else if (message.method === "session/list") {
       if (scenario.exitOnList) process.exit(0);
