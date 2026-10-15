@@ -87,9 +87,11 @@ describe.skipIf(!live)("catalog quota (native)", () => {
       expect(classify(read(positiveLog)).modelRequests,
         "model requests are not observable under this transport").toBeGreaterThan(0);
 
-      // Negative check: the production catalog and list probes.
+      // Negative check: the production catalog and list probes. The catalog
+      // probe runs in the scratch cwd, so whatever it might leave there is
+      // cleaned with it.
       const catalogLog = join(logs, "catalog.jsonl");
-      results.catalogRead = await probeGrokCatalog(transport(catalogLog)).then(() => true, () => false);
+      results.catalogRead = await probeGrokCatalog({ cwd, ...transport(catalogLog) }).then(() => true, () => false);
       const listLog = join(logs, "list.jsonl");
       await listGrokSessions(cwd, transport(listLog));
       for (const [name, log] of [["catalog", catalogLog], ["list", listLog]] as const) {

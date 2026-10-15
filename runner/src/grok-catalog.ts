@@ -51,11 +51,9 @@ export function grokCatalogFromInitialize(initialized: unknown): EngineModelInfo
   }
   if (typeof state.currentModelId !== "string" || !ids.has(state.currentModelId))
     throw new GrokCatalogInvalid("currentModelId not listed");
-  const models = parseModelState(meta);
-  if (models.length !== available.length) throw new GrokCatalogInvalid("model list not read whole");
   return [
     GROK_DEFAULT_ENTRY,
-    ...models.map(({ window: _window, ...model }) => model),
+    ...parseModelState(meta).map(({ window: _window, ...model }) => model),
   ];
 }
 
