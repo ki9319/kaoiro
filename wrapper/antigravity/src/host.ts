@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
   effectiveStatusEnvelopeFields,
+  withAgentMarker,
   initialMachineState,
   logEntryToPayload,
   makeLog,
@@ -2198,7 +2199,7 @@ export class AntigravityHost implements EngineAdapter {
       let child: SpawnedAgy;
       try {
         const childEnv: NodeJS.ProcessEnv = {
-          ...process.env,
+          ...withAgentMarker(process.env),
           ...nonInteractiveToolEnv(process.env).additions,
           KAOIRO_GATE_SOCKET: gateServer.socketPath,
           KAOIRO_GATE_NONCE: gateServer.nonce,
@@ -3064,7 +3065,7 @@ export class AntigravityHost implements EngineAdapter {
   }
 
   #safeChildEnv(): NodeJS.ProcessEnv {
-    const environment = { ...process.env };
+    const environment = withAgentMarker(process.env);
     delete environment.CODEX_HOME;
     return environment;
   }

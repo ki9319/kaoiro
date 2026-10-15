@@ -52,18 +52,18 @@ function childFixture(closeDelayMs = 0, openDelayMs = 0) {
 }
 const tool = { name: "probe", description: "probe", inputSchema: { type: "object" }, handler: async () => ({ content: [] }) };
 
-it.each(["start", "resume"])("sends the tool-home policy on thread/%s before any turn", async action => {
+it.each(["start", "resume"].flatMap(action => [undefined, "/tmp/fuji464-private-tool-home"].map(toolHome => ({ action, toolHome }))))("sends the marker policy on thread/$action with toolHome=$toolHome before any turn", async ({ action, toolHome }) => {
   const fixture = childFixture();
   const session = await AppServerSession.create({
-    toolHome: "/tmp/fuji464-private-tool-home",
+    ...(toolHome === undefined ? {} : { toolHome }),
     turnSignal: () => null,
     transport: { spawnChild: () => fixture.child },
   }); sessions.push(session);
   if (action === "start") await session.startThread();
   else await session.resumeThread("existing-thread");
   const open = fixture.sent.find(r => r.method === `thread/${action}`);
-  expect(open?.params.config).toMatchObject({
-    shell_environment_policy: { set: { CODEX_HOME: "/tmp/fuji464-private-tool-home" } },
+  expect((open?.params.config as { shell_environment_policy: { set: Record<string, string> } }).shell_environment_policy.set).toEqual({
+    KAOIRO_AGENT: "1", ...(toolHome === undefined ? {} : { CODEX_HOME: toolHome }),
   });
   expect(fixture.sent.some(r => r.method === "turn/start")).toBe(false);
 });
@@ -128,7 +128,10 @@ it("omits MCP for no descriptors and fences concurrent setup and premature turns
   await expect(session.resumeThread("thread")).rejects.toThrow("already opening or bound");
   await expect(first).resolves.toBe("thread");
   expect(listen).not.toHaveBeenCalled();
-  expect(fixture.sent.find(r => r.method === "thread/start")!.params.config).toEqual({ features: { multi_agent: true } });
+  expect(fixture.sent.find(r => r.method === "thread/start")!.params.config).toEqual({
+    features: { multi_agent: true },
+    shell_environment_policy: { set: { KAOIRO_AGENT: "1" } },
+  });
 });
 
 it.each(["construction", "initialization"])("releases the real private socket on %s failure", async mode => {

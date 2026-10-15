@@ -1,4 +1,4 @@
-import { MAX_COALESCED_BYTES, MAX_COALESCED_MESSAGES, ToolOrigins } from "@kaoiro/agent-common";
+import { MAX_COALESCED_BYTES, MAX_COALESCED_MESSAGES, ToolOrigins, withAgentMarker } from "@kaoiro/agent-common";
 import { DeliveryPolicyController } from "@kaoiro/wrapper-core";
 // Agent host — runs a query() session, derives state from its message stream,
 // and routes tool-permission requests through canUseTool so they surface as
@@ -2612,7 +2612,7 @@ export class AgentHost implements EngineAdapter {
       (this.#permissionMode as PermissionMode | null) ??
       this.#config.permission_mode ??
       "default";
-    const childEnv = { ...(this.#options.queryOptions?.env ?? process.env) };
+    const childEnv = withAgentMarker(this.#options.queryOptions?.env ?? process.env);
     delete childEnv.CODEX_HOME;
     this.#abort = new AbortController();
     const options: Options = {

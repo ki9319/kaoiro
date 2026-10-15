@@ -311,8 +311,8 @@ it("keeps the default exec factory, arguments and callbacks despite unrelated co
     expect(options).toEqual([{ config: {
       developer_instructions: "PERSONA", approvals_reviewer: "user",
       features: { multi_agent: true },
-      shell_environment_policy: { set: { CODEX_HOME: expect.stringContaining("kaoiro-codex-tool-") } },
-    } }]);
+      shell_environment_policy: { set: { CODEX_HOME: expect.stringContaining("kaoiro-codex-tool-"), KAOIRO_AGENT: "1" } },
+    }, env: expect.objectContaining({ KAOIRO_AGENT: "1" }) }]);
     expect(threadOptions).toEqual([expect.objectContaining({ model: "gpt-5.6-sol", modelReasoningEffort: "high", approvalPolicy: "never", sandboxMode: "workspace-write", networkAccessEnabled: false })]);
     expect(starts).toHaveBeenCalledWith({ turnToken: "token", conversationIds: ["c"] });
     expect(ends).toHaveBeenCalledWith({ turnToken: "token", conversationIds: ["c"], terminal: "turn.completed" });

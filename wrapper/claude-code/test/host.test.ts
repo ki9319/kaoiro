@@ -99,18 +99,21 @@ describe("initialStatusExt", () => {
 });
 
 describe("AgentHost whoami effective projection (#113)", () => {
-  it("filters CODEX_HOME from the SDK options without adding omitted caller keys", async () => {
+  it.each([undefined, "", "1", "legacy"])("marks SDK child env and filters CODEX_HOME with inherited marker %s", async marker => {
     let seen: NodeJS.ProcessEnv | undefined;
+    const inherited = { CODEX_HOME: "/tmp/fuji464-hostile", FUJI464_KEEP: "yes",
+      ...(marker === undefined ? {} : { KAOIRO_AGENT: marker }) };
     const host = new AgentHost(config, {
       onState: () => {},
-      queryOptions: { env: { CODEX_HOME: "/tmp/fuji464-hostile", FUJI464_KEEP: "yes" } },
+      queryOptions: { env: inherited },
       queryFn: makeQueryFn(({ options }) => {
         seen = options.env;
         return asQuery((async function* () { yield result("success", { result: "ok" }); })());
       }),
     });
     await host.run("hello");
-    expect(seen).toEqual({ FUJI464_KEEP: "yes" });
+    expect(seen).toEqual({ FUJI464_KEEP: "yes", KAOIRO_AGENT: "1" });
+    expect(inherited.KAOIRO_AGENT).toBe(marker);
     host.close();
   });
   it("model/effort/source と engine-neutral permission を同じ snapshot から返す", () => {

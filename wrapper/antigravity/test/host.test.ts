@@ -157,13 +157,16 @@ function hostHarness(options: {
 }
 
 describe("AntigravityHost", () => {
-  it("omits inherited CODEX_HOME from the CLI child", async () => {
+  it.each([undefined, "", "1", "legacy"])("marks the CLI child and omits CODEX_HOME with parent marker %s", async marker => {
     vi.stubEnv("CODEX_HOME", "/tmp/fuji464-hostile");
+    vi.stubEnv("KAOIRO_AGENT", marker);
     try {
       const { host, calls } = hostHarness();
       await host.send("hello");
       await waitFor(() => calls.length === 1);
       expect(calls[0]?.env.CODEX_HOME).toBeUndefined();
+      expect(calls[0]?.env.KAOIRO_AGENT).toBe("1");
+      expect(process.env.KAOIRO_AGENT).toBe(marker);
       calls[0]?.child.finish();
       host.close();
     } finally { vi.unstubAllEnvs(); }

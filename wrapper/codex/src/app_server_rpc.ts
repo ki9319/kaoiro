@@ -3,6 +3,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { arch, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { withAgentMarker } from "@kaoiro/agent-common";
 
 export type RpcObject = Record<string, unknown>;
 export interface AppServerNotification { method: string; params: RpcObject }
@@ -114,7 +115,7 @@ export class AppServerRpc {
     this.#child = options.spawnChild?.() ?? spawn(resolveAppServerBinary(), [
       "--config", 'approvals_reviewer="user"', "--config", 'approval_policy="never"',
       "--config", "analytics.enabled=false", "app-server", "--listen", "stdio://",
-    ], { stdio: ["pipe", "pipe", "pipe"] });
+    ], { stdio: ["pipe", "pipe", "pipe"], env: withAgentMarker(process.env) });
     this.#closed = new Promise((resolve) => {
       this.#child.once("close", () => {
         if (this.#killTimer) clearTimeout(this.#killTimer);

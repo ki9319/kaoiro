@@ -8,6 +8,10 @@ last_updated: 2026-10-15
 
 ## Coverage
 
+The [managed engine environment](wrapper.md#managed-engine-environment)
+documents the wrapper's `KAOIRO_AGENT` output for user-side hooks. It is not
+a runner setting and needs no entry in `runner.config.json` or `runner.env`.
+
 This page covers the connection fields in `runner.config.json` (`host_id` /
 `server_url` / `cwd_allowlist` / `capabilities` / tokens, below), the Codex
 and Antigravity engine-specific blocks, and the Codex backend selector.
