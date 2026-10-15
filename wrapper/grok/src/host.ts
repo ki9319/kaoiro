@@ -1114,21 +1114,19 @@ export class GrokHost implements EngineAdapter {
   async #sendSwitch(generation: Generation, claimed: AxisRecord) {
     const held = this.#selection!;
     const target = claimed.model?.value ?? held.model;
-    let modelFailed = false;
     if (target !== held.model) {
       const failure = await this.#setOption(generation, "model", target);
       if (failure === "closing") return;
       if (failure) {
-        modelFailed = true;
         this.#switchErrorOnce = { kind: "model", requested: target, reason: "control_rejected", rolled_back_to: held.model };
         // A start pick that failed is held, with the effort chosen for it.
         if (claimed.model && !claimed.model.operator) this.#holdAxis("model", claimed.model);
         if (claimed.effort && !claimed.effort.operator) this.#holdAxis("effort", claimed.effort);
-        // An operator effort still applies, to the model Grok kept.
-        if (!claimed.effort?.operator) return;
+        // Unit 4's failure contract: an operator effort is dropped unsent.
+        return;
       }
     }
-    if (claimed.model && !modelFailed) this.#confirmAxis("model", claimed.model);
+    if (claimed.model) this.#confirmAxis("model", claimed.model);
     const now = this.#selection!;
     const entry = this.#catalog.find((candidate) => candidate.value === now.model);
     let effort = claimed.effort?.value ?? held.effort;

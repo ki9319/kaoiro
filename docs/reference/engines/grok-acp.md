@@ -121,15 +121,17 @@ reporting are unsupported. Unsupported controls reject explicitly.
 The runner discovers sessions with a short-lived
 `grok --no-auto-update agent --no-leader stdio` in its own process group: it
 sends `initialize`, pages `session/list {cwd}` and kills the group. A probe
-has a 10 s deadline and reads at most 20 pages. It settles only once the
-whole group is gone: SIGTERM, then SIGKILL after 1 s to whatever is left, even
-when Grok itself exited first. Any failure, a malformed response included,
-gives an empty list and a failed existence check (`session_not_found`); a
-partial list is never returned. Every supervisor caller that starts a probe owns its abort:
-a pending resume spawn, a pending `switch_session` check, the latest session
-enumeration and `stopAll`. A stop, a newer request or shutdown aborts the
-probe and kills its process group. Grok writes a new session to disk a moment
-after `session/new`, so a session created a moment ago may not be listed yet.
+has a 10 s deadline and reads at most 20 pages. Its teardown is bounded and
+covers the whole group, even when Grok itself exited first: SIGTERM, then
+SIGKILL after 1 s to whatever is left, then up to 1 s more; a group still
+present after that does not keep the probe from settling. Any failure, a
+malformed response included, gives an empty list and a failed existence check
+(`session_not_found`); a partial list is never returned. Every supervisor
+caller that starts a probe owns its abort: a pending resume spawn, a pending
+`switch_session` check, the latest session enumeration and `stopAll`. A stop,
+a newer request or shutdown aborts the probe and kills its process group. Grok
+writes a new session to disk a moment after `session/new`, so a session
+created a moment ago may not be listed yet.
 
 The wrapper's first lane attaches with `session/resume` (session id, launch
 cwd, the fresh MCP server) instead of `session/new`. Resume replays no
@@ -311,11 +313,9 @@ truth; an axis the request did not set that comes back changed takes source
 
 A request Grok rejects (JSON-RPC `-32602`) changes nothing it did not apply:
 
-- The model request fails: the model is not applied, and `switch_error` is
-  `{ kind: "model", requested, reason: "control_rejected", rolled_back_to:
-  <current model> }`. An operator's pending effort is then applied to the
-  model Grok kept, with the default substituted (and `effort_reset` stamped)
-  when that model lacks it; a start effort is held with its model.
+- The model request fails: nothing is applied, a pending effort is dropped,
+  and `switch_error` is `{ kind: "model", requested, reason:
+  "control_rejected", rolled_back_to: <current model> }`.
 - The model request succeeds and the effort request fails: the model stays
   switched, because Grok applied it. `ext.effort` reports what Grok still
   holds, which can be outside the new model's `effort_levels`.

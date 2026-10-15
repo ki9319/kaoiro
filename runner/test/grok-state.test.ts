@@ -1,28 +1,11 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeGrokScratch, removeGrokState } from "./grok-state.js";
 
 // The cleanup of live-test Grok state, against a fake GROK_HOME only. The
 // runner keeps a copy of this file; keep the two identical.
-
-// Lets a test know a scratch cwd's name before it exists; every other
-// mkdtemp stays random.
-const next = vi.hoisted(() => ({ suffix: undefined as string | undefined }));
-vi.mock("node:fs", async (importOriginal) => {
-  const fs = await importOriginal<typeof import("node:fs")>();
-  return {
-    ...fs,
-    mkdtempSync: (prefix: string) => {
-      const suffix = next.suffix;
-      if (suffix === undefined) return fs.mkdtempSync(prefix);
-      next.suffix = undefined;
-      fs.mkdirSync(`${prefix}${suffix}`);
-      return `${prefix}${suffix}`;
-    },
-  };
-});
 
 let home: string;
 let previous: string | undefined;
@@ -54,39 +37,23 @@ afterEach(() => {
 });
 
 describe("removeGrokState", () => {
-  it("removes the session group and the workspace that appeared for its own scratch cwd", () => {
+  it("removes its own scratch cwd and that cwd's session group only", () => {
     const cwd = scratch("state");
-    mkdirSync(ws(workspaceOf(cwd, "0123abcd")), { recursive: true });
     mkdirSync(session(cwd), { recursive: true });
     mkdirSync(session(`${cwd}x`), { recursive: true });
-    mkdirSync(ws(`${workspaceOf(cwd, "0123abcd")}-more`), { recursive: true });
     removeGrokState(cwd);
-    expect(readdirSync(ws()).sort()).toEqual([`${workspaceOf(cwd, "0123abcd")}-more`, "work-0123abcd"]);
+    expect(existsSync(cwd)).toBe(false);
     expect(readdirSync(join(home, "sessions"))).toEqual([encodeURIComponent(`${cwd}x`)]);
   });
 
-  it("keeps a workspace with the same name that existed before the cwd was made", () => {
-    const suffix = `Q${Math.random().toString(36).slice(2, 7)}`;
-    const name = `kaoiro-grok-state-${suffix.toLowerCase()}`;
-    // Another cwd with the same basename, made before this one.
-    mkdirSync(ws(`${name}-11111111`), { recursive: true });
-    next.suffix = suffix;
+  it("leaves every memory workspace, its own name's included", () => {
     const cwd = scratch("state");
-    expect(basename(cwd)).toBe(`.kaoiro-grok-state-${suffix}`);
-    mkdirSync(ws(`${name}-22222222`), { recursive: true });
+    // Whether Grok made these for this cwd or for another with the same
+    // basename, nothing proves which; all of them stay.
+    const named = [workspaceOf(cwd, "0123abcd"), workspaceOf(cwd, "fedcba98")];
+    for (const entry of named) mkdirSync(ws(entry), { recursive: true });
     removeGrokState(cwd);
-    expect(readdirSync(ws()).sort()).toEqual([`${name}-11111111`, "work-0123abcd"]);
-  });
-
-  it("removes no workspace when two appeared under its name", () => {
-    const cwd = scratch("state");
-    mkdirSync(ws(workspaceOf(cwd, "11111111")), { recursive: true });
-    mkdirSync(ws(workspaceOf(cwd, "22222222")), { recursive: true });
-    mkdirSync(session(cwd), { recursive: true });
-    removeGrokState(cwd);
-    expect(readdirSync(ws()).sort())
-      .toEqual([workspaceOf(cwd, "11111111"), workspaceOf(cwd, "22222222"), "work-0123abcd"]);
-    expect(readdirSync(join(home, "sessions"))).toEqual([]);
+    expect(readdirSync(ws()).sort()).toEqual([...named, "work-0123abcd"].sort());
   });
 
   it.each([
@@ -107,9 +74,9 @@ describe("removeGrokState", () => {
   it("removes nothing a second time", () => {
     const cwd = scratch("state");
     removeGrokState(cwd);
-    mkdirSync(ws(workspaceOf(cwd, "0123abcd")), { recursive: true });
+    mkdirSync(session(cwd), { recursive: true });
     removeGrokState(cwd);
-    expect(readdirSync(ws())).toContain(workspaceOf(cwd, "0123abcd"));
+    expect(existsSync(session(cwd))).toBe(true);
   });
 });
 

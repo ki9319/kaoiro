@@ -428,45 +428,25 @@ describe("switch provenance", () => {
     expect(t.states().filter((ext) => ext.effort_reset === true)).toHaveLength(1);
   });
 
-  // Both switches are asked mid-turn, so one claim carries them to the
-  // failing model request.
-  async function failedModelWithEffort(effort: string) {
+  it("drops an operator effort claimed with a model Grok refuses, sending nothing more (unit 4 contract)", async () => {
+    // Both switches are asked mid-turn, so one claim carries them to the
+    // refused model request (the fixture's -32602).
     const root = mkdtempSync(join(homedir(), ".kaoiro-grok-644-"));
     scratch.push(root);
     const release = join(root, "release");
-    const t = await launch({ root, config: { model: "grok-4.5", model_source: "env" },
-      env: { KAOIRO_TEST_GROK_RELEASE_FILE: release } });
-    await vi.waitFor(() => expect(t.ext().model).toBe("grok-4.5"));
-    const real = AcpSession.prototype.setConfigOption;
-    const sent = vi.spyOn(AcpSession.prototype, "setConfigOption").mockImplementation(async function (this: AcpSession, id, value) {
-      if (id === "model") throw new Error("refused");
-      return real.call(this, id, value);
-    });
+    const t = await launch({ root, config: { model: "grok-4.7", model_source: "env" },
+      env: { KAOIRO_TEST_GROK_RELEASE_FILE: release, KAOIRO_TEST_GROK_MODEL_FAIL: "1" } });
     const turn = t.host.send("calls-2");
     await vi.waitFor(() => expect(t.methods()).toContain("model_call"));
-    await t.host.setModel("grok-4.7");
-    await t.host.setEffort(effort);
-    expect(t.ext()).toMatchObject({ pending_model: "grok-4.7", pending_effort: effort });
+    await t.host.setModel("grok-4.6");
+    await t.host.setEffort("low");
+    expect(t.ext()).toMatchObject({ pending_model: "grok-4.6", pending_effort: "low" });
     writeFileSync(release, "");
     await turn;
     await vi.waitFor(() => expect(t.states().some((ext) => ext.switch_error?.kind === "model")).toBe(true));
     await vi.waitFor(() => expect(t.ext()).not.toHaveProperty("pending_effort"));
-    expect(sent.mock.calls[0]).toEqual(["model", "grok-4.7"]);
-    return t;
-  }
-
-  it("stamps an operator effort replaced on the model Grok kept when the model request fails (issue #648)", async () => {
-    const t = await failedModelWithEffort("xhigh");
-    expect(t.requests().filter(([id]) => id === "reasoning_effort")).toEqual([]);
-    expect(t.ext()).toMatchObject({ model: "grok-4.5", model_source: "env", effort: "high", effort_source: "config" });
-    expect(t.states().filter((ext) => ext.effort_reset === true)).toHaveLength(1);
-  });
-
-  it("applies an operator effort the kept model offers when the model request fails", async () => {
-    const t = await failedModelWithEffort("low");
-    await vi.waitFor(() => expect(t.ext().effort).toBe("low"));
-    expect(t.requests()).toEqual([["model", "grok-4.5"], ["reasoning_effort", "low"]]);
-    expect(t.ext()).toMatchObject({ model: "grok-4.5", model_source: "env", effort_source: "config" });
+    expect(t.requests()).toEqual([["model", "grok-4.6"]]);
+    expect(t.ext()).toMatchObject({ model: "grok-4.7", model_source: "env", effort: "high", effort_source: "default" });
     expect(t.states().some((ext) => ext.effort_reset === true)).toBe(false);
   });
 });

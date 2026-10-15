@@ -30,4 +30,8 @@ The native tests `wrapper/grok/test/native-resume.test.ts` and
 `runner/test/grok_sessions.native.test.ts` (`KAOIRO_LIVE_GROK=1`) check the
 resume, two further resumes with no drift, a differing pick applied before the
 first prompt, the other-cwd refusal, the launch profile, and discovery under
-the exact cwd.
+the exact cwd. They remove only their own scratch cwd and its session group.
+The memory workspace Grok makes for each cwd stays: its name carries the cwd
+basename and a hash, and nothing measured ties that hash to the full cwd, so a
+workspace of another cwd with the same basename cannot be told apart. Their
+buildup is tracked in issue #650.

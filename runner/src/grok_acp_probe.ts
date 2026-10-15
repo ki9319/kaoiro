@@ -76,9 +76,11 @@ async function groupGone(pid: number, withinMs: number, kill: Kill): Promise<boo
   return true;
 }
 
-/** Ends a probe's whole group: SIGTERM, then SIGKILL to whatever is left
- *  after the grace. The leader exiting first does not end the wait, since a
- *  process it started can outlive it in the group. */
+/** Ends a probe's whole group, within a bound: SIGTERM, then SIGKILL to
+ *  whatever is left after the grace, then one more grace. The leader exiting
+ *  first does not end the wait, since a process it started can outlive it in
+ *  the group; a group still present after the SIGKILL grace is left, and the
+ *  caller settles anyway. */
 export async function endProbeGroup(
   pid: number | undefined,
   graceMs = KILL_GRACE_MS,
@@ -93,8 +95,9 @@ export async function endProbeGroup(
 /**
  * Runs `initialize` and then `operation` against a fresh Grok. Resolves to
  * the operation's value; rejects with GrokProbeAborted when `signal` aborts
- * and with GrokProbeError for every other failure. The process group is
- * killed before the promise settles either way.
+ * and with GrokProbeError for every other failure. Either way the process
+ * group gets endProbeGroup's bounded teardown before the promise settles,
+ * which can leave a member that outlives the SIGKILL grace.
  */
 export async function runGrokProbe<T>(
   options: GrokProbeOptions,

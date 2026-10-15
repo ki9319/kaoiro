@@ -1,4 +1,3 @@
-import { rmSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { runGrokProbe } from "../src/grok_acp_probe.js";
 import { grokSessionExists, listGrokSessions } from "../src/grok_sessions.js";
@@ -34,8 +33,6 @@ describe.skipIf(!live)("native grok session discovery", () => {
     } finally {
       removeGrokState(cwd);
       removeGrokState(other);
-      rmSync(cwd, { recursive: true, force: true });
-      rmSync(other, { recursive: true, force: true });
     }
   }, 120_000);
 });

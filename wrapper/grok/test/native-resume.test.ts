@@ -90,8 +90,6 @@ describe.skipIf(!live)("native cold resume", () => {
     } finally {
       removeGrokState(cwd);
       removeGrokState(other);
-      rmSync(cwd, { recursive: true, force: true });
-      rmSync(other, { recursive: true, force: true });
     }
   }, 600_000);
 
@@ -127,7 +125,6 @@ print(json.dumps({'inside': ok}))
       expect(existsSync(inside)).toBe(false);
     } finally {
       removeGrokState(cwd);
-      rmSync(cwd, { recursive: true, force: true });
       rmSync(reports, { recursive: true, force: true });
     }
   }, 600_000);
