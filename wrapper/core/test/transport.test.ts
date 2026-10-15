@@ -105,7 +105,7 @@ import {
   hydrationVerdictFrom,
 } from "../src/transport.js";
 import type { ServerLinkOptions } from "../src/transport.js";
-import type { Envelope } from "@kaoiro/protocol";
+import type { Envelope, PermissionSyncMessage } from "@kaoiro/protocol";
 import type { VersionedWrapperEvent } from "../src/transport.js";
 import { createDeliveryAcknowledgementRuntime } from "../../agent-common/src/delivery_ack.js";
 import { DeliveryPolicyController } from "../src/delivery_policy.js";
@@ -695,6 +695,107 @@ describe("ServerLink — permission synchronization", () => {
     mock.joinReceivers.clear();
     mock.lastChannelParams = null;
     mock.onOpen = null;
+  });
+
+  function observationSync(
+    slot: "effective" | "last_effective",
+    enforcement: unknown,
+  ) {
+    const next = { revision: 1, requested: { sandbox: "danger-full-access", network_access: true } };
+    const submitted = { ...next, execution_id: "exec-1" };
+    return {
+      version: "0",
+      next,
+      control: {
+        ...next,
+        constraints: { approval: "on-request", enforcement: "os" as unknown },
+        status: slot === "effective" ? "applied" : "pending",
+        ...(slot === "effective" ? { submitted } : {}),
+        [slot]: {
+          ...submitted,
+          session_id: "session-1",
+          turn_id: "turn-1",
+          permission: {
+            sandbox: "danger-full-access",
+            approval: "on-request",
+            ...(enforcement === undefined ? {} : { enforcement }),
+          },
+          network_access: true,
+        },
+      },
+    };
+  }
+
+  describe.each(["effective", "last_effective"] as const)("%s enforcement", (slot) => {
+    it.each([undefined, "os", "mode", "advisory"])("preserves %s and releases synchronization", async (enforcement) => {
+      const received: PermissionSyncMessage[] = [];
+      const link = new ServerLink("ws://x/wrapper", "a.agent", {
+        personaId: "ao",
+        permissionSync: { engine: "grok", onSync: (message) => received.push(message) },
+      });
+      try {
+        mock.joinReceivers.get("ok")?.({ permission_sync: true });
+        const ready = link.waitForPermissionSync();
+        emit("permission_sync", observationSync(slot, enforcement));
+        expect(received).toHaveLength(1);
+        await ready;
+        const permission = received[0]!.control![slot]!.permission;
+        expect(Object.hasOwn(permission, "enforcement")).toBe(enforcement !== undefined);
+        expect(permission.enforcement).toBe(enforcement);
+      } finally {
+        link.close();
+      }
+    });
+
+    it.each([null, "", "invalid", true, 1, [], {}].map(value => ({ value })))(
+      "rejects present-invalid $value without releasing synchronization",
+      async ({ value }) => {
+        const received: PermissionSyncMessage[] = [];
+        const link = new ServerLink("ws://x/wrapper", "a.agent", {
+          personaId: "ao",
+          permissionSync: { engine: "grok", onSync: (message) => received.push(message) },
+        });
+        try {
+          mock.joinReceivers.get("ok")?.({ permission_sync: true });
+          let released = false;
+          void link.waitForPermissionSync().then(() => { released = true; });
+          emit("permission_sync", observationSync(slot, value));
+          await Promise.resolve();
+          expect(received).toHaveLength(0);
+          expect(released).toBe(false);
+          emit("permission_sync", observationSync(slot, "os"));
+          await vi.waitFor(() => expect(released).toBe(true));
+          expect(received).toHaveLength(1);
+        } finally {
+          link.close();
+        }
+      },
+    );
+  });
+
+  it.each([undefined, null, "", "invalid"])("rejects invalid constraints enforcement %s", async (enforcement) => {
+    const received: PermissionSyncMessage[] = [];
+    const link = new ServerLink("ws://x/wrapper", "a.agent", {
+      personaId: "ao",
+      permissionSync: { engine: "grok", onSync: (message) => received.push(message) },
+    });
+    try {
+      mock.joinReceivers.get("ok")?.({ permission_sync: true });
+      let released = false;
+      void link.waitForPermissionSync().then(() => { released = true; });
+      const sync = observationSync("last_effective", "os");
+      if (enforcement === undefined) delete (sync.control.constraints as Record<string, unknown>).enforcement;
+      else sync.control.constraints.enforcement = enforcement;
+      emit("permission_sync", sync);
+      await Promise.resolve();
+      expect(received).toHaveLength(0);
+      expect(released).toBe(false);
+      emit("permission_sync", observationSync("last_effective", "os"));
+      await vi.waitFor(() => expect(released).toBe(true));
+      expect(received).toHaveLength(1);
+    } finally {
+      link.close();
+    }
   });
 
   it("negotiated join は authoritative permission_sync まで次の exec barrier を閉じる", async () => {

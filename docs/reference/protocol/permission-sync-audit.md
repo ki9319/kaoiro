@@ -1,7 +1,7 @@
 ---
 title: Permission synchronization and audit
 status: accepted
-last_updated: 2026-09-27
+last_updated: 2026-10-16
 description: Persisted permission settings, join synchronization after wrapper reconnect, and the permission lifecycle audit trail.
 ---
 
@@ -37,6 +37,12 @@ the `PermissionControlExt` arm permits it. A required field cannot be omitted,
 and a forbidden field cannot be sent even as `null`. The explicit empty sync is
 the exception for the two top-level fields, not a null convention for nested
 records. Apply the same omission rule to live control publications.
+
+Inside `effective` and `last_effective`, `permission.enforcement` is optional,
+as in `PermissionAxesExt`: preserve its absence without inferring a mechanism.
+Grok's `off` profile intentionally omits it. A present value must still be
+`os`, `mode`, or `advisory`; `null` is invalid. This does not relax
+`control.constraints.enforcement`, which remains required.
 
 Seed empty settings from the wrapper's raw launch baseline, not from normalized
 `ext.effective`. Otherwise `next` is the saved next-execution selection.

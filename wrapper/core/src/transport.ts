@@ -674,7 +674,8 @@ function permissionObservationFrom(value: unknown): PermissionControlExt["last_e
     !isPlainObject(value.permission) ||
     !PERMISSION_SANDBOXES.has(value.permission.sandbox as PermissionConfiguration["sandbox"]) ||
     !PERMISSION_APPROVALS.has(value.permission.approval as PermissionAxesExt["approval"]) ||
-    !PERMISSION_ENFORCEMENTS.has(value.permission.enforcement as NonNullable<PermissionAxesExt["enforcement"]>) ||
+    (value.permission.enforcement !== undefined &&
+      !PERMISSION_ENFORCEMENTS.has(value.permission.enforcement as NonNullable<PermissionAxesExt["enforcement"]>)) ||
     typeof value.network_access !== "boolean"
   ) {
     return null;
@@ -687,7 +688,9 @@ function permissionObservationFrom(value: unknown): PermissionControlExt["last_e
     permission: {
       sandbox: value.permission.sandbox as PermissionConfiguration["sandbox"],
       approval: value.permission.approval as PermissionAxesExt["approval"],
-      enforcement: value.permission.enforcement as NonNullable<PermissionAxesExt["enforcement"]>,
+      ...(value.permission.enforcement === undefined
+        ? {}
+        : { enforcement: value.permission.enforcement as NonNullable<PermissionAxesExt["enforcement"]> }),
     },
     network_access: value.network_access,
   };
