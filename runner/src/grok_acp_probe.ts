@@ -201,7 +201,12 @@ export async function runGrokProbe<T>(
   };
   const timer = setTimeout(() => stop(new GrokProbeError("deadline")),
     options.deadlineMs ?? GROK_PROBE_DEADLINE_MS);
-  const onAbort = () => stop(new GrokProbeAborted());
+  // The group gets its SIGTERM now, not after the next await: a runner
+  // shutdown exits the process right after aborting.
+  const onAbort = () => {
+    stop(new GrokProbeAborted());
+    killProbeGroup(pid, "SIGTERM");
+  };
   options.signal?.addEventListener("abort", onAbort, { once: true });
   try {
     const initialized = await Promise.race([

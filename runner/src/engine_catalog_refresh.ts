@@ -47,6 +47,9 @@ export interface RefreshEngineCatalogDeps {
   /** Current process-local `agy --version` observation; passed into every
    *  register rebuild so catalog refresh cannot erase it. */
   getAntigravityCliVersion: () => string | undefined;
+  /** Live getter for the runner's Grok catalog (grok-catalog.ts), so a
+   *  Claude refresh keeps it in the rebuilt register. */
+  getGrokCatalog?: () => EngineModelInfo[] | undefined;
   updateRegister: (register: RunnerRegister) => void;
   sendCatalogResult: (result: EngineCatalogResult) => void;
   /** issue #218: fixed for the process's whole lifetime (computed once at
@@ -130,6 +133,7 @@ async function handle(
         deps.buildInfo,
         deps.getAntigravityCatalog(),
         deps.getDeliverySnapshot?.(),
+        deps.getGrokCatalog?.(),
       );
       deps.updateRegister(nextRegister);
     }

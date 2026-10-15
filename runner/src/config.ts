@@ -662,6 +662,7 @@ export function buildRegister(
   buildInfo?: BuildInfo,
   antigravityCatalogOverride?: EngineCatalogEntry["models"],
   deliverySnapshot: AppliedDeliverySnapshot = createDeliverySnapshot(config, process.env),
+  grokCatalogOverride?: EngineCatalogEntry["models"],
 ): RunnerRegister {
   const capabilities = effectiveCapabilities(config);
   const engines: EngineCatalogEntry[] = [];
@@ -711,7 +712,9 @@ export function buildRegister(
   if (capabilities.includes("grok")) {
     engines.push({
       id: "grok",
-      models: [{ value: "default", display_name: "Account default" }],
+      // The register-time `initialize` probe's catalog (grok-catalog.ts),
+      // else the default entry alone.
+      models: grokCatalogOverride ?? [{ value: "default", display_name: "Account default" }],
       launch_permission_axes: { sandbox: true, approval: false },
     });
   }

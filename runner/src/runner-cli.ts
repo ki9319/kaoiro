@@ -34,6 +34,7 @@ import { makeRefreshEngineCatalogHandler, type RefreshEngineCatalogDeps } from "
 import { type CodexAuthMode, resolveCodexAuthMode } from "./codex-auth.js";
 import { resolveAntigravityCatalog } from "./antigravity-catalog.js";
 import { resolveAgyVersion } from "./antigravity-version.js";
+import { GrokCatalog, probeGrokCatalog, type GrokCatalogProbeOptions } from "./grok-catalog.js";
 import {
   DEFAULT_AGY_PROBE_TIMEOUT_MS,
   resolveAgyExecutable,
@@ -42,6 +43,7 @@ import {
 import {
   applyServerUrlOverride,
   buildRegister,
+  effectiveCapabilities,
   loadRunnerConfig,
   type RunnerConfig,
   wrapperUrlFrom,
@@ -137,6 +139,8 @@ export interface RunnerCliDependencies {
   ) => RunnerLinkLike;
   watchRunnerConfig?: typeof watchRunnerConfig;
   catalogProbe?: RefreshEngineCatalogDeps["probe"];
+  /** The Grok catalog probe's executable and environment, for tests. */
+  grokCatalogProbe?: GrokCatalogProbeOptions;
   installSignalHandlers?: boolean;
 }
 
@@ -304,6 +308,7 @@ export async function runRunnerCli(
   // whenever a probe succeeds, so LaunchDialog picks up the fresh catalog
   // via the ordinary `hosts` broadcast — no server-side store needed.
   const claudeCatalog = new ClaudeCatalogCache();
+  const grokCatalog = new GrokCatalog(probeGrokCatalog, dependencies.grokCatalogProbe ?? {});
   const handleRefreshEngineCatalog = makeRefreshEngineCatalogHandler({
     // Live getter (藤 must-fix 2): a hot-reload that changes host_id
     // reaches subsequent catalog_result replies without re-wiring the
@@ -319,6 +324,7 @@ export async function runRunnerCli(
     // pinned snapshot.
     getAntigravityCatalog: () => antigravityCatalog,
     getAntigravityCliVersion: () => antigravityVersion ?? undefined,
+    getGrokCatalog: () => grokCatalog.current(),
     updateRegister: (register) => { link.updateRegister(register); appliedRegister = register; },
     sendCatalogResult: (result) => link.sendCatalogResult(result),
     buildInfo,
@@ -332,6 +338,7 @@ export async function runRunnerCli(
       buildInfo,
       antigravityCatalog,
       appliedDelivery,
+      grokCatalog.current(),
     );
 
   link = createRunnerLink(config.server_url, config.host_id, {
@@ -357,6 +364,31 @@ export async function runRunnerCli(
   // PersonaAssets.all_personas (ADR-0031), so a runner-side manifest
   // reconciliation is no longer meaningful — a new pack ingest reaches
   // blacklist-mode hosts without a re-register.
+
+  // issue #646: the Grok catalog probe starts only once the link and the
+  // shutdown path exist, so close() can abort it before stopAll. A newer
+  // refresh aborts the one in flight. Until one answers, the register
+  // carries the last good catalog, else the default entry.
+  const refreshGrokCatalog = (): void => {
+    if (!effectiveCapabilities(config).includes("grok")) {
+      grokCatalog.abort();
+      return;
+    }
+    void grokCatalog.refresh().then((changed) => {
+      if (!changed) return;
+      appliedRegister = buildRegister(
+        config,
+        antigravityVersion ?? undefined,
+        codexAuthMode,
+        claudeCatalog.getStale() ?? undefined,
+        buildInfo,
+        antigravityCatalog,
+        appliedDelivery,
+        grokCatalog.current(),
+      );
+      link.updateRegister(appliedRegister);
+    });
+  };
 
   // ---- Config hot-reload (dogfood/dev の DX 用) ----------------------------
   // watchRunnerConfig の onReload は同期。Reload 内で codex doctor を回す
@@ -458,6 +490,7 @@ export async function runRunnerCli(
       buildInfo,
       nextAntigravityCatalog,
       nextDelivery,
+      grokCatalog.current(),
     );
     const previous = { config, fileConfig, appliedDelivery, appliedRegister, behaviourRelay, runtimeSettings,
       codexAuthMode, antigravityExecutable, antigravityProbeTimeoutMs, antigravityCatalog, antigravityVersion, heartbeatLogging };
@@ -499,6 +532,7 @@ export async function runRunnerCli(
       );
     }
     process.stderr.write(`runner: codex backend=${config.codex?.backend ?? "exec"} for subsequent wrappers\n`);
+    refreshGrokCatalog();
   };
   const watcher = watchConfig(
     configPath,
@@ -524,6 +558,7 @@ export async function runRunnerCli(
   );
 
   const close = (): void => {
+    grokCatalog.abort();
     watcher.close();
     supervisor.stopAll();
     link.close();
@@ -536,6 +571,7 @@ export async function runRunnerCli(
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
   }
+  refreshGrokCatalog();
   return {
     supervisor,
     waitForReloads: async () => reloadQueue,
