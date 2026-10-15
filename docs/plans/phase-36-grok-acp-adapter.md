@@ -83,7 +83,7 @@ Mapping:
 | cold resume and session discovery | `session/resume` in the wrapper's first lane; the runner pages `session/list {cwd}` in a short-lived grok (work unit 3a) | measured, see the [resume evidence](../evidence/grok/2026-10-15-resume-and-discovery.md) |
 | dashboard history on resume | the session's `updates.jsonl`, normalized and replayed by `HistoryReplayer` (work unit 3b) | measured, see the [history evidence](../evidence/grok/2026-10-15-history-replay.md) |
 | launch catalog | the runner reads `initialize` `_meta.modelState` in a short-lived grok at register time and keeps the last good reading (work unit 3c) | measured on 1.0.52: no model request, see the [catalog evidence](../evidence/grok/2026-10-15-catalog-and-quota.md); measure again when grok is upgraded |
-| weekly account rate limits | `_x.ai/billing` normalized to `seven_day.utilization` and `resets_at`, then published on both peer status and whoami | measured on Grok Build 1.0.52 and ACP SDK 1.8.0; remeasure on either upgrade |
+| weekly account rate limits | `_x.ai/billing` normalized to `seven_day.utilization` and `resets_at`, then published on both peer status and whoami | measured on Grok Build 1.0.52 and ACP SDK 1.8.0, see [rate-limit evidence](../evidence/grok/2026-10-15-rate-limits.md); remeasure on either upgrade |
 | attachments | capability false or field omitted | unsupported |
 
 ### Unsupported operations
