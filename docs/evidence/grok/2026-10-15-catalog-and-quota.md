@@ -104,6 +104,8 @@ with its own recorder.
 | run 2, catalog probe (the reading passed validation) | 7 | 0 | 0 | 0 |
 | run 2, list probe | 8 | 0 | 0 | 0 |
 
+"Outside the GET set" includes the `CONNECT`s, as in the design r3 table.
+
 Two mutations each failed the measurement, in both runs:
 
 - with the base-URL overrides removed, the positive control saw 0 model
@@ -125,3 +127,8 @@ run 1's logged only common methods.
 
 Grok's memory workspace for the scratch cwd of each positive control was left
 in place (issue #650); the cwd and its session directory were removed.
+
+The measurement holds for Grok 1.0.52 only. Measure it again when Grok is
+upgraded ([issue #655](https://github.com/sakuraiyuta/kaoiro/issues/655)).
+What the probes send is pinned separately by `runner/test/grok-catalog.test.ts`;
+a probe that also sends a prompt, at any point of its operation, fails it.

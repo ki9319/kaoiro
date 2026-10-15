@@ -11,10 +11,11 @@
 //   stubbornChild: start a child in the group that ignores SIGTERM; the pid
 //               marker is written once its handler is in place
 //   listReply:  answer session/list with this body verbatim
-// Every request is appended to FAKE_GROK_LOG; FAKE_GROK_PIDS receives
+// Every request is appended to FAKE_GROK_LOG, including one still unread in
+// the pipe when the probe's teardown sends SIGTERM; FAKE_GROK_PIDS receives
 // "<leader pid> <child pid>" once both exist.
 import { spawn } from "node:child_process";
-import { appendFileSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, readSync, renameSync, writeFileSync } from "node:fs";
 
 const scenario = JSON.parse(readFileSync(process.env.FAKE_GROK_SCENARIO, "utf8"));
 const log = process.env.FAKE_GROK_LOG;
@@ -72,3 +73,26 @@ process.stdin.on("data", (chunk) => {
   }
 });
 process.stdin.on("end", () => process.exit(0));
+
+// The probe writes its last request and ends stdin right before SIGTERM, so
+// that request can still be in the pipe. Log what is left, then exit, so the
+// tests' request log is complete.
+process.on("SIGTERM", () => {
+  const chunk = Buffer.alloc(65536);
+  try {
+    let read;
+    while ((read = readSync(0, chunk, 0, chunk.length, null)) > 0) buffer += chunk.toString("utf8", 0, read);
+  } catch {
+    // EAGAIN: nothing more is waiting.
+  }
+  for (const line of buffer.split("\n")) {
+    if (!line.trim() || !log) continue;
+    try {
+      const message = JSON.parse(line);
+      appendFileSync(log, `${JSON.stringify({ method: message.method, params: message.params })}\n`);
+    } catch {
+      // A partial last line is not a request.
+    }
+  }
+  process.exit(0);
+});

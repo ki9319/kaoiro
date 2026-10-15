@@ -227,11 +227,12 @@ Quota: the committed tests pin what the probes send.
 request is a dated measurement of Grok 1.0.52, not a committed test (see the
 [catalog evidence](../../evidence/grok/2026-10-15-catalog-and-quota.md)).
 Grok ran in a network namespace with loopback only, next to a recorder, and a
-prompt first showed its model requests (`POST /v1/responses`) there. The
-catalog and list probes then attempted only the GETs `/`, `/v1/models`,
-`/v1/settings`, `/v1/feedback/config`, `/v1/bundle/archive` and
-`/v1/subagents/bundle`. The measurement says nothing about billed quota or
-other Grok versions, and it has to be repeated when Grok is upgraded.
+prompt first showed its model requests (`POST /v1/responses`) there. For the
+catalog and list probes, the recorder then saw only the GETs `/`,
+`/v1/models`, `/v1/settings`, `/v1/feedback/config`, `/v1/bundle/archive`
+and `/v1/subagents/bundle`; the evidence page lists what it could not see.
+The measurement says nothing about billed quota or other Grok versions, and
+it has to be repeated when Grok is upgraded.
 
 ## Start selection and restore hold
 

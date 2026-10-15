@@ -111,7 +111,9 @@ describe("probeGrokCatalog", () => {
 
 // What the runner's probes send is what the quota measurement covers
 // (docs/evidence/grok/2026-10-15-catalog-and-quota.md); any other request,
-// a prompt above all, falls outside it.
+// a prompt above all, falls outside it. A prompt sent after the last
+// session/list, just before the probe's teardown, must fail this too: the
+// fake logs what is still in its pipe when SIGTERM arrives.
 describe("the session-list probes", () => {
   it("send initialize and session/list only", async () => {
     const page = { sessions: [{ sessionId: "a-1", cwd: CWD, title: "t", updatedAt: "2026-10-15T00:00:00Z" }] };
