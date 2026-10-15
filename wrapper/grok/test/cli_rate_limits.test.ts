@@ -38,7 +38,7 @@ it("whoami carries the own window and list_agents renders a peer's window", asyn
       loadConfig: () => ({ ...config }),
       loadWrapperBuildInfo: () => buildInfo,
       createHost: (options) => new GrokHost({ ...options, executable,
-        env: { ...options.env, KAOIRO_TEST_GROK_BILLING: "valid" } }),
+        env: { ...(options.env ?? process.env), KAOIRO_TEST_GROK_BILLING: "valid" } }),
       createServerLink: (_url, _id, options) => {
         queueMicrotask(() => options.onPersonaPrompt?.("fixture rules"));
         return {
