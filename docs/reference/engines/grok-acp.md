@@ -121,9 +121,11 @@ reporting are unsupported. Unsupported controls reject explicitly.
 The runner discovers sessions with a short-lived
 `grok --no-auto-update agent --no-leader stdio` in its own process group: it
 sends `initialize`, pages `session/list {cwd}` and kills the group. A probe
-has a 10 s deadline and reads at most 20 pages. Any failure gives an empty
-list and a failed existence check (`session_not_found`); a partial list is
-never returned. Every supervisor caller that starts a probe owns its abort:
+has a 10 s deadline and reads at most 20 pages. It settles only once the
+whole group is gone: SIGTERM, then SIGKILL after 1 s to whatever is left, even
+when Grok itself exited first. Any failure, a malformed response included,
+gives an empty list and a failed existence check (`session_not_found`); a
+partial list is never returned. Every supervisor caller that starts a probe owns its abort:
 a pending resume spawn, a pending `switch_session` check, the latest session
 enumeration and `stopAll`. A stop, a newer request or shutdown aborts the
 probe and kills its process group. Grok writes a new session to disk a moment
@@ -298,17 +300,22 @@ sender and runs one request at a time. A request that gets no answer within
 
 The target values are decided when the pending values are applied. The target
 model is the pending model or the current one. The target effort is the
-pending effort, else the current effort if the target model lists it, else the
-target model's default effort. Grok keeps a stale effort on a model switch, so
-the host sends the model request and then the effort request, and stamps
-`effort_reset: true` once when it substituted the default. Each response's
-`configOptions` is adopted as the truth.
+pending effort, else the current effort if the model Grok then holds lists it,
+else that model's default effort. Grok keeps a stale effort on a model switch,
+so the host sends the model request and then the effort request. When it
+substituted the default, it stamps `effort_reset: true` once and the effort
+takes source `config`, whether or not Grok already held that default and no
+effort request was needed. Each response's `configOptions` is adopted as the
+truth; an axis the request did not set that comes back changed takes source
+`default`, and the change is logged to stderr.
 
 A request Grok rejects (JSON-RPC `-32602`) changes nothing it did not apply:
 
-- The model request fails: nothing is applied, a pending effort is dropped,
-  and `switch_error` is `{ kind: "model", requested, reason:
-  "control_rejected", rolled_back_to: <current model> }`.
+- The model request fails: the model is not applied, and `switch_error` is
+  `{ kind: "model", requested, reason: "control_rejected", rolled_back_to:
+  <current model> }`. An operator's pending effort is then applied to the
+  model Grok kept, with the default substituted (and `effort_reset` stamped)
+  when that model lacks it; a start effort is held with its model.
 - The model request succeeds and the effort request fails: the model stays
   switched, because Grok applied it. `ext.effort` reports what Grok still
   holds, which can be outside the new model's `effort_levels`.

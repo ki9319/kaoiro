@@ -375,6 +375,7 @@ export class GrokHost implements EngineAdapter {
         // A held model is already displayed as the fallback.
         ...(this.#held.model ? {} : { model: "default", model_source: "default" }),
         ...pending,
+        ...(this.#switchErrorOnce ? { switch_error: this.#switchErrorOnce } : {}),
       };
     }
     const context = this.#context;
@@ -1017,20 +1018,8 @@ export class GrokHost implements EngineAdapter {
     }
     // A later generation (session/load after a permission switch) keeps each
     // source unless Grok now holds a different value than it last returned.
-    // A held axis is released once Grok holds the requested value.
-    for (const axis of ["model", "effort"] as const) {
-      const held = this.#held[axis];
-      if (held?.value === selection[axis]) {
-        this.#release(axis);
-        this.#setSource(axis, held.source);
-        continue;
-      }
-      const before = previous?.[axis];
-      if (before !== undefined && before !== selection[axis] && !this.#pending[axis] && !held) {
-        writeRedactedStderr(`[kaoiro] grok holds a different ${axis} after a restart than it returned before\n`);
-        this.#setSource(axis, "default");
-      }
-    }
+    for (const axis of ["model", "effort"] as const)
+      this.#reconcile(axis, previous?.[axis], selection[axis], "after a restart");
     const model = this.#pending.model;
     if (model && !known.has(model.value)) {
       // Not in the catalog: rejected without a request, as setModel would.
@@ -1053,6 +1042,21 @@ export class GrokHost implements EngineAdapter {
     // the change can reset it.
     if (this.#pending.model?.value === selection.model) this.#settle("model");
     if (!this.#pending.model && this.#pending.effort?.value === selection.effort) this.#settle("effort");
+  }
+  // An axis this host did not just set: a held axis is released once Grok
+  // holds the requested value; otherwise a value that changed since Grok last
+  // returned it no longer has the source recorded for the old one.
+  #reconcile(axis: Axis, before: string | undefined, after: string, when: string) {
+    const held = this.#held[axis];
+    if (held?.value === after) {
+      this.#release(axis);
+      this.#setSource(axis, held.source);
+      return;
+    }
+    if (before !== undefined && before !== after && !this.#pending[axis] && !held) {
+      writeRedactedStderr(`[kaoiro] grok holds a different ${axis} ${when} than it returned before\n`);
+      this.#setSource(axis, "default");
+    }
   }
   #settle(axis: Axis) {
     const request = this.#pending[axis];
@@ -1110,47 +1114,49 @@ export class GrokHost implements EngineAdapter {
   async #sendSwitch(generation: Generation, claimed: AxisRecord) {
     const held = this.#selection!;
     const target = claimed.model?.value ?? held.model;
-    const entry = this.#catalog.find((candidate) => candidate.value === target);
+    let modelFailed = false;
+    if (target !== held.model) {
+      const failure = await this.#setOption(generation, "model", target);
+      if (failure === "closing") return;
+      if (failure) {
+        modelFailed = true;
+        this.#switchErrorOnce = { kind: "model", requested: target, reason: "control_rejected", rolled_back_to: held.model };
+        // A start pick that failed is held, with the effort chosen for it.
+        if (claimed.model && !claimed.model.operator) this.#holdAxis("model", claimed.model);
+        if (claimed.effort && !claimed.effort.operator) this.#holdAxis("effort", claimed.effort);
+        // An operator effort still applies, to the model Grok kept.
+        if (!claimed.effort?.operator) return;
+      }
+    }
+    if (claimed.model && !modelFailed) this.#confirmAxis("model", claimed.model);
+    const now = this.#selection!;
+    const entry = this.#catalog.find((candidate) => candidate.value === now.model);
     let effort = claimed.effort?.value ?? held.effort;
     let reset = false;
     if (entry && entry.effort_levels.length > 0 && !entry.effort_levels.includes(effort) && entry.default_effort) {
       effort = entry.default_effort;
       reset = true;
     }
-    if (target !== held.model) {
-      const failure = await this.#setOption(generation, "model", target);
+    if (effort !== now.effort) {
+      const failure = await this.#setOption(generation, "reasoning_effort", effort);
+      if (failure === "closing") return;
       if (failure) {
-        if (failure !== "closing") {
-          this.#switchErrorOnce = { kind: "model", requested: target, reason: "control_rejected", rolled_back_to: held.model };
-          // A start pick that failed is held, with the effort chosen for it.
-          if (claimed.model && !claimed.model.operator) this.#holdAxis("model", claimed.model);
-          if (claimed.effort && !claimed.effort.operator) this.#holdAxis("effort", claimed.effort);
-        }
+        this.#switchErrorOnce ??= { kind: "effort", requested: effort,
+          reason: reset ? "effort_reset_failed" : "control_rejected", rolled_back_to: now.effort };
+        if (!reset && claimed.effort && !claimed.effort.operator) this.#holdAxis("effort", claimed.effort);
         return;
       }
     }
-    if (claimed.model) this.#confirmAxis("model", claimed.model);
-    const now = this.#selection!;
-    if (effort === now.effort) {
-      if (claimed.effort && !reset) this.#confirmAxis("effort", claimed.effort);
-      return;
-    }
-    const failure = await this.#setOption(generation, "reasoning_effort", effort);
-    if (failure) {
-      if (failure !== "closing") {
-        this.#switchErrorOnce = { kind: "effort", requested: effort,
-          reason: reset ? "effort_reset_failed" : "control_rejected", rolled_back_to: now.effort };
-        if (!reset && claimed.effort && !claimed.effort.operator) this.#holdAxis("effort", claimed.effort);
-      }
-      return;
-    }
+    // A substitution is recorded whether or not Grok needed a request for it.
     if (reset) {
       // Unit 4's reset contract: the substituted default is a config value.
       this.#release("effort");
       this.#effortSource = "config";
       this.#effortResetOnce = true;
-    } else {
-      this.#confirmAxis("effort", claimed.effort ?? { value: effort, source: "config", operator: true });
+    } else if (claimed.effort) {
+      this.#confirmAxis("effort", claimed.effort);
+    } else if (effort !== now.effort) {
+      this.#confirmAxis("effort", { value: effort, source: "config", operator: true });
     }
   }
   #confirmAxis(axis: Axis, request: AxisRequest) {
@@ -1170,7 +1176,10 @@ export class GrokHost implements EngineAdapter {
       await Promise.race([generation.session.setConfigOption(id, value), expired]);
       const selection = parseSelection(generation.session.configOptions);
       if (!selection) throw new Error("grok returned no model or effort selection");
+      const before = this.#selection;
       this.#setSelection({ model: selection.model, effort: selection.effort });
+      const unsent = id === "model" ? "effort" : "model";
+      this.#reconcile(unsent, before?.[unsent], selection[unsent], `after a ${id} switch`);
       return undefined;
     } catch (error) {
       if (this.#closing) return "closing";

@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { GrokProbeAborted, killProbeGroup } from "../src/grok_acp_probe.js";
+import {
+  GrokProbeAborted, GrokProbeError, killProbeGroup, probeGroupAlive, runGrokProbe,
+} from "../src/grok_acp_probe.js";
 import { GROK_LIST_PAGE_LIMIT, grokSessionExists, listGrokSessions } from "../src/grok_sessions.js";
 import { listSessions, sessionExists } from "../src/sessions.js";
 
@@ -185,8 +187,111 @@ describe("grok session discovery over session/list", () => {
   }, 10_000);
 });
 
+// Whether anything, a zombie included, is left in the group, read at once:
+// a probe must not settle while a member it started is still there.
+function groupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe("probe teardown when the leader exits first", () => {
+  // The fake's child ignores SIGTERM and the fake itself exits on it, so only
+  // a teardown that outlasts the leader ends the child. Signals in finally
+  // go only to the group the fake recorded.
+  async function settledWithGroupGone(f: ReturnType<typeof fake>, settle: () => Promise<unknown>) {
+    let leader = 0;
+    try {
+      await settle();
+      leader = (await f.pids())[0] ?? 0;
+      expect(leader).toBeGreaterThan(1);
+      expect(groupAlive(leader)).toBe(false);
+    } finally {
+      if (!leader && existsSync(join(f.dir, "pids"))) leader = (await f.pids())[0] ?? 0;
+      if (Number.isSafeInteger(leader) && leader > 1) {
+        try { process.kill(-leader, "SIGKILL"); } catch { /* already gone */ }
+      }
+    }
+  }
+
+  it("on a normal finish", async () => {
+    const f = fake({ stubbornChild: true, pages: { __first__: { sessions: [entry("a-1")] } } });
+    await settledWithGroupGone(f, () => runGrokProbe({ cwd: CWD, executable: FAKE, env: f.env }, async (call) => {
+      await f.pids();
+      return call("session/list", { cwd: CWD });
+    }));
+  }, 10_000);
+
+  it("at the deadline", async () => {
+    const f = fake({ hang: true, stubbornChild: true, pages: {} });
+    await settledWithGroupGone(f, async () => {
+      const listing = listGrokSessions(CWD, { executable: FAKE, env: f.env, deadlineMs: 1_000 });
+      await f.pids();
+      expect(await listing).toEqual([]);
+    });
+  }, 10_000);
+
+  it("on abort", async () => {
+    const f = fake({ hang: true, stubbornChild: true, pages: {} });
+    await settledWithGroupGone(f, async () => {
+      const abort = new AbortController();
+      const listing = listGrokSessions(CWD, { executable: FAKE, env: f.env, signal: abort.signal });
+      await f.pids();
+      abort.abort();
+      await expect(listing).rejects.toBeInstanceOf(GrokProbeAborted);
+    });
+  }, 10_000);
+});
+
+describe("malformed responses", () => {
+  const listed = (listReply: unknown) => {
+    const f = fake({ listReply });
+    return runGrokProbe({ cwd: CWD, executable: FAKE, env: f.env }, (call) => call("session/list", { cwd: CWD }));
+  };
+
+  it.each([null, "refused", 7, []])("rejects an error of %j as a protocol failure", async (error) => {
+    const failure = await listed({ error }).catch((caught: unknown) => caught);
+    expect(failure).toBeInstanceOf(GrokProbeError);
+    expect((failure as GrokProbeError).reason).toBe("protocol");
+  }, 10_000);
+
+  it("keeps an error object's code", async () => {
+    const failure = await listed({ error: { code: -32603, message: "no" } }).catch((caught: unknown) => caught);
+    expect(failure).toMatchObject({ reason: "rpc", code: -32603 });
+  }, 10_000);
+
+  it("fails discovery closed on an error of null", async () => {
+    const f = fake({ listReply: { error: null } });
+    expect(await listGrokSessions(CWD, { executable: FAKE, env: f.env })).toEqual([]);
+    expect(await grokSessionExists(CWD, "a-1", { executable: FAKE, env: f.env })).toBe(false);
+  }, 10_000);
+});
+
+describe("probeGroupAlive", () => {
+  const failing = (code: string) => vi.fn(() => {
+    throw Object.assign(new Error(code), { code });
+  });
+
+  it("is false only when the group is gone", () => {
+    expect(probeGroupAlive(4242, failing("ESRCH"))).toBe(false);
+    expect(probeGroupAlive(4242, failing("EPERM"))).toBe(true);
+    const kill = vi.fn();
+    expect(probeGroupAlive(4242, kill)).toBe(true);
+    expect(kill).toHaveBeenCalledWith(-4242, 0);
+  });
+
+  it.each([undefined, 0, 1, -1, 1.5])("never signals for pid %s", (pid) => {
+    const kill = vi.fn();
+    expect(probeGroupAlive(pid, kill)).toBe(false);
+    expect(kill).not.toHaveBeenCalled();
+  });
+});
+
 describe("killProbeGroup", () => {
-  it.each([undefined, 0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+  it.each([undefined, 0, 1, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
     "never signals for pid %s", (pid) => {
       const kill = vi.fn();
       expect(killProbeGroup(pid, "SIGTERM", kill)).toBe(false);

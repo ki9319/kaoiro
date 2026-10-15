@@ -7,6 +7,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 export const GROK_PROBE_DEADLINE_MS = 10_000;
 const KILL_GRACE_MS = 1_000;
+const GROUP_POLL_MS = 25;
 
 export class GrokProbeError extends Error {
   constructor(
@@ -33,20 +34,60 @@ export interface GrokProbeOptions {
 
 export type GrokProbeCall = (method: string, params: unknown) => Promise<unknown>;
 
-/** Kills a probe's process group. Only a positive integer pid is signalled,
- *  so a missing pid can never become kill(0) or kill(-1). */
+type Kill = (pid: number, signal: NodeJS.Signals | 0) => void;
+
+const ownGroup = (pid: number | undefined): pid is number =>
+  pid !== undefined && Number.isSafeInteger(pid) && pid > 1;
+
+/** Kills a probe's process group. Only an integer pid above 1 is signalled,
+ *  so a missing pid can never become kill(0), and pid 1 never kill(-1). */
 export function killProbeGroup(
   pid: number | undefined,
   signal: NodeJS.Signals,
-  kill: (pid: number, signal: NodeJS.Signals) => void = process.kill,
+  kill: Kill = process.kill,
 ): boolean {
-  if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) return false;
+  if (!ownGroup(pid)) return false;
   try {
     kill(-pid, signal);
     return true;
   } catch {
     return false;
   }
+}
+
+/** Whether any process, a zombie included, is left in a probe's group. Only
+ *  ESRCH means none; any other refusal counts as a live member. */
+export function probeGroupAlive(pid: number | undefined, kill: Kill = process.kill): boolean {
+  if (!ownGroup(pid)) return false;
+  try {
+    kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+async function groupGone(pid: number, withinMs: number, kill: Kill): Promise<boolean> {
+  const until = Date.now() + withinMs;
+  while (probeGroupAlive(pid, kill)) {
+    if (Date.now() >= until) return false;
+    await new Promise((resolve) => setTimeout(resolve, GROUP_POLL_MS));
+  }
+  return true;
+}
+
+/** Ends a probe's whole group: SIGTERM, then SIGKILL to whatever is left
+ *  after the grace. The leader exiting first does not end the wait, since a
+ *  process it started can outlive it in the group. */
+export async function endProbeGroup(
+  pid: number | undefined,
+  graceMs = KILL_GRACE_MS,
+  kill: Kill = process.kill,
+): Promise<void> {
+  if (!ownGroup(pid) || !killProbeGroup(pid, "SIGTERM", kill)) return;
+  if (await groupGone(pid, graceMs, kill)) return;
+  killProbeGroup(pid, "SIGKILL", kill);
+  await groupGone(pid, graceMs, kill);
 }
 
 /**
@@ -93,16 +134,20 @@ export async function runGrokProbe<T>(
     for (const entry of pending.values()) entry.reject(error);
     pending.clear();
   };
-  const exited = new Promise<void>((resolve) => {
-    child.once("exit", () => resolve());
-    child.once("error", () => resolve());
-  });
   child.once("error", () => stop(new GrokProbeError("spawn")));
   child.once("exit", () => stop(new GrokProbeError("exit")));
   child.stderr.resume();
   child.stdin.on("error", () => {});
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => {
+    // A line the checks below miss must fail this probe, not the runner.
+    try {
+      readLines(chunk);
+    } catch {
+      stop(new GrokProbeError("protocol"));
+    }
+  });
+  const readLines = (chunk: string) => {
     buffer += chunk;
     let index: number;
     while ((index = buffer.indexOf("\n")) >= 0) {
@@ -128,15 +173,20 @@ export async function runGrokProbe<T>(
       const entry = typeof message.id === "number" ? pending.get(message.id) : undefined;
       if (!entry) continue;
       pending.delete(message.id as number);
-      const error = message.error as { code?: unknown } | undefined;
-      if (error !== undefined) {
-        entry.reject(new GrokProbeError("rpc",
-          typeof error.code === "number" ? error.code : undefined));
-      } else {
+      if (!("error" in message)) {
         entry.resolve(message.result);
+        continue;
       }
+      const error = message.error;
+      if (typeof error !== "object" || error === null || Array.isArray(error)) {
+        stop(new GrokProbeError("protocol"));
+        entry.reject(new GrokProbeError("protocol"));
+        continue;
+      }
+      const code = (error as { code?: unknown }).code;
+      entry.reject(new GrokProbeError("rpc", typeof code === "number" ? code : undefined));
     }
-  });
+  };
   const call: GrokProbeCall = (method, params) => {
     if (settled) return failed;
     const id = ++nextId;
@@ -161,11 +211,7 @@ export async function runGrokProbe<T>(
     clearTimeout(timer);
     options.signal?.removeEventListener("abort", onAbort);
     child.stdin.end();
-    if (killProbeGroup(pid, "SIGTERM")) {
-      const grace = setTimeout(() => killProbeGroup(pid, "SIGKILL"), KILL_GRACE_MS);
-      await exited;
-      clearTimeout(grace);
-    }
+    await endProbeGroup(pid);
     child.stdout.destroy();
     child.stderr.destroy();
   }

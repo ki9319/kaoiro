@@ -6,6 +6,9 @@
 //   initError:  answer initialize with this JSON-RPC error code
 //   exitOnList: exit before answering session/list
 //   spawnChild: start a sleeping child in the same process group
+//   stubbornChild: start a child in the group that ignores SIGTERM; the pid
+//               marker is written once its handler is in place
+//   listReply:  answer session/list with this body verbatim
 // Every request is appended to FAKE_GROK_LOG; FAKE_GROK_PIDS receives
 // "<leader pid> <child pid>" once both exist.
 import { spawn } from "node:child_process";
@@ -16,10 +19,19 @@ const log = process.env.FAKE_GROK_LOG;
 const pids = process.env.FAKE_GROK_PIDS;
 
 let child;
-if (scenario.spawnChild) child = spawn("sleep", ["30"], { stdio: "ignore" });
-if (pids) {
+const markPids = () => {
+  if (!pids) return;
   writeFileSync(`${pids}.tmp`, `${process.pid} ${child?.pid ?? 0}`);
   renameSync(`${pids}.tmp`, pids);
+};
+if (scenario.stubbornChild) {
+  child = spawn(process.execPath, ["-e",
+    "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); process.stdout.write('ready')"],
+  { stdio: ["ignore", "pipe", "ignore"] });
+  child.stdout.once("data", markPids);
+} else {
+  if (scenario.spawnChild) child = spawn("sleep", ["30"], { stdio: "ignore" });
+  markPids();
 }
 
 const reply = (id, body) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...body })}\n`);
@@ -44,6 +56,10 @@ process.stdin.on("data", (chunk) => {
     } else if (message.method === "session/list") {
       if (scenario.exitOnList) process.exit(0);
       if (scenario.hang) continue;
+      if (scenario.listReply !== undefined) {
+        reply(message.id, scenario.listReply);
+        continue;
+      }
       const page = scenario.pages[message.params?.cursor ?? "__first__"];
       if (page === undefined) reply(message.id, { error: { code: -32603, message: "no page" } });
       else if (page.error !== undefined) reply(message.id, { error: { code: page.error, message: "no" } });

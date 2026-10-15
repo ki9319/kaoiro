@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { ResolvedSnapshotExt, WrapperConfig } from "@kaoiro/agent-common";
 import type { GrokHost } from "../src/host.js";
-import { nativeRun, removeGrokState } from "./native-support.js";
+import { makeGrokScratch, removeGrokState } from "./grok-state.js";
+import { nativeRun } from "./native-support.js";
 
 // Work unit 3a acceptance against the real grok (issue #644): a resumed agent
 // keeps its cwd, engine, permission, and model and effort with their sources,
@@ -36,10 +37,8 @@ const relaunch = (stored: ResolvedSnapshotExt, sandbox: Sandbox): Partial<Wrappe
 
 describe.skipIf(!live)("native cold resume", () => {
   it("keeps cwd, engine, permission, model and sources across two resumes, and applies a differing pick", async () => {
-    // Each cwd is its own mkdtemp directory, so removeGrokState can match
-    // Grok's workspace for it exactly.
-    const cwd = mkdtempSync(join(homedir(), ".kaoiro-grok-resume-"));
-    const other = mkdtempSync(join(homedir(), ".kaoiro-grok-resume-"));
+    const cwd = makeGrokScratch("resume");
+    const other = makeGrokScratch("resume");
     try {
       let sessionId: string | undefined;
       let stored: ResolvedSnapshotExt = {};
@@ -97,7 +96,7 @@ describe.skipIf(!live)("native cold resume", () => {
   }, 600_000);
 
   it("enforces the new launch profile, not the one the session was saved with", async () => {
-    const cwd = mkdtempSync(join(homedir(), ".kaoiro-grok-resume-perm-"));
+    const cwd = makeGrokScratch("resume-perm");
     const reports = mkdtempSync(join(tmpdir(), "kaoiro-grok-resume-report-"));
     const report = join(reports, "result.json");
     const inside = join(cwd, "inside");
@@ -134,33 +133,3 @@ print(json.dumps({'inside': ok}))
   }, 600_000);
 });
 
-describe("removeGrokState", () => {
-  it("removes only the session group and the workspace of its own scratch cwd", () => {
-    const home = mkdtempSync(join(tmpdir(), "kaoiro-grok-home-"));
-    const previous = process.env.GROK_HOME;
-    process.env.GROK_HOME = home;
-    try {
-      const cwd = join(homedir(), ".kaoiro-grok-resume-AbC123");
-      const workspaces = join(home, "memory-v2", "workspaces");
-      const own = "kaoiro-grok-resume-abc123-0123abcd";
-      const others = ["work-0123abcd", "kaoiro-grok-resume-abc123x-0123abcd",
-        "kaoiro-grok-resume-abc123-0123abcd-more", "kaoiro-grok-resume-abc12-0123abcd",
-        ".kaoiro-grok-resume-AbC123-0123abcd"];
-      for (const entry of [own, ...others]) mkdirSync(join(workspaces, entry), { recursive: true });
-      const sessions = join(home, "sessions");
-      mkdirSync(join(sessions, encodeURIComponent(cwd)), { recursive: true });
-      mkdirSync(join(sessions, encodeURIComponent(`${cwd}x`)), { recursive: true });
-      removeGrokState(cwd);
-      expect(readdirSync(workspaces).sort()).toEqual([...others].sort());
-      expect(readdirSync(sessions)).toEqual([encodeURIComponent(`${cwd}x`)]);
-      // A cwd without the scratch prefix leaves every workspace alone, even
-      // one whose Grok workspace name (`.work` -> `work-…`) exists.
-      removeGrokState(join(homedir(), ".work"));
-      expect(readdirSync(workspaces).sort()).toEqual([...others].sort());
-    } finally {
-      if (previous === undefined) delete process.env.GROK_HOME;
-      else process.env.GROK_HOME = previous;
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
-});

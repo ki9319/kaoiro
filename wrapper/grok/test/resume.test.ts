@@ -376,3 +376,87 @@ describe("restore hold", () => {
     expect(t.ext()).toMatchObject({ ...pick, effective: pick });
   });
 });
+
+describe("switch provenance", () => {
+  const stderrOf = (written: { mock: { calls: unknown[][] } }) =>
+    written.mock.calls.map(([chunk]) => String(chunk)).join("");
+  // Makes Grok answer every effort request with a different model as well.
+  const effortAnswerMovesModel = (to: string) => {
+    const real = AcpSession.prototype.setConfigOption;
+    vi.spyOn(AcpSession.prototype, "setConfigOption").mockImplementation(async function (this: AcpSession, id, value) {
+      const result = await real.call(this, id, value);
+      const model = id === "reasoning_effort" ? this.configOptions?.find((option) => option.id === "model") : undefined;
+      if (model && model.type === "select") model.currentValue = to;
+      return result;
+    });
+  };
+
+  it("gives an axis the answer to the other axis's request changed the default source, and logs it", async () => {
+    const t = await launch({ config: { model: "grok-4.7", model_source: "env", effort: "high", effort_source: "launch" } });
+    effortAnswerMovesModel("grok-4.6");
+    const written = vi.spyOn(process.stderr, "write");
+    await t.host.setEffort("low");
+    await vi.waitFor(() => expect(t.ext().effort).toBe("low"));
+    expect(t.ext().effective).toMatchObject({ model: "grok-4.6", model_source: "default", effort: "low", effort_source: "config" });
+    expect(stderrOf(written)).toContain("grok holds a different model after a reasoning_effort switch");
+  });
+
+  it("keeps the source of an axis the answer leaves unchanged", async () => {
+    const t = await launch({ config: { model: "grok-4.7", model_source: "env", effort: "high", effort_source: "launch" } });
+    const written = vi.spyOn(process.stderr, "write");
+    await t.host.setEffort("low");
+    await vi.waitFor(() => expect(t.ext().effort).toBe("low"));
+    expect(t.ext().effective).toMatchObject({ model: "grok-4.7", model_source: "env", effort_source: "config" });
+    expect(stderrOf(written)).not.toContain("grok holds a different");
+  });
+
+  it("reports the switch error once when Grok offers no selection for a start pick", async () => {
+    const pick = { model: "grok-4.6", model_source: "env", effort: "low", effort_source: "launch" } as const;
+    const t = await launch({ config: { ...pick }, env: { KAOIRO_TEST_GROK_CONFIG: "none" } });
+    await t.host.renameDisplayName("Later", 1);
+    const errors = t.states().filter((ext) => ext.switch_error);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.switch_error).toMatchObject({ kind: "model", requested: "grok-4.6", reason: "control_rejected" });
+    expect(t.ext().effective).toMatchObject(pick);
+  });
+
+  it("stamps a start effort replaced by a default Grok already holds, with no effort request", async () => {
+    const t = await launch({ config: { model: "grok-4.5", model_source: "env", effort: "xhigh", effort_source: "launch" } });
+    await vi.waitFor(() => expect(t.ext().model).toBe("grok-4.5"));
+    expect(t.requests()).toEqual([["model", "grok-4.5"]]);
+    expect(t.ext()).toMatchObject({ effort: "high", model_source: "env", effort_source: "config" });
+    expect(t.states().filter((ext) => ext.effort_reset === true)).toHaveLength(1);
+  });
+
+  it("stamps an operator effort replaced on the model Grok kept when the model request fails (issue #648)", async () => {
+    const t = await launch({ config: { model: "grok-4.5", model_source: "env" } });
+    await vi.waitFor(() => expect(t.ext().model).toBe("grok-4.5"));
+    const real = AcpSession.prototype.setConfigOption;
+    vi.spyOn(AcpSession.prototype, "setConfigOption").mockImplementation(async function (this: AcpSession, id, value) {
+      if (id === "model") throw new Error("refused");
+      return real.call(this, id, value);
+    });
+    await t.host.setModel("grok-4.7");
+    await t.host.setEffort("xhigh");
+    await vi.waitFor(() => expect(t.states().some((ext) => ext.switch_error?.kind === "model")).toBe(true));
+    await vi.waitFor(() => expect(t.ext()).not.toHaveProperty("pending_effort"));
+    expect(t.requests().filter(([id]) => id === "reasoning_effort")).toEqual([]);
+    expect(t.ext()).toMatchObject({ model: "grok-4.5", model_source: "env", effort: "high", effort_source: "config" });
+    expect(t.states().filter((ext) => ext.effort_reset === true)).toHaveLength(1);
+  });
+
+  it("applies an operator effort the kept model offers when the model request fails", async () => {
+    const t = await launch({ config: { model: "grok-4.5", model_source: "env" } });
+    await vi.waitFor(() => expect(t.ext().model).toBe("grok-4.5"));
+    const real = AcpSession.prototype.setConfigOption;
+    vi.spyOn(AcpSession.prototype, "setConfigOption").mockImplementation(async function (this: AcpSession, id, value) {
+      if (id === "model") throw new Error("refused");
+      return real.call(this, id, value);
+    });
+    await t.host.setModel("grok-4.7");
+    await t.host.setEffort("low");
+    await vi.waitFor(() => expect(t.ext().effort).toBe("low"));
+    expect(t.ext()).toMatchObject({ model: "grok-4.5", model_source: "env", effort_source: "config" });
+    expect(t.states().some((ext) => ext.effort_reset === true)).toBe(false);
+  });
+});

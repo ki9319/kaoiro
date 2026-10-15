@@ -1,9 +1,8 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { rmSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { runGrokProbe } from "../src/grok_acp_probe.js";
 import { grokSessionExists, listGrokSessions } from "../src/grok_sessions.js";
+import { makeGrokScratch, removeGrokState } from "./grok-state.js";
 
 // Discovery against the real grok (issue #644): Grok's session/list binds a
 // session to the exact cwd string the runner uses. KAOIRO_LIVE_GROK=1 only;
@@ -11,27 +10,10 @@ import { grokSessionExists, listGrokSessions } from "../src/grok_sessions.js";
 
 const live = process.env.KAOIRO_LIVE_GROK === "1";
 
-function removeGrokState(cwd: string): void {
-  const home = process.env.GROK_HOME ?? join(homedir(), ".grok");
-  rmSync(join(home, "sessions", encodeURIComponent(cwd)), { recursive: true, force: true });
-  const workspaces = join(home, "memory-v2", "workspaces");
-  // Grok names a workspace after the cwd basename without its leading dots,
-  // lowercased, plus `-<8 hex>` (measured on 1.0.52). Only a scratch cwd made
-  // by mkdtemp under a `.kaoiro-grok-` prefix is matched, and only exactly,
-  // so a workspace another test or peer owns can never match.
-  const name = basename(cwd);
-  if (!/^\.kaoiro-grok-[\w-]+-[A-Za-z0-9]{6}$/.test(name) || !existsSync(workspaces)) return;
-  const own = new RegExp(`^${name.slice(1).toLowerCase()}-[0-9a-f]{8}$`);
-  for (const entry of readdirSync(workspaces))
-    if (own.test(entry)) rmSync(join(workspaces, entry), { recursive: true, force: true });
-}
-
 describe.skipIf(!live)("native grok session discovery", () => {
   it("lists and finds a session under its cwd only", async () => {
-    // Each cwd is its own mkdtemp directory: its random basename is what
-    // lets removeGrokState match Grok's workspace for it and nothing else.
-    const cwd = mkdtempSync(join(homedir(), ".kaoiro-grok-discovery-"));
-    const other = mkdtempSync(join(homedir(), ".kaoiro-grok-discovery-"));
+    const cwd = makeGrokScratch("discovery");
+    const other = makeGrokScratch("discovery");
     try {
       // Grok writes a new session to disk a moment after session/new, from the
       // process that made it (measured: a process killed at once leaves no
