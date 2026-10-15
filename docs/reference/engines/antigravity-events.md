@@ -260,8 +260,15 @@ for candidate sources and notice timing.
   for an unclassified model, only the independent overlay can appear.
 - An agent with no configured model uses agy's default model but remains
   unclassified, so it publishes no `/usage` rate limits.
-- Usage probes start only at an idle turn boundary. There is no general idle
-  refresh timer. A pending stale-terminal confirmation that is blocked only by
+- Usage probes start at an idle turn boundary, and once at startup: the CLI
+  calls `AntigravityHost.probeRateLimits()` right after the initial state is
+  sent, for a fresh start and for `--resume`, unless an initial prompt starts a
+  turn immediately. The startup call goes through the same guards as a
+  turn-end probe (known model family, no active or queued turn, no running
+  probe, the three-failure cap and the failed-attempt floor below), so with no
+  usable source `rate_limits` stays absent. A turn admitted while the startup
+  probe runs does not cancel it; the result re-publishes the current state.
+  There is no general idle refresh timer. A pending stale-terminal confirmation that is blocked only by
   the #496 retry floor schedules one unref'd timer for the floor deadline; it
   rechecks the ordinary gates once when it fires. The timer is cancelled by
   host close, admission of a new turn, a committed family change, successful

@@ -1246,3 +1246,185 @@ if (args[0] === "models") {
     }
   });
 });
+
+describe("AntigravityHost startup usage probe (issue #660)", () => {
+  const startMs = Date.parse("2026-10-03T10:00:00.000Z");
+
+  function statesWithRateLimits(harness: ReturnType<typeof makeHarness>): Envelope[] {
+    return harness.states.filter((envelope) => envelope.ext?.rate_limits !== undefined);
+  }
+
+  it("spawns nothing unless probeRateLimits() is called", async () => {
+    const harness = makeHarness({ now: () => "2026-10-03T10:00:00.000Z" });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(harness.probes).toHaveLength(0);
+    } finally {
+      await harness.host.close();
+    }
+  });
+
+  it("publishes both windows with resets_at before any turn", async () => {
+    const harness = makeHarness({ now: () => "2026-10-03T10:00:00.000Z" });
+    try {
+      harness.host.probeRateLimits();
+      expect(harness.probes).toHaveLength(1);
+      expect(harness.turns).toHaveLength(0);
+      expect(harness.host.statusSnapshot()).not.toHaveProperty("rate_limits");
+
+      harness.probes[0]!.finish(usageOutput("gemini"));
+      await waitFor(() => harness.host.statusSnapshot().rate_limits !== undefined);
+      expect(harness.host.statusSnapshot().rate_limits).toEqual(geminiLimits);
+      expect(harness.states.at(-1)?.ext?.rate_limits).toEqual(geminiLimits);
+      expect(harness.turns).toHaveLength(0);
+    } finally {
+      await harness.host.close();
+    }
+  });
+
+  it("starts at most one probe while one is running", async () => {
+    const harness = makeHarness({ now: () => "2026-10-03T10:00:00.000Z" });
+    try {
+      harness.host.probeRateLimits();
+      harness.host.probeRateLimits();
+      expect(harness.probes).toHaveLength(1);
+    } finally {
+      await harness.host.close();
+    }
+  });
+
+  it("spawns nothing while a turn is active", async () => {
+    const harness = makeHarness({ now: () => "2026-10-03T10:00:00.000Z" });
+    try {
+      await harness.host.send("busy");
+      await waitFor(() => harness.turnStarts.length === 1);
+      harness.host.probeRateLimits();
+      expect(harness.probes).toHaveLength(0);
+    } finally {
+      await harness.host.close();
+    }
+  });
+
+  it("spawns nothing for an unclassified model", async () => {
+    const probes: FakeUsageChild[] = [];
+    const cfg = config();
+    delete cfg.model;
+    const host = createHarnessHost(cfg, {
+      cwd: process.cwd(),
+      appendSystemPrompt: "persona",
+      permissionBroker: new PermissionBroker({ config: cfg, send: () => {} }),
+      onState: () => {},
+      runtimeAssetsAvailable: () => true,
+      verifyGate: async () => true,
+      agyPath: "/test/agy",
+      usageProbeSpawn: () => {
+        const child = new FakeUsageChild();
+        probes.push(child);
+        return child as unknown as ChildProcess;
+      },
+    }, { onAgySpawn: () => {} });
+    try {
+      host.probeRateLimits();
+      expect(probes).toHaveLength(0);
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("spawns nothing inside the failure floor or after three failures", async () => {
+    let nowMs = startMs;
+    const harness = makeHarness({ now: () => new Date(nowMs).toISOString() });
+    try {
+      for (let index = 0; index < 3; index += 1) {
+        if (index > 0) nowMs += USAGE_PROBE_INTERVAL_MS;
+        harness.host.probeRateLimits();
+        expect(harness.probes).toHaveLength(index + 1);
+        harness.probes[index]!.finish("", 1);
+        await waitFor(() => harness.warnings.filter((warning) => warning.includes("exit_1")).length === index + 1);
+        harness.host.probeRateLimits();
+        expect(harness.probes).toHaveLength(index + 1);
+      }
+      nowMs += USAGE_PROBE_INTERVAL_MS;
+      harness.host.probeRateLimits();
+      expect(harness.probes).toHaveLength(3);
+    } finally {
+      await harness.host.close();
+    }
+  });
+
+  it("keeps rate_limits absent when the startup probe exits non-zero or prints unusable output", async () => {
+    const failures: Array<[string, number]> = [
+      ["", 1],
+      ["not json", 0],
+      [unknownBucketOutput(), 0],
+    ];
+    for (const [output, code] of failures) {
+      const harness = makeHarness({ now: () => "2026-10-03T10:00:00.000Z" });
+      try {
+        harness.host.probeRateLimits();
+        harness.probes[0]!.finish(output, code);
+        await waitFor(() => harness.warnings.some((warning) => warning.includes("antigravity usage probe failed")));
+        expect(harness.host.statusSnapshot()).not.toHaveProperty("rate_limits");
+        expect(harness.host.statusExtSnapshot()).not.toHaveProperty("rate_limits");
+        expect(statesWithRateLimits(harness)).toHaveLength(0);
+      } finally {
+        await harness.host.close();
+      }
+    }
+  });
+
+  it("lets a startup probe finish mid-turn without delaying the turn or adding a spawn", async () => {
+    const harness = makeHarness({ now: () => "2026-10-03T10:00:00.000Z" });
+    try {
+      harness.host.probeRateLimits();
+      expect(harness.probes).toHaveLength(1);
+
+      await harness.host.send("first turn");
+      await waitFor(() => harness.turnStarts.length === 1);
+      expect(harness.probes[0]!.exitCode).toBeNull();
+
+      harness.probes[0]!.finish(usageOutput("gemini"));
+      await waitFor(() => harness.host.statusSnapshot().rate_limits !== undefined);
+      expect(harness.probes).toHaveLength(1);
+      expect(harness.turnEnds).toHaveLength(0);
+      const published = harness.states.at(-1)!;
+      expect(published.ext?.rate_limits).toEqual(geminiLimits);
+      expect(published.state).not.toBe("idle");
+
+      (harness.turns.at(-1)!.stdout as PassThrough).write(
+        `${JSON.stringify({ event: "result", result: { response: "ok", status: "SUCCESS" } })}\n`,
+      );
+      await waitFor(() => harness.turnEnds.length === 1);
+      expect(harness.host.statusSnapshot().rate_limits).toEqual(geminiLimits);
+    } finally {
+      await harness.host.close();
+    }
+  });
+
+  it("counts a mid-turn startup failure once and keeps the failure floor", async () => {
+    let nowMs = startMs;
+    const harness = makeHarness({ now: () => new Date(nowMs).toISOString() });
+    try {
+      harness.host.probeRateLimits();
+      await harness.host.send("first turn");
+      await waitFor(() => harness.turnStarts.length === 1);
+
+      harness.probes[0]!.finish("", 1);
+      await waitFor(() => harness.warnings.filter((warning) => warning.includes("exit_1")).length === 1);
+      expect(harness.host.statusSnapshot()).not.toHaveProperty("rate_limits");
+      expect(statesWithRateLimits(harness)).toHaveLength(0);
+
+      (harness.turns.at(-1)!.stdout as PassThrough).write(
+        `${JSON.stringify({ event: "result", result: { response: "ok", status: "SUCCESS" } })}\n`,
+      );
+      await waitFor(() => harness.turnEnds.length === 1);
+      expect(harness.probes).toHaveLength(1);
+
+      nowMs = startMs + USAGE_PROBE_INTERVAL_MS - 1;
+      await completeTurn(harness, { status: "SUCCESS" });
+      expect(harness.probes).toHaveLength(1);
+    } finally {
+      await harness.host.close();
+    }
+  });
+});

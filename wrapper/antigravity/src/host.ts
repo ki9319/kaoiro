@@ -821,6 +821,12 @@ export class AntigravityHost implements EngineAdapter {
     void this.#drainTurns();
   }
 
+  /** Starts the startup `/usage` probe (issue #660). All probe guards in
+   *  `#maybeStartUsageProbe` still decide whether it actually spawns. */
+  probeRateLimits(): void {
+    this.#maybeStartUsageProbe();
+  }
+
   /** The capability supplied to inter-agent tools only while this agy turn runs. */
   activeInterAgentTurnToken(): string | null {
     return this.#activeTurnToken;
