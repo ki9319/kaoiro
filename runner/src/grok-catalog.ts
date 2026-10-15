@@ -7,7 +7,7 @@
 
 import type { EngineModelInfo } from "@kaoiro/protocol";
 import { parseModelState } from "@kaoiro/grok";
-import { GrokProbeAborted, GrokProbeError, runGrokProbe, type GrokProbeOptions } from "./grok_acp_probe.js";
+import { GrokProbeError, runGrokProbe, type GrokProbeOptions } from "./grok_acp_probe.js";
 
 export const GROK_DEFAULT_ENTRY: EngineModelInfo = { value: "default", display_name: "Account default" };
 
@@ -33,7 +33,7 @@ export function grokCatalogFromInitialize(initialized: unknown): EngineModelInfo
   const state = record(meta?.modelState);
   if (!state) throw new GrokCatalogInvalid("no modelState");
   const available = state.availableModels;
-  if (!Array.isArray(available) || available.length === 0) throw new GrokCatalogInvalid("no availableModels");
+  if (!Array.isArray(available)) throw new GrokCatalogInvalid("no availableModels");
   const ids = new Set<string>();
   for (const entry of available) {
     const item = record(entry);
@@ -83,18 +83,19 @@ export class GrokCatalog {
   }
 
   /** Resolves true when this probe changed the catalog the caller should
-   *  publish, false when it failed, or was superseded or aborted. */
+   *  publish, false when it failed, or was superseded or aborted: both of
+   *  those clear `#running`, so its result is dropped quietly. */
   async refresh(): Promise<boolean> {
     this.abort();
     const running = new AbortController();
     this.#running = running;
     try {
       const catalog = await this.probe({ ...this.options, signal: running.signal });
-      if (this.#running !== running || running.signal.aborted) return false;
+      if (this.#running !== running) return false;
       this.#lastKnownGood = catalog;
       return true;
     } catch (error) {
-      if (error instanceof GrokProbeAborted || this.#running !== running) return false;
+      if (this.#running !== running) return false;
       const reason = error instanceof GrokCatalogInvalid ? error.detail
         : error instanceof GrokProbeError ? error.message : "unexpected failure";
       this.warn(`runner: grok catalog probe failed (${reason}); keeping the ${
