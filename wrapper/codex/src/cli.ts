@@ -1280,12 +1280,11 @@ export async function runCodexCli(dependencies: CodexCliDependencies = {}): Prom
           validate: validateRequestSessionResetInput,
           autonomous: () => {
             const approval = host.bridgeToolApproval(host.activeInterAgentTurnToken());
-            const autonomous = !approval.blocked && approval.turn === "never" && approval.next === "never";
-            if (autonomous) writeRedactedStderr(
-              "request_session_reset: approved by the agent's approval setting (never); no operator dialog\n",
-            );
-            return autonomous;
+            return !approval.blocked && approval.turn === "never" && approval.next === "never";
           },
+          onAutonomous: () => writeRedactedStderr(
+            "request_session_reset: approved by the agent's approval setting (never); no operator dialog\n",
+          ),
         },
       ),
     ],

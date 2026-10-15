@@ -72,6 +72,56 @@ describe("app-server reset approval through production CLI composition", () => {
     } finally { broker.mockRestore();await f.close(); }
   });
 
+  it.each([false, true])("replayed strict approval follows the current app-server axis (axis=%s)", async axis => {
+    const f = await cliAppFixture(true, "app-server", "legacy", { approvalAxis: axis });
+    const broker = vi.spyOn(PermissionBroker.prototype, "decide");
+    try {
+      const stored = { revision: 3, requested: {
+        sandbox: "workspace-write", network_access: false, approval: "on-request",
+      } };
+      f.wire.push("permission_sync", { version: "0", next: stored,
+        control: { ...stored, status: "pending", constraints: { approval: "never", enforcement: "os" } },
+      });
+      await f.drain();
+      await f.inbound(1, "first");
+      await vi.waitFor(() => expect(f.turns()).toHaveLength(1));
+      expect(f.turns()[0]!.params).toMatchObject({ approvalPolicy: axis ? "on-request" : "never" });
+      if (axis) {
+        const call = await ask(f);
+        expect(broker).toHaveBeenCalledTimes(1);
+        decide(f, call.id, false);
+        expect((await call.reply).result.isError).toBe(true);
+        await completedWithoutReset(f);
+      } else {
+        expect(JSON.stringify(await f.tool("request_session_reset", { mode: "new" }))).toContain("reserved");
+        expect(broker).not.toHaveBeenCalled();
+        expect(pending(f)).toHaveLength(0);
+        expect(f.envelopes("state_change").some(e => e.state === "waiting_permission")).toBe(false);
+        f.terminal();await vi.waitFor(() => expect(resets(f)).toHaveLength(1));
+      }
+      expect(f.host.bridgeToolApproval(null).next).toBe(axis ? "on-request" : "never");
+    } finally { broker.mockRestore();await f.close(); }
+  });
+
+  it("does not log autonomous approval when the policy read abandons the turn", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const f = await cliAppFixture();
+    const read = f.host.bridgeToolApproval.bind(f.host);
+    const policy = vi.spyOn(f.host, "bridgeToolApproval").mockImplementation(token => {
+      const result = read(token);
+      f.host.close();
+      return result;
+    });
+    try {
+      await f.inbound(1, "first");await vi.waitFor(() => expect(f.turns()).toHaveLength(1));
+      const reply = await f.tool("request_session_reset", { mode: "new" }).catch(() => ({ closed: true }));
+      expect(reply.closed === true || reply.result?.isError === true).toBe(true);
+      expect(policy).toHaveBeenCalledTimes(1);
+      expect(stderr.mock.calls.some(([text]) => String(text).includes("approved by the agent"))).toBe(false);
+      expect(resets(f)).toHaveLength(0);
+    } finally { policy.mockRestore();await f.close();stderr.mockRestore(); }
+  });
+
   it.each([false, true])("strict approval respects operator allow=%s", async allow => {
     const f = await strict();
     try {

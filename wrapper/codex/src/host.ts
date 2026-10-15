@@ -1164,7 +1164,7 @@ export class CodexHost implements EngineAdapter {
     return {
       turn: token !== null && token === this.#activeTurnToken && record?.token === token
         ? record.approval : null,
-      next: this.#permissionState.next.requested.approval ?? "never",
+      next: this.#approvalAxis ? (this.#permissionState.next.requested.approval ?? "never") : "never",
       blocked: this.#permissionState.blocked !== null,
     };
   }
