@@ -90,6 +90,29 @@ describe("runGrokCli composition", () => {
     await work;
     await probe;
   });
+  it("resumes the session named by --resume with the relayed snapshot", async () => {
+    let seen: { resumeSessionId?: string; resumeSnapshot?: unknown } | undefined;
+    const snapshot = { model: "grok-4.6", model_source: "launch" as const };
+    let probe!: Promise<void>;
+    await runGrokCli({
+      parseCliArgs: () => ({ configPath: "fixture", resume: "fixture-session" }),
+      loadConfig: () => ({ ...config, resume_snapshot: snapshot }),
+      loadWrapperBuildInfo: () => buildInfo,
+      createHost: (options) => {
+        seen = options;
+        return new GrokHost({ ...options,
+          executable: fileURLToPath(new URL("./fixtures/grok.mjs", import.meta.url)) });
+      },
+      createServerLink: (_url, _id, callbacks) => recordingLink(callbacks, [], [], []),
+      onHostCreated: (host) => {
+        probe = vi.waitFor(() => expect(host.state).toBe("waiting_input"), { timeout: 5000 })
+          .finally(() => host.close());
+        void probe.catch(() => {});
+      },
+    });
+    await probe;
+    expect(seen).toMatchObject({ resumeSessionId: "fixture-session", resumeSnapshot: snapshot });
+  });
   it("keeps a queued operator bubble after the running turn's assistant log", async () => {
     const envelopes: Envelope[] = [];
     const received = vi.spyOn(events, "updateEvents");
