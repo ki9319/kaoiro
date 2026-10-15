@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { runGrokProbe } from "../../../runner/src/grok_acp_probe.js";
-import { probeGrokCatalog } from "../../../runner/src/grok-catalog.js";
-import { listGrokSessions } from "../../../runner/src/grok_sessions.js";
+import { runGrokProbe } from "../src/grok_acp_probe.js";
+import { probeGrokCatalog } from "../src/grok-catalog.js";
+import { listGrokSessions } from "../src/grok_sessions.js";
 import { makeGrokScratch, removeGrokState } from "./grok-state.js";
 
 // Whether the runner's Grok probes attempt any request that could spend
