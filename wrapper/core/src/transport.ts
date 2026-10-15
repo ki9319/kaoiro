@@ -19,6 +19,7 @@ import type {
   DirectoryEntry,
   DirectoryRateLimitWindow,
   DirectoryResult,
+  SelfIdentityResult,
   DirectoryStatusLine,
   StatusLineReadResult,
   StatusLineSetResult,
@@ -1430,6 +1431,7 @@ export class ServerLink {
   #deliveryRecoveryIncarnation: string | null = null;
 
   readonly #socket: Socket;
+  readonly #agentId: string;
   readonly #channel: Channel;
   #seq = 0;
   #lastEnvelope: Envelope | null = null;
@@ -1487,6 +1489,7 @@ export class ServerLink {
     options: ServerLinkOptions,
     socketFactory: ServerSocketFactory = createPhoenixSocket,
   ) {
+    this.#agentId = agentId;
     this.#deliveryPolicy = options.deliveryPolicy;
     this.#policyJoin = this.#deliveryPolicy?.beginJoin() ?? 0;
     this.#onReplyBasisMode = options.onReplyBasisMode;
@@ -2517,6 +2520,28 @@ export class ServerLink {
   /** Pushes the explicit end boundary after the final replayed row. */
   sendHistoryReplayComplete(replayId: string): void {
     this.#pushVersioned("history_replay_complete", { replay_id: replayId });
+  }
+
+  /** Reads the directory authority without fetching peers or trusting a local echo. */
+  requestSelfIdentity(): Promise<SelfIdentityResult | null> {
+    if (!this.#socket.isConnected() || this.#channel.state !== "joined")
+      return Promise.resolve(null);
+    return new Promise((resolve) => {
+      this.#pushVersioned("directory_request", { scope: "self" })
+        .receive("ok", (payload: unknown) => {
+          if (!isObject(payload) || !isObject(payload.self) ||
+              payload.self.agent_id !== this.#agentId) {
+            resolve(null);
+            return;
+          }
+          const name = typeof payload.self.display_name === "string"
+            ? validDisplayNameOrNull(payload.self.display_name) : null;
+          resolve({ agent_id: this.#agentId,
+            ...(name === null ? {} : { display_name: name }) });
+        })
+        .receive("error", () => resolve(null))
+        .receive("timeout", () => resolve(null));
+    });
   }
 
   /** Fetches the peer directory (docs/reference/inter-agent/directory.md). The

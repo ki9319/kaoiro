@@ -1442,6 +1442,12 @@ export interface UserDirectoryEntry {
   role: UserRole;
 }
 
+/** Self-only wrapper directory view; the identity is bound to the joined socket. */
+export interface SelfIdentityResult {
+  agent_id: string;
+  display_name?: string;
+}
+
 /** `directory_request` response. `agents` and `users` are intentionally
  * separate arrays so callers cannot mistake a user for an agent destination. */
 export interface DirectoryResult {

@@ -1943,6 +1943,48 @@ describe("list_agents / whoami companion tools", () => {
     );
   });
 
+  it("whoami reads the directory name without changing canonical persona or caching names", async () => {
+    let name: string | undefined = "Original";
+    const tool = new InterAgentTool({ config: { ...configFor("self"), display_name: "Stale config" },
+      send: () => {}, getState: () => "idle",
+      getWhoami: () => ({ agent_id: "self", persona: PERSONA, state: "idle", display_name: "Stale host" }),
+      requestSelfIdentity: async () => ({ agent_id: "self", ...(name ? { display_name: name } : {}) }),
+    });
+    const read = async () => JSON.parse((await tool.whoami()).content[0]!.text);
+    expect(await read()).toMatchObject({ display_name: "Original", persona: PERSONA });
+    name = "Renamed";
+    expect(await read()).toMatchObject({ display_name: "Renamed", persona: PERSONA });
+    name = undefined;
+    expect(await read()).not.toHaveProperty("display_name");
+  });
+
+  it.each(["identity", "delivery"])("whoami keeps independent reads concurrent when %s fails", async failed => {
+    const started: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const tool = new InterAgentTool({ config: { ...configFor("self"), display_name: "Stale" },
+      send: () => {}, getState: () => "idle",
+      requestSelfIdentity: async () => { started.push("identity"); await gate;
+        if (failed === "identity") throw new Error("unavailable");
+        return { agent_id: "self", display_name: "Current" }; },
+      requestInterAgentDeliveryStatus: async () => { started.push("delivery"); await gate;
+        if (failed === "delivery") throw new Error("unavailable");
+        return { issued_seq: 2, acked_seq: 1, lost_count: 0 }; },
+    });
+    const pending = tool.whoami();
+    await vi.waitFor(() => expect(started).toEqual(["identity", "delivery"]));
+    release();
+    const result = JSON.parse((await pending).content[0]!.text);
+    if (failed === "identity") {
+      expect(result).not.toHaveProperty("display_name");
+      expect(result.inter_agent_delivery.issued_seq).toBe(2);
+    } else {
+      expect(result.display_name).toBe("Current");
+      expect(result).not.toHaveProperty("inter_agent_delivery");
+    }
+    expect(result.persona).toEqual(PERSONA);
+  });
+
   it("whoami は getWhoami の snapshot を JSON として返す", async () => {
     const snapshot: WhoamiSnapshot = {
       agent_id: "self.agent",
@@ -2073,6 +2115,7 @@ describe("descriptors (共通 Tool 記述層, ADR-0032 F5)", () => {
       (d) => d.name === "whoami",
     )?.description;
     expect(whoamiDescription).toContain("engine-neutral permission");
+    expect(whoamiDescription).toContain("do not substitute `persona.name`");
     // issue #254: this is a user-facing protocol contract, not incidental
     // prose. Keep the rate-limit shape, cached-time semantics, reset hint,
     // and absent=unknown rule visible to the calling agent.

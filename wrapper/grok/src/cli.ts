@@ -136,6 +136,7 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
       Promise.resolve({ kind: "error", reason: "not_connected" }),
     requestInterAgentDeliveryStatus: () =>
       link?.requestInterAgentDeliveryStatus() ?? Promise.resolve(null),
+    requestSelfIdentity: () => link?.requestSelfIdentity() ?? Promise.resolve(null),
     getWhoami: () =>
       ({
         agent_id: config.agent_id,

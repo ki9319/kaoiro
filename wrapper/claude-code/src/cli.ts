@@ -696,6 +696,7 @@ export async function runClaudeCli(dependencies: ClaudeCliDependencies = {}): Pr
       Promise.resolve({ kind: "error" as const, reason: "not_connected" }),
     requestInterAgentDeliveryStatus: () =>
       link?.requestInterAgentDeliveryStatus() ?? Promise.resolve(null),
+    requestSelfIdentity: () => link?.requestSelfIdentity() ?? Promise.resolve(null),
     getWhoami: () => ({
       ...host.statusSnapshot(),
       build: {

@@ -49,9 +49,11 @@ defmodule KaoiroServerWeb.DisplayNameProjectionTest do
       assert [{^id, "default", 2, "Renamed"}] = :dets.lookup(AgentDirectory, id)
       assert AgentStates.snapshot()[id]["display_name"] == "Original"
       assert_live_name(ctx.observer, id, @engine, "Renamed")
+      assert_self_name(peer, id, "Renamed")
 
       publish(peer, id, @engine, "Original")
       assert_live_name(ctx.observer, id, @engine, "Renamed")
+      assert_self_name(peer, id, "Renamed")
     end
   end
 
@@ -80,6 +82,7 @@ defmodule KaoiroServerWeb.DisplayNameProjectionTest do
     publish(peer, id, "codex", "Legacy")
     assert AgentDirectory.get(id) == nil
     assert_live_name(ctx.observer, id, "codex", "Legacy")
+    assert_self_name(peer, id, "Legacy")
   end
 
   for invalid <- ["", "bad\nname", String.duplicate("x", 65)] do
@@ -92,9 +95,71 @@ defmodule KaoiroServerWeb.DisplayNameProjectionTest do
 
       entry = entry(ctx.observer, id)
       refute Map.has_key?(entry, "display_name")
+
+      assert_reply push(peer, "directory_request", %{"version" => "0", "scope" => "self"}),
+                   :ok,
+                   %{"self" => %{"agent_id" => ^id} = own}
+
+      refute Map.has_key?(own, "display_name")
       assert entry["persona"] == @persona
       assert entry["engine"] == "grok"
     end
+  end
+
+  test "self view uses the socket identity before any envelope and ignores a forged id" do
+    AgentDirectory.record("self.caller", "default", "Caller")
+    AgentDirectory.record("self.other", "default", "Other")
+    caller = join_wrapper("self.caller")
+    assert AgentStates.get_envelope("self.caller") == nil
+
+    assert_reply push(caller, "directory_request", %{
+                   "version" => "0",
+                   "scope" => "self",
+                   "agent_id" => "self.other"
+                 }),
+                 :ok,
+                 reply
+
+    assert reply == %{"self" => %{"agent_id" => "self.caller", "display_name" => "Caller"}}
+  end
+
+  test "self view without either source omits the name" do
+    caller = join_wrapper("self.missing")
+
+    assert_reply push(caller, "directory_request", %{"version" => "0", "scope" => "self"}),
+                 :ok,
+                 %{"self" => %{"agent_id" => "self.missing"}} = reply
+
+    assert reply == %{"self" => %{"agent_id" => "self.missing"}}
+  end
+
+  test "unknown scopes are refused instead of returning peers", ctx do
+    for scope <- ["all", "peer", nil, 1, %{}] do
+      assert_reply push(ctx.observer, "directory_request", %{"version" => "0", "scope" => scope}),
+                   :error,
+                   %{reason: "unsupported_scope"}
+    end
+  end
+
+  test "self reply respects the encoded transport frame budget" do
+    id = "self.large"
+    # One grapheme can still exceed the byte budget after name validation.
+    name = "a" <> String.duplicate("\u0301", 4_000_000)
+    AgentDirectory.record(id, "default", name)
+    caller = join_wrapper(id)
+
+    assert_reply push(caller, "directory_request", %{"version" => "0", "scope" => "self"}),
+                 :error,
+                 %{reason: "self_identity_too_large"},
+                 5000
+  end
+
+  defp assert_self_name(socket, id, name) do
+    assert_reply push(socket, "directory_request", %{"version" => "0", "scope" => "self"}),
+                 :ok,
+                 %{"self" => %{"agent_id" => ^id, "display_name" => ^name}} = reply
+
+    assert Map.keys(reply) == ["self"]
   end
 
   defp join_wrapper(id) do

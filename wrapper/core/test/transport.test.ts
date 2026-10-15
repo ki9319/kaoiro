@@ -3587,3 +3587,25 @@ describe("ServerLink — status line (issue 482)", () => {
     });
   });
 });
+
+describe("self identity request failures", () => {
+  it("returns unavailable when the request times out", async () => {
+    const link = new ServerLink("ws://localhost:4000/wrapper", "self.agent", { personaId: "default" });
+    try {
+      const pending = link.requestSelfIdentity();
+      expect(mock.lastPush?.event).toBe("directory_request");
+      mock.lastPush!.receivers.get("timeout")!({});
+      expect(await pending).toBeNull();
+    } finally { link.close(); }
+  });
+
+  it("does not enqueue while the socket is connected but the channel is rejoining", async () => {
+    const link = new ServerLink("ws://localhost:4000/wrapper", "self.agent", { personaId: "default" });
+    try {
+      mock.channelState = "joining";
+      const count = mock.pushes.length;
+      expect(await link.requestSelfIdentity()).toBeNull();
+      expect(mock.pushes).toHaveLength(count);
+    } finally { link.close(); mock.channelState = "joined"; }
+  });
+});

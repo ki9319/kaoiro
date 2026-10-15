@@ -704,6 +704,23 @@ defmodule KaoiroServerWeb.WrapperChannel do
     end
   end
 
+  defp handle_wrapper_in("directory_request", %{"scope" => "self"}, socket) do
+    id = socket.assigns.agent_id
+    name = directory_display_name(AgentStates.get_envelope(id) || %{}, AgentDirectory.get(id))
+    identity = %{"agent_id" => id} |> maybe_put_directory_field("display_name", name)
+    reply = %{"self" => identity}
+
+    if TransportLimits.reply_frame_fits?("wrapper:#{id}", reply) do
+      {:reply, {:ok, reply}, socket}
+    else
+      {:reply, {:error, %{reason: "self_identity_too_large"}}, socket}
+    end
+  end
+
+  defp handle_wrapper_in("directory_request", %{"scope" => _}, socket) do
+    {:reply, {:error, %{reason: "unsupported_scope"}}, socket}
+  end
+
   # Peer directory request (docs/reference/inter-agent/directory.md).
   # The wrapper's `mcp__kaoiro__list_agents` tool calls this to resolve
   # persona names → agent_ids before send_to_agent. Reply carries every
@@ -1791,13 +1808,7 @@ defmodule KaoiroServerWeb.WrapperChannel do
     end
   end
 
-  defp directory_entry(id, envelope, directory, activity, peers, delivery, build_info) do
-    persona =
-      case envelope do
-        %{"persona" => %{} = p} -> Map.take(p, ["id", "name", "sprite_set"])
-        _ -> %{}
-      end
-
+  defp directory_display_name(envelope, directory) do
     # Rename commits before the wrapper echo. Reading the authoritative row
     # also prevents a delayed old envelope from rolling the name back.
     name =
@@ -1806,11 +1817,20 @@ defmodule KaoiroServerWeb.WrapperChannel do
         entry -> Map.get(entry, :display_name)
       end
 
-    display_name =
-      case valid_display_name(name) do
-        {:ok, trimmed} -> trimmed
-        :error -> nil
+    case valid_display_name(name) do
+      {:ok, trimmed} -> trimmed
+      :error -> nil
+    end
+  end
+
+  defp directory_entry(id, envelope, directory, activity, peers, delivery, build_info) do
+    persona =
+      case envelope do
+        %{"persona" => %{} = p} -> Map.take(p, ["id", "name", "sprite_set"])
+        _ -> %{}
       end
+
+    display_name = directory_display_name(envelope, directory)
 
     state =
       case envelope do

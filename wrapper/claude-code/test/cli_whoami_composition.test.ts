@@ -188,3 +188,31 @@ it("actual Claude CLI forwards the live join generation to the acceptance sink",
   expect(seen).toEqual([7, 11]);
   interAgent.endReplyInput("T");
 });
+
+it("whoami uses current directory names and never stale config across rename or unavailability", async () => {
+  let handler!: NonNullable<ToolDescriptor["handler"]>;
+  let name: string | undefined = "Original";
+  const local = { ...config, display_name: "Stale config" };
+  const link = { close() {}, send() {}, currentSessionId: () => null,
+    reportDisconnectIntent: async () => true,
+    requestSelfIdentity: async () => name === undefined ? null : { agent_id: config.agent_id, display_name: name },
+  };
+  const host = { state: "idle", statusExtSnapshot: () => ({}),
+    statusSnapshot: () => ({ agent_id: config.agent_id, persona: config.persona, state: "idle" as const }),
+    run: async () => {
+      const read = async () => JSON.parse((await handler({})).content[0]!.text);
+      expect(await read()).toMatchObject({ display_name: "Original", persona: config.persona });
+      name = "Renamed";
+      expect(await read()).toMatchObject({ display_name: "Renamed", persona: config.persona });
+      name = undefined;
+      expect(await read()).not.toHaveProperty("display_name");
+      expect(local.display_name).toBe("Stale config");
+    },
+  };
+  await runClaudeCli({
+    parseCliArgs: () => ({ configPath: "fixture" }), loadConfig: () => local,
+    createServerLink: (_url, _id, options) => { queueMicrotask(() => options.onPersonaPrompt?.("Fixture")); return link as never; },
+    createHost: () => host as never,
+    buildMcpServer: (actual, extras) => { handler = kaoiroToolDescriptors(actual).find(x => x.name === "whoami")!.handler!; return buildKaoiroMcpServer(actual, extras); },
+  });
+});
