@@ -21,8 +21,8 @@ Keep these six points in mind even before opening the source of truth.
 1. If you find a discrepancy that changes the task's actual scope, send a
    query to the dispatch source **before implementation**, not together
    with the completion report.
-2. Do not touch outside the assigned subdirectory. Report problems found
-   there only.
+2. Do not touch anything outside the assigned subdirectory. If you find a
+   problem outside it, report it instead of fixing it.
 3. Do not revert or stage another agent's uncommitted changes. Do not use
    `git add -A`; explicitly add only files you changed.
 4. Do not amend a pushed commit. Always make corrections as new commits.

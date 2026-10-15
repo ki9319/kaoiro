@@ -27,7 +27,8 @@ the migration of the pre-2026-09 tree is tracked in
 
 `specs/` is the pre-taxonomy folder and has been dissolved into
 `architecture/`, `operations/`, `reference/`, and `evidence/`
-(Phase 35, ADR-0060, issue #368). Only backwards-compatibility redirect stubs
+(Phase 35, ADR-0060, [issue #368](https://github.com/sakuraiyuta/kaoiro/issues/368)).
+Only backwards-compatibility redirect stubs
 and the three kept pages (`personas`, `agent-operations`, and provisional
 `protocol-external-human`) remain there; do not add new pages there.
 

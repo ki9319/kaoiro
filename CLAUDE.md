@@ -41,7 +41,7 @@ kaoiro — a system that visualizes the state of multiple CLI AI agents as chara
 - [docs/open-questions/](docs/open-questions/) — unresolved questions.
 - [docs/adr/](docs/adr/) — architecture decision records.
 - [docs/reference/engines/claude-events.md](docs/reference/engines/claude-events.md#commands-for-manual-verification-canusetool-firing-boundary)
-  (verification notes) — the command boundary for manually verifying the broker path.
+  — the boundary of the commands usable for manual verification of the broker path.
 
 ## Commands
 
