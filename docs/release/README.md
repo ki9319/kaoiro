@@ -46,4 +46,5 @@ production run records outside the repository.
 
 | Release | Date | Previous | Highlights |
 |---|---|---|---|
+| [v2026.10.15.4](v2026.10.15.4.md) | 2026-10-15 | v2026.10.14.13 | Grok Build work units 3 and 4: cold resume, session discovery, history replay, launch catalog, live model and effort switching, context usage |
 | [v2026.10.14.13](v2026.10.14.13.md) | 2026-10-14 | v2026.10.10.2 | Grok Build engine (work units 1 and 2), authenticated HTTP MCP for Grok, permission gate stop in the dashboard |
