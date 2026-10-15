@@ -377,7 +377,9 @@ start.
 
 ## Grok runner configuration
 
-Add `grok` to capabilities to expose the account-default catalog. The `grok`
+Add `grok` to capabilities to expose its launch catalog, which the runner
+reads at register time from a short-lived Grok `initialize` (see the
+[launch catalog](../engines/grok-acp.md#launch-catalog)). The `grok`
 block supports `turn_watchdog_inactivity_ms` and `turn_watchdog_abort_grace_ms`
 through the same behaviour registry; deprecated environment overrides are
 `KAOIRO_GROK_TURN_WATCHDOG_INACTIVITY_MS` and

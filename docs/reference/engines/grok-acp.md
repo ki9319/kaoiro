@@ -105,8 +105,9 @@ normal peer messages and dispatch confirmation. Early and yield delivery
 are explicitly `none`. Reply-basis v1 is not negotiated: Grok MCP calls do
 not carry turn-origin identity, so the MCP server cannot prove it.
 
-The runner's launch catalog contains only `default` (account default). A
-launch pick or a resumed pair is applied when the session starts (see
+The runner's launch catalog is read from a short-lived `initialize` (see
+[Launch catalog](#launch-catalog)). A launch pick or a resumed pair is
+applied when the session starts (see
 [Start selection and restore hold](#start-selection-and-restore-hold)). Cold
 resume and the session picker are supported (see
 [Cold resume and session discovery](#cold-resume-and-session-discovery)).
@@ -194,6 +195,43 @@ empty still gets an empty `tool_result`.
 The live log path publishes a `tool_use` without its id or input and no
 `tool_result`, so the replayed history shows more than the live log did. See
 the [dated evidence](../../evidence/grok/2026-10-15-history-replay.md).
+
+## Launch catalog
+
+The runner reads the launch catalog with the same short-lived Grok as session
+discovery, sending `initialize` only, which creates no session. The probe
+starts once the runner's server link and shutdown path exist. Until it
+answers, the catalog is the last good reading, else the `default` entry
+alone, so for a few seconds after the runner starts the launch dialog offers
+`default` only. A success re-broadcasts the register. A config reload aborts
+the probe in flight and starts another, a Claude catalog refresh keeps the
+Grok catalog, and shutdown aborts the probe before it stops the agents.
+
+The reading is `_meta.modelState`, validated whole: every `modelId` matches
+`[A-Za-z0-9._:-]{1,128}`, is unique and is not `default`; every model has a
+name; a description, when present, is text; reasoning efforts, when present,
+are a list of entries with a value; and `currentModelId` is listed. The
+catalog is `default` followed by one entry per model with its effort levels
+and default effort. Any failure (spawn, the 10 s deadline, a JSON-RPC error,
+an invalid reading) keeps the last good catalog, else `default`, and is
+logged.
+
+Limit: when Grok cannot fetch its model list and has no fresh cache, it
+answers with a built-in list, and nothing in the answer marks it. The runner
+shows that list as Grok reports it, as the running agent does.
+
+The quota check is `runner/test/grok-catalog-quota.native.test.ts`
+(`KAOIRO_LIVE_GROK=1`). It runs Grok in a network namespace that has loopback
+only, next to a recorder that answers 503 on Grok's two base URLs and the six
+proxy variables and refuses `CONNECT`. A prompt must first show at least one
+model request (`POST /v1/responses`). Then the production catalog and
+session-list probes may send only the GETs measured for Grok 1.0.52 (`/`,
+`/v1/models`, `/v1/settings`, `/v1/feedback/config`, `/v1/bundle/archive`,
+`/v1/subagents/bundle`), with no `CONNECT` and no model request. This shows
+that, under that transport, the probes attempt no model request. It does not
+show billed quota, the behaviour of other Grok versions, or traffic that
+ignores both the base URLs and the proxy variables. A later Grok that adds a
+request fails the check until someone measures it again.
 
 ## Start selection and restore hold
 
