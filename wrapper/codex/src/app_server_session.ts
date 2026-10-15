@@ -2,6 +2,7 @@ import { rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ToolDescriptor, WrapperConfig, ReplyOrigin } from "@kaoiro/agent-common";
+import { AGENT_MARKER_ENV } from "@kaoiro/agent-common";
 import { BRIDGE_MCP_POLICY, BRIDGE_THREAD_OPEN_TIMEOUT_MS } from "./bridge_policy.js";
 import { ToolHost } from "./toolhost.js";
 import {
@@ -85,9 +86,10 @@ export class AppServerSession {
       ...options.thread,
       config: {
         features: { multi_agent: options.internalSubagents ?? true },
-        ...(options.toolHome === undefined ? {} : {
-          shell_environment_policy: { set: { CODEX_HOME: options.toolHome } },
-        }),
+        shell_environment_policy: { set: {
+          ...AGENT_MARKER_ENV,
+          ...(options.toolHome === undefined ? {} : { CODEX_HOME: options.toolHome }),
+        } },
         ...(host === null ? {} : {
           mcp_servers: {
             kaoiro: {

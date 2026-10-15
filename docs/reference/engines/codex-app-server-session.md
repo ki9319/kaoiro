@@ -1,7 +1,7 @@
 ---
 title: "Codex app-server session and bridge"
 status: implemented
-last_updated: 2026-09-26
+last_updated: 2026-10-15
 ---
 
 # Codex app-server session and bridge
@@ -10,6 +10,12 @@ Current implementation contracts, extracted from the package README. The
 [backend architecture](../../architecture/codex-backends.md) links the neighboring contracts;
 [ADR-0058](../../adr/0058-codex-app-server-turn-steer.md) retains the decisions and staged authorization.
 Measured coverage and limits are in the [evidence record](../../evidence/codex-app-server/session-and-bridge.md).
+
+Both backends set the [managed-process marker](../configuration/wrapper.md#managed-engine-environment)
+in their native process environment and in `shell_environment_policy.set`.
+Start and resume therefore supply `KAOIRO_AGENT=1` to tool shells even with
+`inherit = "none"`. The app-server session includes the marker when no
+`toolHome` is supplied; `CODEX_HOME` is added only when a tool home exists.
 
 `AppServerSession` composes the transport with the existing `ToolHost` and
 `dist/bridge.js`. It binds one thread per lifetime, using either start or

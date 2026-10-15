@@ -74,7 +74,13 @@ describe("permission sources", () => {
       HOME: "/fixture/home",
       GROK_CONFIG: "{}",
       GROK_SANDBOX: "workspace",
+      KAOIRO_AGENT: "1",
     });
+  });
+  it.each([undefined, "", "1", "legacy"])("marks a copied native environment with parent marker %s", marker => {
+    const inherited = { HOME: "/fixture/home", ...(marker === undefined ? {} : { KAOIRO_AGENT: marker }) };
+    expect(childEnvironment(inherited, "off")).toEqual({ HOME: "/fixture/home", GROK_SANDBOX: "off", KAOIRO_AGENT: "1" });
+    expect(inherited.KAOIRO_AGENT).toBe(marker);
   });
   it.each(["FAIL", "UNKNOWN", "HANG"])(
     "marks a real inspect process unavailable for %s",

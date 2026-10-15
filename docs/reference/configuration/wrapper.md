@@ -2,11 +2,49 @@
 title: Wrapper configuration
 description: Runner-relayed WrapperConfig fields and engine-local delivery controls.
 status: accepted
-last_updated: 2026-10-09
+last_updated: 2026-10-15
 related: [protocol]
 ---
 
 # Wrapper configuration
+
+## Managed engine environment
+
+The wrapper exports the following non-secret output to each managed engine
+process (Claude Code, Codex exec/app-server, Antigravity, and Grok), on both
+fresh starts and resumes:
+
+| Variable | Wrapper value | Meaning |
+| --- | --- | --- |
+| `KAOIRO_AGENT` | `1` | A kaoiro-managed process or its descendant |
+
+Variable existence is the stable detection contract, including an empty value.
+The wrapper overwrites inherited values with `1` in its child environment and
+leaves its parent's environment unchanged. This is an output to agents, not a
+runner behaviour setting or an environment override covered by issue #469.
+It carries no identity or credential and grants no permission.
+
+Native tool shells and command hooks inherit the marker. Codex also sets it
+explicitly in `shell_environment_policy.set`, including when inherited shell
+variables are disabled. User-side command hooks can test for it without
+printing other environment values:
+
+```sh
+[ "${KAOIRO_AGENT+x}" = x ] || exit 0
+```
+
+A nested CLI launched from a managed tool shell inherits the marker even if
+it has no kaoiro MCP connection of its own. For independent CLI runs or hook
+tests from that shell, remove it explicitly:
+
+```sh
+env -u KAOIRO_AGENT <engine-cli> ...
+```
+
+An independently launched plain CLI receives no new marker. Auxiliary probes
+are outside this agent-session guarantee: probes sharing a marked child
+environment may receive it, while independent catalog probes do not gain it.
+Marker presence does not imply that kaoiro tools are available.
 
 ## WrapperConfig fields relayed by the runner (issues #181 and #292)
 

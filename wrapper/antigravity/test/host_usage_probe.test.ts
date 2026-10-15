@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PermissionBroker, type Envelope, type WrapperConfig } from "@kaoiro/agent-common";
 import { AntigravityHost } from "../src/host.js";
 import { parseAgyUsageOutput, USAGE_PROBE_INTERVAL_MS } from "../src/usage_probe.js";
@@ -104,6 +104,7 @@ function makeHarness(options: {
   const logs: Envelope[] = [];
   const turns: HarnessAgy[] = [];
   const probes: FakeUsageChild[] = [];
+  const probeEnvironments: Array<NodeJS.ProcessEnv | undefined> = [];
   const turnStarts: string[] = [];
   const turnEnds: string[] = [];
   const turnEndErrors: Array<unknown> = [];
@@ -148,14 +149,15 @@ function makeHarness(options: {
       usageProbeFloorSetTimer: (callback: () => void, delayMs: number) => options.floorTimers!.set(callback, delayMs),
       usageProbeFloorClearTimer: (timer: unknown) => options.floorTimers!.clear(timer),
     }),
-    usageProbeSpawn: () => {
+    usageProbeSpawn: (_command, _args, spawnOptions) => {
+      probeEnvironments.push(spawnOptions.env);
       if (options.throwUsageProbeSpawn === true) throw new Error("fixture usage spawn throw");
       const child = new FakeUsageChild();
       probes.push(child);
       return child as unknown as ChildProcess;
     },
   }, { onAgySpawn: (child) => turns.push(child) });
-  return { host, states, logs, turns, probes, turnStarts, turnEnds, turnEndErrors, warnings, signals, probeSignals };
+  return { host, states, logs, turns, probes, probeEnvironments, turnStarts, turnEnds, turnEndErrors, warnings, signals, probeSignals };
 }
 
 async function completeTurn(
@@ -261,6 +263,18 @@ const measuredGeminiLimits = {
 };
 
 describe("AntigravityHost usage probe state transitions", () => {
+  it("marks the shared probe environment without changing its parent", async () => {
+    vi.stubEnv("KAOIRO_AGENT", undefined);
+    vi.stubEnv("CODEX_HOME", "/fixture/state-home");
+    const harness = makeHarness();
+    try {
+      await completeTurn(harness, { status: "SUCCESS" });
+      expect(harness.probeEnvironments[0]?.KAOIRO_AGENT).toBe("1");
+      expect(harness.probeEnvironments[0]?.CODEX_HOME).toBeUndefined();
+      expect(process.env.KAOIRO_AGENT).toBeUndefined();
+      harness.probes[0]!.finish(usageOutput("gemini"));
+    } finally { await harness.host.close(); vi.unstubAllEnvs(); }
+  });
   it("runs the captured terminal 429 and usage output through the default host with a fixture CLI", async () => {
     expect(issue393Terminal429).toMatchObject({
       event: "result",

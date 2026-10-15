@@ -512,7 +512,8 @@ async function runOneTurn(
 }
 
 describe("CodexHost", () => {
-  it("pins non-interactive approvals on new and resumed threads", async () => {
+  it.each([undefined, "", "1", "legacy"])("pins approvals and marker env on new/resumed threads with parent marker %s", async marker => {
+    vi.stubEnv("KAOIRO_AGENT", marker);
     const { client, calls } = makeClient([
       [{ type: "thread.started", thread_id: "approval-contract" }, usageEvent()],
       [usageEvent()],
@@ -532,6 +533,9 @@ describe("CodexHost", () => {
       await host.send("second");
       await client.waitForTurn(1);
       expect(captured?.config?.approvals_reviewer).toBe("user");
+      expect(captured?.env?.KAOIRO_AGENT).toBe("1");
+      expect(captured?.config).toMatchObject({ shell_environment_policy: { set: { KAOIRO_AGENT: "1" } } });
+      expect(process.env.KAOIRO_AGENT).toBe(marker);
       expect(calls.resume).toEqual([null, "approval-contract"]);
       expect(calls.options.map((options) => options?.approvalPolicy)).toEqual([
         "never", "never",
@@ -539,6 +543,7 @@ describe("CodexHost", () => {
     } finally {
       host.close();
       await running;
+      vi.unstubAllEnvs();
     }
   });
 

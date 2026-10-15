@@ -39,6 +39,8 @@ import type {
 } from "@kaoiro/protocol";
 import { DeliveryPolicyController } from "@kaoiro/wrapper-core";
 import {
+  AGENT_MARKER_ENV,
+  withAgentMarker,
   initialMachineState,
   makeAttachRejected,
   makeInstructionRejected,
@@ -1551,7 +1553,7 @@ export class CodexHost implements EngineAdapter {
       // Host-level auto_review can override exec's non-interactive policy.
       // Pinning both reviewer and approvalPolicy is defense in depth.
       approvals_reviewer: "user",
-      shell_environment_policy: { set: { CODEX_HOME: toolHome.path } },
+      shell_environment_policy: { set: { CODEX_HOME: toolHome.path, ...AGENT_MARKER_ENV } },
     };
     // Runner config is authoritative over any user-global Codex config
     // (ADR-0038 F2): always inject the effective toggle so a positive
@@ -1636,7 +1638,10 @@ export class CodexHost implements EngineAdapter {
             },
           };
         }
-        const codex = factory({ config: { ...codexConfig } as NonNullable<CodexOptions["config"]> });
+        const codex = factory({
+          config: { ...codexConfig } as NonNullable<CodexOptions["config"]>,
+          env: withAgentMarker(process.env),
+        });
         try {
           await this.#runTurn(codex, turn.input, turn.tempDir, turn.conversationIds ?? [], originToken);
         } finally {

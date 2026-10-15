@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, sep } from "node:path";
 import type { WrapperConfig } from "@kaoiro/protocol";
+import { withAgentMarker } from "@kaoiro/agent-common";
 import { GrokLaunchError } from "./errors.js";
 
 export type SandboxProfile = "read-only" | "workspace" | "off";
@@ -74,7 +75,7 @@ export function childEnvironment(
   inherited: NodeJS.ProcessEnv,
   profile: SandboxProfile,
 ): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...inherited, GROK_SANDBOX: profile };
+  const env: NodeJS.ProcessEnv = { ...withAgentMarker(inherited), GROK_SANDBOX: profile };
   for (const key of Object.keys(env)) {
     if (/^GROK_CLAUDE_.*_ENABLED$/.test(key)) delete env[key];
   }
