@@ -153,8 +153,9 @@ describe("removeGrokState", () => {
       removeGrokState(cwd);
       expect(readdirSync(workspaces).sort()).toEqual([...others].sort());
       expect(readdirSync(sessions)).toEqual([encodeURIComponent(`${cwd}x`)]);
-      // A cwd without the scratch prefix leaves every workspace alone.
-      removeGrokState(join(homedir(), "work"));
+      // A cwd without the scratch prefix leaves every workspace alone, even
+      // one whose Grok workspace name (`.work` -> `work-…`) exists.
+      removeGrokState(join(homedir(), ".work"));
       expect(readdirSync(workspaces).sort()).toEqual([...others].sort());
     } finally {
       if (previous === undefined) delete process.env.GROK_HOME;
