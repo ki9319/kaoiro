@@ -376,7 +376,7 @@ describe("SettingsDrawer", () => {
     expect(target.textContent).not.toContain("閉じた会話 1 件を非表示");
   });
 
-  it("会話一覧と確認ダイアログは persona 名と各 agent_id の tooltip を表示する", async () => {
+  it("会話一覧と確認ダイアログは display_name と各 agent_id の tooltip を表示する", async () => {
     const conn = makeConnection(async () => [
       {
         conversationId: "named-row",
@@ -394,13 +394,14 @@ describe("SettingsDrawer", () => {
         ts: "2026-09-23T00:00:00Z",
         type: "state_change",
         state: "waiting_input",
+        display_name: "live-custom",
         persona: { id: "momo", name: "もも", sprite_set: "momo" },
       },
     };
     const directory: Record<string, DirectoryEntry> = {
       "offline.agent": {
         persona: { id: "ao", name: "あお", sprite_set: "ao" },
-        display_name: "あお",
+        display_name: "offline-custom",
         last_seen: null,
       },
     };
@@ -412,8 +413,8 @@ describe("SettingsDrawer", () => {
       ".conv-list .conv-participants span[title]",
     );
     expect(Array.from(participantSpans, (span) => span.textContent)).toEqual([
-      "もも",
-      "あお",
+      "live-custom",
+      "offline-custom",
       "unknown.agent",
     ]);
     expect(Array.from(participantSpans, (span) => span.getAttribute("title"))).toEqual([
@@ -430,8 +431,8 @@ describe("SettingsDrawer", () => {
       'dialog[aria-label="会話を閉じる確認"] .conv-participants span[title]',
     );
     expect(Array.from(dialogSpans, (span) => span.textContent)).toEqual([
-      "もも",
-      "あお",
+      "live-custom",
+      "offline-custom",
       "unknown.agent",
     ]);
     expect(Array.from(dialogSpans, (span) => span.getAttribute("title"))).toEqual([

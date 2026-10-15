@@ -31,6 +31,7 @@
     spriteStateFor,
     spriteUrlFor,
   } from "./lib/expression";
+  import { projectDirectoryName as projectDirectoryNameFromEntry } from "./lib/personaName";
   import type {
     AuthMethods,
     ConnectionStatus,
@@ -630,10 +631,7 @@
     envelope: Envelope,
     dirEntry: DirectoryEntry | undefined,
   ): Envelope {
-    if (dirEntry === undefined || dirEntry.display_name === envelope.display_name) {
-      return envelope;
-    }
-    return { ...envelope, display_name: dirEntry.display_name };
+    return projectDirectoryNameFromEntry(envelope, dirEntry);
   }
 
   // Synthesizes a minimal Envelope from a directory-only entry so AgentCard
@@ -2089,6 +2087,7 @@
           envelope={selectedEnvelope}
           logs={logs[selectedEnvelope.agent_id] ?? []}
           {agents}
+          {directory}
           {connection}
           {manifest}
           sessions={runnerSessions}

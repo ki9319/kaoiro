@@ -27,6 +27,7 @@ import type {
   Envelope,
   PersonaManifest,
 } from "../src/lib/protocol";
+import { reactiveProps } from "./reactiveProps.svelte";
 
 const mounted: object[] = [];
 
@@ -529,5 +530,57 @@ describe("ResponseTimeline (#25 実機検収 3 仕様変更版)", () => {
     expect(
       errorTarget.querySelector(".portrait")?.getAttribute("data-state"),
     ).toBe("error");
+  });
+
+  it("sender と receiver の display_name は directory rename 後に remount せず追随する", async () => {
+    const agents = {
+      "sender.agent": {
+        ...stateEnv("sender.agent", "Sender persona"),
+        display_name: "sender-old",
+        state: "waiting_input",
+      },
+      "receiver.agent": {
+        ...stateEnv("receiver.agent", "Receiver persona"),
+        display_name: "receiver-old",
+      },
+    };
+    const props = reactiveProps({
+      agents,
+      directory: {} as Record<string, DirectoryEntry>,
+      logs: {
+        "sender.agent": [interAgent("sender.agent", "receiver.agent", secAgo(5))],
+      },
+      manifest: null as PersonaManifest | null,
+      now: NOW,
+      onSelectAgent: vi.fn(),
+    });
+    const target = document.createElement("div");
+    document.body.append(target);
+    const component = mount(ResponseTimeline, { target, props });
+    mounted.push(component);
+    await tick();
+
+    const name = target.querySelector(".who-name");
+    expect(name?.textContent).toContain("sender-old");
+    expect(name?.textContent).toContain("receiver-old");
+
+    props.directory = {
+      "sender.agent": {
+        persona: { id: "sender", name: "Sender persona", sprite_set: "sender" },
+        display_name: "Sender renamed",
+        last_seen: null,
+      },
+      "receiver.agent": {
+        persona: { id: "receiver", name: "Receiver persona", sprite_set: "receiver" },
+        display_name: "Receiver renamed",
+        last_seen: null,
+      },
+    };
+    await tick();
+
+    expect(name?.textContent).toContain("Sender renamed");
+    expect(name?.textContent).toContain("Receiver renamed");
+    expect(name?.textContent).not.toContain("sender-old");
+    expect(name?.textContent).not.toContain("receiver-old");
   });
 });

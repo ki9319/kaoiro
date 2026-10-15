@@ -1,4 +1,5 @@
 import { hasValidBuildBranch, isLandingBuildVersion, isValidBuildVersion } from "./buildIdentityDomain";
+import { agentDisplayName } from "./personaName";
 // kaoiro public-protocol client — plain TS, no Svelte dependency
 // (ADR-0007). Speaks Phoenix Channels (vsn=2.0.0 via the official client,
 // ADR-0009) and consumes the same API as any external client: join
@@ -1786,22 +1787,15 @@ export interface InterAgentMessagePayload {
   owner: { kind: "user" | "agent"; id: string };
 }
 
-/** Formats an agent for human display as `<name>(<id>)`. Prefers the
- *  mutable `display_name` (issue #209 D19/D23) — a renamed agent must
- *  show its current label, not the pack's canonical name, everywhere
- *  a human reads this label (spawn notices, IA conversation peers).
- *  Falls back to `persona.name` only for a legacy envelope that
- *  predates `display_name` (older wrapper build). When the agent is
- *  not in the snapshot (e.g. just disconnected and pruned) or has
- *  neither field, falls back to the bare id. The synthetic `server`
- *  sender used for auto-termination escalates collapses to just
- *  `server` since there is no separate id/name to disambiguate. */
+/** Formats an agent for human display as `<name>(<id>)`. `server` has no
+ *  separate identity to disambiguate and stays a text-only label. */
 export function formatAgentLabel(
   agents: Record<string, Envelope>,
   id: string,
+  directory?: Record<string, DirectoryEntry>,
 ): string {
   if (id === "server") return "server";
-  const name = agents[id]?.display_name ?? agents[id]?.persona?.name;
+  const name = agentDisplayName(id, agents, directory);
   if (!name || name === id) return id;
   return `${name}(${id})`;
 }

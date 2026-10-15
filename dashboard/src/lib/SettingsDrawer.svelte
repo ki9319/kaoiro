@@ -7,7 +7,7 @@
     isConversationAlreadyClosedError,
     visibleConversationSummaries,
   } from "./conversationList";
-  import { personaName } from "./personaName";
+  import { agentDisplayName } from "./personaName";
   import { MAX_RALLY_TURNS } from "./protocol";
   import type {
     ConversationSummary,
@@ -904,7 +904,7 @@
               <span class="conv-participants">
                 {#each conv.participants as agentId, index}
                   {#if index > 0}<span aria-hidden="true">{" ⇔ "}</span>{/if}
-                  <span title={agentId}>{personaName(agentId, agents, directory)}</span>
+                  <span title={agentId}>{agentDisplayName(agentId, agents, directory)}</span>
                 {/each}
               </span>
               <span class="conv-cid" title={conv.conversationId}
@@ -1030,7 +1030,7 @@
             <span class="conv-participants">
               {#each confirmCloseTarget.participants as agentId, index}
                 {#if index > 0}<span aria-hidden="true">{" ⇔ "}</span>{/if}
-                <span title={agentId}>{personaName(agentId, agents, directory)}</span>
+                <span title={agentId}>{agentDisplayName(agentId, agents, directory)}</span>
               {/each}
             </span>
             <span class="conv-cid" title={confirmCloseTarget.conversationId}

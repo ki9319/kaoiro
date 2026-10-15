@@ -16,6 +16,7 @@
   import { StatusQueue } from "./statusDisplay.svelte";
   import { renderMarkdown, renderMermaidIn } from "./markdown";
   import PersonaFace from "./PersonaFace.svelte";
+  import { personaForAgent } from "./personaName";
   import TaskRing from "./TaskRing.svelte";
   import StatusLinePanel from "./StatusLinePanel.svelte";
   import type { StatusLineView } from "./statusLine";
@@ -55,6 +56,7 @@
     userInputDialogAvailability,
   } from "./protocol";
   import type {
+    DirectoryEntry,
     Envelope,
     KaoiroConnection,
     PersonaManifest,
@@ -78,6 +80,7 @@
     policyConnected = false,
     logs = [],
     agents = {},
+    directory = {},
     connection = null,
     manifest = null,
     sessions = null,
@@ -103,6 +106,7 @@
     onDeliveryPolicyRefresh?: ((id: string) => void) | undefined;
     logs?: Envelope[];
     agents?: Record<string, Envelope>;
+    directory?: Record<string, DirectoryEntry>;
     connection?: KaoiroConnection | null;
     manifest?: PersonaManifest | null;
     /** Latest resume-candidate enumeration reply (App.svelte holds the
@@ -3853,6 +3857,13 @@
                  outgoing=false → ピアから受け取った side (紫 tone). -->
             {@const outgoing = env.agent_id === envelope.agent_id}
             {@const peer = outgoing ? iam.to : env.agent_id}
+            {@const peerLabel = formatAgentLabel(agents, peer, directory)}
+            {@const peerState = agents[peer]?.state ?? "disconnected"}
+            {@const peerPersona = peer === "server" ? undefined : personaForAgent(peer, agents, directory)}
+            {@const peerExpression = expressionFor(peerState)}
+            {@const peerSprite = peer === "server"
+              ? null
+              : spriteUrlFor(manifest, peerPersona?.sprite_set, peerState)}
             <div
               class="msg inter-agent"
               class:outgoing
@@ -3874,9 +3885,43 @@
                     class="peer-link"
                     title="{peer} の詳細を開く"
                     onclick={() => onSelectAgent?.(peer)}
-                  >{formatAgentLabel(agents, peer)}</button>
+                  >
+                    <span
+                      class="peer-portrait"
+                      data-state={peerExpression.variant}
+                      aria-hidden="true"
+                    >
+                      <PersonaFace
+                        sprite={peerSprite}
+                        variant={peerExpression.variant}
+                        label={peerExpression.label}
+                        size="timeline"
+                        imgAltLabelled={false}
+                        faceLabelled={true}
+                      />
+                    </span>
+                    {peerLabel}
+                  </button>
+                {:else if peer !== "server"}
+                  <code class="peer-static">
+                    <span
+                      class="peer-portrait"
+                      data-state={peerExpression.variant}
+                      aria-hidden="true"
+                    >
+                      <PersonaFace
+                        sprite={peerSprite}
+                        variant={peerExpression.variant}
+                        label={peerExpression.label}
+                        size="timeline"
+                        imgAltLabelled={false}
+                        faceLabelled={true}
+                      />
+                    </span>
+                    {peerLabel}
+                  </code>
                 {:else}
-                  <code>{formatAgentLabel(agents, peer)}</code>
+                  <code>{peerLabel}</code>
                 {/if}
                 <span class="kind">{iam.kind}</span>
                 <span class="cid" title="conversation_id">cid:{iam.conversation_id.slice(0, 8)}</span>
@@ -5368,6 +5413,41 @@
     text-decoration-style: dotted;
     cursor: pointer;
   }
+
+  .inter-agent-head .peer-link,
+  .inter-agent-head .peer-static {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    vertical-align: middle;
+  }
+
+  .inter-agent-head .peer-portrait {
+    flex: 0 0 auto;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 50%;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--bg-card) 60%, transparent);
+    display: inline-grid;
+    place-items: center;
+    --tone: var(--c-idle);
+  }
+
+  /* Match ResponseTimeline's portrait tones so the CSS face reflects the peer. */
+  .inter-agent-head .peer-portrait[data-state="sending"] { --tone: var(--c-sending); }
+  .inter-agent-head .peer-portrait[data-state="thinking"] { --tone: var(--c-thinking); }
+  .inter-agent-head .peer-portrait[data-state="tool_running"] { --tone: var(--c-tool_running); }
+  .inter-agent-head .peer-portrait[data-state="waiting_permission"] {
+    --tone: var(--c-waiting_permission);
+  }
+  .inter-agent-head .peer-portrait[data-state="waiting_question"] {
+    --tone: var(--c-waiting_question);
+  }
+  .inter-agent-head .peer-portrait[data-state="waiting_input"] { --tone: var(--c-waiting_input); }
+  .inter-agent-head .peer-portrait[data-state="done"] { --tone: var(--c-done); }
+  .inter-agent-head .peer-portrait[data-state="error"] { --tone: var(--c-error); }
+  .inter-agent-head .peer-portrait[data-state="disconnected"] { --tone: var(--c-disconnected); }
 
   .inter-agent-head .peer-link:hover,
   .inter-agent-head .peer-link:focus-visible {

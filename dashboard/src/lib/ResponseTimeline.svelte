@@ -22,7 +22,7 @@
   import { formatRelativeJa } from "./relativeTime";
   import {
     personaForAgent,
-    personaName as resolvePersonaName,
+    agentDisplayName as resolveAgentDisplayName,
   } from "./personaName";
   import type { DirectoryEntry, Envelope, PersonaManifest } from "./protocol";
 
@@ -72,8 +72,8 @@
   const readTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const HOVER_READ_DELAY_MS = 300;
 
-  function personaName(agentId: string): string {
-    return resolvePersonaName(agentId, agents, directory);
+  function agentName(agentId: string): string {
+    return resolveAgentDisplayName(agentId, agents, directory);
   }
 
   function canBeUnread(kind: string): boolean {
@@ -163,7 +163,7 @@
               markRead(key);
               onSelectAgent(entry);
             }}
-            title={`${personaName(entry.agentId)} の詳細を開く`}
+            title={`${agentName(entry.agentId)} の詳細を開く`}
           >
             <!-- issue #234: sprite-less fallback mirrors agent-strip
                  (App.svelte) / AgentCard.svelte / AgentDetail.svelte's
@@ -194,11 +194,11 @@
               <span class="row-head">
                 <span class="name">
                   {#if entry.kind === "user"}
-                    <span class="who-badge" aria-label="operator prompt">→ {personaName(entry.agentId)}</span>
+                    <span class="who-badge" aria-label="operator prompt">→ {agentName(entry.agentId)}</span>
                   {:else if entry.kind === "inter_agent"}
-                    <span class="who-name">{personaName(entry.agentId)} <span class="receiver">→ {entry.recipientId ? personaName(entry.recipientId) : "受信側"}</span></span>
+                    <span class="who-name">{agentName(entry.agentId)} <span class="receiver">→ {entry.recipientId ? agentName(entry.recipientId) : "受信側"}</span></span>
                   {:else}
-                    <span class="who-name">{personaName(entry.agentId)}</span>
+                    <span class="who-name">{agentName(entry.agentId)}</span>
                   {/if}
                 </span>
                 <span class="when">{formatRelativeJa(entry.envelope.ts, now)}</span>
