@@ -2114,6 +2114,84 @@ defmodule KaoiroServerWeb.WrapperChannelTest do
     end
   end
 
+  # Grok work unit 3a (issue #644): the grok host now puts model and effort
+  # with their sources into `effective`; the wrapper's persistence guard in
+  # its tests mirrors these three skip conditions.
+  describe "grok effective snapshot" do
+    test "stores a grok effective with model fields and keeps a permission it omits" do
+      agent_id = "test.grok-644-store"
+      socket = join_wrapper(agent_id)
+
+      full = %{
+        "model" => "grok-4.6",
+        "model_source" => "env",
+        "effort" => "low",
+        "effort_source" => "launch",
+        "sandbox" => "workspace-write",
+        "network_access" => true
+      }
+
+      ref =
+        push(
+          socket,
+          "envelope",
+          envelope(agent_id, "idle")
+          |> Map.put("session_id", "sess-grok-644")
+          |> Map.put("ext", %{"engine" => "grok", "effective" => full})
+        )
+
+      assert_reply ref, :ok
+      assert %{snapshot: ^full} = KaoiroServer.SessionPointers.get(agent_id)
+
+      model_only = Map.drop(full, ["sandbox", "network_access"])
+
+      ref =
+        push(
+          socket,
+          "envelope",
+          Map.put(envelope(agent_id, "idle"), "ext", %{
+            "engine" => "grok",
+            "effective" => %{model_only | "model" => "grok-4.7"}
+          })
+        )
+
+      assert_reply ref, :ok
+
+      assert %{snapshot: %{"model" => "grok-4.7", "sandbox" => "workspace-write"}} =
+               KaoiroServer.SessionPointers.get(agent_id)
+    end
+
+    test "skips a grok status with a pending value or a switch error" do
+      agent_id = "test.grok-644-skip"
+      socket = join_wrapper(agent_id)
+      seed_snapshot(agent_id, "grok-4.6")
+
+      for marker <- [
+            %{"pending_model" => "grok-4.5"},
+            %{"pending_effort" => "low"},
+            %{
+              "switch_error" => %{
+                "kind" => "model",
+                "requested" => "grok-4.5",
+                "reason" => "control_rejected",
+                "rolled_back_to" => "grok-4.7"
+              }
+            }
+          ] do
+        ext =
+          Map.merge(marker, %{
+            "engine" => "grok",
+            "effective" => %{"model" => "grok-4.7", "model_source" => "default"}
+          })
+
+        ref = push(socket, "envelope", Map.put(envelope(agent_id, "idle"), "ext", ext))
+        assert_reply ref, :ok
+      end
+
+      assert %{snapshot: %{"model" => "grok-4.6"}} = KaoiroServer.SessionPointers.get(agent_id)
+    end
+  end
+
   # phase-17 17-11 (ε): boundary marker の to_session_id 後追い patch
   # 経路 (Codex lazy 采番用) の race テスト。maybe_patch_boundary_to_session_id
   # は record_session_pointer の直後に発火し、AgentStates.pending_boundary_patch
