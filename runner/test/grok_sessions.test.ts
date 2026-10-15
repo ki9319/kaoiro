@@ -252,7 +252,8 @@ describe("malformed responses", () => {
     return runGrokProbe({ cwd: CWD, executable: FAKE, env: f.env }, (call) => call("session/list", { cwd: CWD }));
   };
 
-  it.each([null, "refused", 7, []])("rejects an error of %j as a protocol failure", async (error) => {
+  it.each([["null", null], ["a string", "refused"], ["a number", 7], ["an array", []]])(
+    "rejects an error of %s as a protocol failure", async (_label, error) => {
     const failure = await listed({ error }).catch((caught: unknown) => caught);
     expect(failure).toBeInstanceOf(GrokProbeError);
     expect((failure as GrokProbeError).reason).toBe("protocol");
