@@ -1,9 +1,10 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { runGrokProbe } from "../src/grok_acp_probe.js";
 import { probeGrokCatalog } from "../src/grok-catalog.js";
 import { listGrokSessions } from "../src/grok_sessions.js";
@@ -49,6 +50,48 @@ describe("classify", () => {
     expect(classify(inside)).toMatchObject({ requests: 6, outside: 0, modelRequests: 0, connects: 0 });
     expect(classify([{ method: "GET", path: "/v1/other" }, { method: "HEAD", path: "/" },
       { method: "POST", path: "/v1/settings" }, { method: "CONNECT" }, { method: "GET" }]).outside).toBe(5);
+  });
+});
+
+describe("quota recorder", () => {
+  const send = (port: number, request: string) => new Promise<string>((resolve, reject) => {
+    const socket = connect(port, "127.0.0.1", () => socket.end(request));
+    let answer = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => { answer += chunk; });
+    socket.on("end", () => resolve(answer));
+    socket.on("error", reject);
+  });
+
+  it("records every request, whatever its method, before answering it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kaoiro-grok-recorder-"));
+    const log = join(dir, "log.jsonl");
+    const recorder = spawn("python3", ["-I", join(fixtures, "quota-recorder.py"), "0", log], { stdio: "ignore" });
+    try {
+      await vi.waitFor(() => expect(existsSync(`${log}.ready`) && readFileSync(`${log}.ready`, "utf8")).toBeTruthy());
+      const port = Number(readFileSync(`${log}.ready`, "utf8"));
+      const answers = [];
+      for (const request of [
+        "GET http://upstream.invalid/v1/models?q=1 HTTP/1.1\r\nHost: upstream.invalid\r\n\r\n",
+        "POST /v1/responses HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n",
+        "CONNECT upstream.invalid:443 HTTP/1.1\r\nHost: upstream.invalid:443\r\n\r\n",
+        "TRACE /unexpected HTTP/1.1\r\nHost: x\r\n\r\n",
+        "CUSTOM /v1/responses HTTP/1.1\r\nHost: x\r\n\r\n",
+        "NONSENSE\r\n\r\n",
+      ]) answers.push(await send(port, request));
+      expect(answers.slice(0, 5).map((answer) => answer.split("\r\n")[0])).toEqual(Array(5).fill("HTTP/1.0 503 Service Unavailable"));
+      const entries = read(log);
+      expect(entries).toEqual([
+        { method: "GET", path: "/v1/models" }, { method: "POST", path: "/v1/responses" }, { method: "CONNECT" },
+        { method: "TRACE", path: "/unexpected" }, { method: "CUSTOM", path: "/v1/responses" }, { method: "?" },
+      ]);
+      // Each request a probe should never send fails the negative check.
+      for (const entry of entries.slice(1)) expect(classify([entry]).outside).toBe(1);
+      expect(classify(entries.slice(0, 1)).outside).toBe(0);
+    } finally {
+      recorder.kill("SIGKILL");
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

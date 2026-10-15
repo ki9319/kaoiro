@@ -3,8 +3,10 @@
 Logs only the method and, for HTTP, the URL pathname (a proxy's
 absolute-form target is reduced to its pathname, the query dropped); for
 CONNECT it logs only that one happened. Never logs headers or bodies.
-Answers 503 to every request and refuses CONNECT. Writes LOG.ready once
-it listens.
+Every request is logged before anything depends on its method, so no
+method can go unrecorded; one that cannot be parsed is logged as "?".
+Answers 503 to every request, CONNECT included. Port 0 picks a free port.
+Writes LOG.ready, holding the port, once it listens.
 """
 import json
 import socketserver
@@ -16,24 +18,34 @@ PORT = int(sys.argv[1])
 LOG = sys.argv[2]
 
 
+def record(entry):
+    with open(LOG, "a") as log:
+        log.write(json.dumps(entry) + "\n")
+
+
 class Handler(BaseHTTPRequestHandler):
-    def _record(self):
+    def handle_one_request(self):
+        self.raw_requestline = self.rfile.readline(65537)
+        if not self.raw_requestline:
+            self.close_connection = True
+            return
+        if len(self.raw_requestline) > 65536 or not self.parse_request():
+            record({"method": "?"})
+            self.close_connection = True
+            return
         if self.command == "CONNECT":
-            entry = {"method": "CONNECT"}
+            record({"method": "CONNECT"})
         else:
             raw = self.path
             absolute = raw.startswith(("http://", "https://"))
             path = urlsplit(raw).path if absolute else raw.split("?", 1)[0]
-            entry = {"method": self.command, "path": path}
-        with open(LOG, "a") as log:
-            log.write(json.dumps(entry) + "\n")
+            record({"method": self.command, "path": path})
         self.send_response(503)
         self.send_header("Content-Length", "0")
         self.send_header("Connection", "close")
         self.end_headers()
-
-    do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = do_HEAD = _record
-    do_CONNECT = do_OPTIONS = _record
+        self.wfile.flush()
+        self.close_connection = True
 
     def log_message(self, *args):
         pass
@@ -46,5 +58,6 @@ class Server(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
 with Server(("127.0.0.1", PORT), Handler) as server:
     open(LOG, "a").close()
-    open(LOG + ".ready", "w").close()
+    with open(LOG + ".ready", "w") as ready:
+        ready.write(str(server.server_address[1]))
     server.serve_forever()

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EngineModelInfo, RunnerRegister } from "@kaoiro/protocol";
 import type { RunnerLinkOptions } from "../src/transport.js";
+import { GrokCatalog } from "../src/grok-catalog.js";
 import { runRunnerCli } from "../src/runner-cli.js";
 import { loadRunnerConfig } from "../src/config.js";
 
@@ -15,10 +16,12 @@ import { loadRunnerConfig } from "../src/config.js";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-grok-acp.mjs", import.meta.url));
 const EXIT_DRIVER = fileURLToPath(new URL("./fixtures/grok-catalog-exit.ts", import.meta.url));
+const SHUTDOWN_DRIVER = fileURLToPath(new URL("./fixtures/grok-catalog-shutdown.ts", import.meta.url));
 const RUNNER = fileURLToPath(new URL("..", import.meta.url));
 const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 
 class FakeRunnerLink {
@@ -163,6 +166,71 @@ describe("grok catalog in the runner register", () => {
       await vi.waitFor(() => expect(groupAlive(leader!)).toBe(false), { timeout: 2_000 });
     } finally {
       if (leader! > 1 && groupAlive(leader!)) process.kill(-leader!, "SIGKILL");
+    }
+  }, 15_000);
+
+  it("starts and publishes nothing after close, even from a reload that was waiting", async () => {
+    let calls = 0;
+    let entered!: () => void;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const refresh = vi.spyOn(GrokCatalog.prototype, "refresh");
+    const h = await start({ initHang: true }, {
+      resolveCodexAuthMode: async () => {
+        calls += 1;
+        if (calls > 1) {
+          entered();
+          await gate;
+        }
+        return "unknown";
+      },
+    });
+    try {
+      await h.leader();
+      const reloading = h.reload(51);
+      await waiting;
+      h.runtime.close();
+      const atClose = refresh.mock.calls.length;
+      const registers = h.link.updatedRegisters.length;
+      release();
+      await reloading;
+      expect(refresh.mock.calls.length).toBe(atClose);
+      expect(h.link.updatedRegisters).toHaveLength(registers);
+    } finally {
+      release();
+      h.runtime.close();
+    }
+  }, 15_000);
+
+  it.each([
+    ["a child that exits on SIGTERM", { spawnChild: true }],
+    ["a child that ignores SIGTERM", { stubbornChild: true }],
+  ])("ends the probe group before the runner's own SIGTERM handler exits, with %s", async (_label, child) => {
+    const root = mkdtempSync(join(tmpdir(), "kaoiro-grok-catalog-shutdown-"));
+    dirs.push(root);
+    const scenarioPath = join(root, "scenario.json");
+    const pids = join(root, "pids");
+    const configPath = join(root, "runner.config.json");
+    writeFileSync(scenarioPath, JSON.stringify({ initHang: true, ...child }));
+    writeFileSync(configPath, JSON.stringify({ host_id: "grok-catalog-shutdown", server_url: "ws://runner.invalid/runner",
+      cwd_allowlist: [root], capabilities: ["grok"] }));
+    const driver = spawn(process.execPath, ["--import", "tsx", SHUTDOWN_DRIVER], {
+      cwd: RUNNER, stdio: "ignore",
+      env: { ...process.env, OWN_CONFIG: configPath, FAKE_EXECUTABLE: FAKE, FAKE_GROK_SCENARIO: scenarioPath,
+        FAKE_GROK_PIDS: pids },
+    });
+    let leader = 0;
+    try {
+      const code = await new Promise<number | null>((resolve) => driver.once("exit", resolve));
+      expect(code).toBe(0);
+      leader = Number(readFileSync(pids, "utf8").split(" ")[0]);
+      expect(leader).toBeGreaterThan(1);
+      expect(groupAlive(leader)).toBe(false);
+    } finally {
+      if (!leader && existsSync(pids)) leader = Number(readFileSync(pids, "utf8").split(" ")[0]);
+      if (leader > 1 && groupAlive(leader)) process.kill(-leader, "SIGKILL");
+      if (driver.exitCode === null && driver.signalCode === null) driver.kill("SIGKILL");
     }
   }, 15_000);
 });

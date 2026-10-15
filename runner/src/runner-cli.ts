@@ -35,6 +35,7 @@ import { type CodexAuthMode, resolveCodexAuthMode } from "./codex-auth.js";
 import { resolveAntigravityCatalog } from "./antigravity-catalog.js";
 import { resolveAgyVersion } from "./antigravity-version.js";
 import { GrokCatalog, probeGrokCatalog, type GrokCatalogProbeOptions } from "./grok-catalog.js";
+import { grokProbesSettled } from "./grok_acp_probe.js";
 import {
   DEFAULT_AGY_PROBE_TIMEOUT_MS,
   resolveAgyExecutable,
@@ -369,13 +370,17 @@ export async function runRunnerCli(
   // shutdown path exist, so close() can abort it before stopAll. A newer
   // refresh aborts the one in flight. Until one answers, the register
   // carries the last good catalog, else the default entry.
+  // Set once by close(): work that resumes after it (a reload past an
+  // await, a probe's answer) starts and publishes nothing.
+  let closed = false;
   const refreshGrokCatalog = (): void => {
+    if (closed) return;
     if (!effectiveCapabilities(config).includes("grok")) {
       grokCatalog.abort();
       return;
     }
     void grokCatalog.refresh().then((changed) => {
-      if (!changed) return;
+      if (!changed || closed) return;
       appliedRegister = buildRegister(
         config,
         antigravityVersion ?? undefined,
@@ -441,6 +446,7 @@ export async function runRunnerCli(
       prevEnabled: prevCodexEnabled,
       prevMode: codexAuthMode,
     });
+    if (closed) return;
     // ADR-0057 F6: re-probe on every reload while enabled (quota-free, no
     // TTL cache to preserve); clear the catalog when the operator disables
     // the capability so a stale probe result cannot outlive it.
@@ -455,6 +461,7 @@ export async function runRunnerCli(
           nextAntigravityExecutable,
           nextAntigravityProbeTimeoutMs,
         );
+    if (closed) return;
     // issue #387 Part 2(A): re-probe `agy --version` on every reload while
     // enabled, mirroring the catalog probe above. Warn only on an actual
     // change from the last value THIS process observed (both sides present
@@ -463,6 +470,7 @@ export async function runRunnerCli(
     const nextAntigravityVersion = nextAntigravityExecutable === undefined
       ? null
       : await resolveVersion(nextAntigravityExecutable, nextAntigravityProbeTimeoutMs);
+    if (closed) return;
     const nextRuntime: SupervisorRuntimeUpdate = {
       cwdAllowlist: next.cwd_allowlist,
       wrapperServerUrl: wrapperUrlFrom(next.server_url),
@@ -558,15 +566,22 @@ export async function runRunnerCli(
   );
 
   const close = (): void => {
+    closed = true;
     grokCatalog.abort();
     watcher.close();
     supervisor.stopAll();
     link.close();
   };
   if (dependencies.installSignalHandlers ?? true) {
+    // Grok probes end their process groups with a bounded TERM/KILL
+    // teardown; exiting before it finishes would orphan a member that
+    // ignores SIGTERM.
+    let shuttingDown = false;
     const shutdown = (): void => {
+      if (shuttingDown) return;
+      shuttingDown = true;
       close();
-      process.exit(0);
+      void grokProbesSettled().finally(() => process.exit(0));
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
