@@ -7,8 +7,10 @@ import {
   classifyInterAgentError,
   createDeliveryAcknowledgementRuntime,
   formatInboundMessage,
+  HistoryReplayer,
   InterAgentTool,
   makeLog,
+  makeStateChange,
   mergePendingDisplayNameSync,
   PermissionBroker,
   QuestionBroker,
@@ -26,6 +28,7 @@ import {
 import { GrokHost, type GrokHostOptions } from "./host.js";
 import type { GrokWireMetadata } from "./grok/wire.js";
 import { GrokLaunchError } from "./grok/errors.js";
+import { readGrokHistory } from "./history.js";
 
 export interface GrokCliDependencies {
   parseCliArgs?: typeof parseCliArgs;
@@ -64,6 +67,26 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
   });
   const deliveries = new Map<string, Envelope[]>();
   const send = (envelope: Envelope) => link?.send(envelope);
+  const cwd = dependencies.cwd ?? process.cwd();
+  // ADR-0051 D2. Built before the link: the join reply, and with it the
+  // hydration verdict, can land before the host exists, so the replayer holds
+  // the verdict until markReady().
+  const replayer = new HistoryReplayer({
+    seedState: () =>
+      link?.send(
+        makeStateChange(config, host?.state ?? "idle", new Date().toISOString(), {},
+          host?.statusExtSnapshot() ?? {}),
+      ),
+    sessionId: () => link?.currentSessionId() ?? null,
+    readTranscript: (sessionId) => readGrokHistory(cwd, sessionId, config),
+    // Grok records no inter-agent sidecar.
+    readSidecar: () => [],
+    sendHistoryReset: (replayId) => link?.sendHistoryReset(replayId),
+    sendEnvelope: (envelope) => link?.send(envelope),
+    sendReplayIa: (replayId, items) => link?.sendReplayIa(replayId, items),
+    sendHistoryReplayComplete: (replayId) => link?.sendHistoryReplayComplete(replayId),
+    ...(args.resume ? { legacyResumeSessionId: args.resume } : {}),
+  });
   const permission = new PermissionBroker({
     config,
     send,
@@ -161,6 +184,7 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
       },
     } } : {}),
     onPersonaPrompt: resolvePersona,
+    onHydration: (verdict: Parameters<HistoryReplayer["onVerdict"]>[0]) => replayer.onVerdict(verdict),
     onInstruction: (text: string, attachments?: string[]) => {
       chain = chain
         .then(async () => {
@@ -266,7 +290,7 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
         permissionSyncSupported,
         waitForPermissionSync: () => link?.waitForPermissionSync?.() ?? Promise.resolve(),
         onPermissionLifecycle: (event: WrapperPermissionLifecycleMessage) => link?.reportPermissionLifecycle(event),
-        cwd: dependencies.cwd ?? process.cwd(),
+        cwd,
         personaPrompt: rules,
         ...(args.resume ? { resumeSessionId: args.resume } : {}),
         ...(config.resume_snapshot ? { resumeSnapshot: config.resume_snapshot } : {}),
@@ -281,7 +305,11 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
           input: Record<string, unknown>,
           signal?: AbortSignal,
         ) => permission.decide(name, input, signal),
-        onSessionId: (id: string) => link?.setSessionId(id),
+        onSessionId: (id: string) => {
+          link?.setSessionId(id);
+          // The session id is known, so a verdict can now be served.
+          replayer.markReady();
+        },
         onMetadata: (metadata: GrokWireMetadata) => {
           writeRedactedStderr(
             `[kaoiro] grok ACP ${JSON.stringify(metadata)}\n`,

@@ -101,7 +101,13 @@ export async function nativeRun(
   // A predicate answers whatever Grok asks, without the plugin (host-dependent).
   permissions?: LivePermissions | ((payload: Record<string, unknown>) => boolean),
   hostOptions?: Pick<GrokHostOptions, "onLaneStep">,
-  extras: { argv?: string[]; onSessionId?: (id: string) => void } = {},
+  extras: {
+    argv?: string[];
+    onSessionId?: (id: string) => void;
+    /** Asks for a history replay on join and records where in the envelope
+     *  stream its reset and completion fell. */
+    replay?: { marks: { kind: "reset" | "complete"; at: number }[] };
+  } = {},
 ) {
   const folder = mkdtempSync(join(tmpdir(), "kaoiro-grok-native-config-"));
   const file = join(folder, "agent.json");
@@ -112,6 +118,7 @@ export async function nativeRun(
   const metadata: WireMetadata[] = [];
   let callbacks!: ServerLinkOptions;
   let probe!: Promise<void>;
+  let sessionId: string | null = null;
   try {
     const run = runGrokCli({
       cwd,
@@ -124,6 +131,8 @@ export async function nativeRun(
           options.onPersonaPrompt?.(
             "Use the requested tools and report only their results.",
           );
+          if (extras.replay)
+            options.onHydration?.({ replay_required: true, replay_id: "native-replay" });
         });
         return {
           send: (e: Envelope) => {
@@ -144,7 +153,14 @@ export async function nativeRun(
               permissions?.decisions ?? [],
             );
           },
-          setSessionId: (id: string) => extras.onSessionId?.(id),
+          setSessionId: (id: string) => {
+            sessionId = id;
+            extras.onSessionId?.(id);
+          },
+          currentSessionId: () => sessionId,
+          sendHistoryReset: () => extras.replay?.marks.push({ kind: "reset", at: envelopes.length }),
+          sendReplayIa: () => {},
+          sendHistoryReplayComplete: () => extras.replay?.marks.push({ kind: "complete", at: envelopes.length }),
           waitForPermissionSyncNegotiation: async () => true,
           waitForPermissionSync: async () => {},
           reportPermissionLifecycle: () => {},
