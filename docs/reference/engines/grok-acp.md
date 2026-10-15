@@ -116,8 +116,10 @@ lists its configuration options (see
 [Model and effort switching](#model-and-effort-switching) and
 [Context usage](#context-usage)). The dashboard history of a resumed session
 is replayed from Grok's log (see
-[Dashboard history on resume](#dashboard-history-on-resume)). Attachments and
-quota reporting are unsupported. Unsupported controls reject explicitly.
+[Dashboard history on resume](#dashboard-history-on-resume)). Attachments are
+unsupported. Weekly account allowance reporting is available through
+`rate_limits` (see [Account rate limits](#account-rate-limits)). Unsupported
+controls reject explicitly.
 
 ## Cold resume and session discovery
 
@@ -444,6 +446,62 @@ differs from the selected model.
 Limit: the TUI's `/context-window` can change the window of a session's model
 and ACP does not expose it, so such a session shows the default window.
 
+## Account rate limits
+
+On Grok Build 1.0.52 with ACP SDK 1.8.0, the wrapper reads the measured
+`_x.ai/billing` extension with empty parameters on the current generation's
+ACP connection. The wire method carries ACP's underscore prefix; the request
+uses that name literally. The exact upstream layer that removes the prefix is
+not part of this adapter's contract.
+
+The wrapper publishes only the allowlisted weekly window on both
+`state_change.ext` and `whoami`:
+
+```json
+{
+  "rate_limits": {
+    "seven_day": {
+      "utilization": 0.125,
+      "resets_at": 4102358400
+    }
+  }
+}
+```
+
+`utilization` is the finite `creditUsagePercent` divided by 100;
+`resets_at` is the current weekly period's RFC 3339 end converted to integer
+epoch seconds. No status or `five_hour` window is inferred. Other Grok
+products can consume the same weekly pool. A value of `1.0` means the included
+allowance is used; extra or on-demand credits may still allow execution, so
+the omitted `status` remains unknown.
+
+After the initial state publication, a fresh or restored session reads once
+when it has no initial prompt. A supplied initial prompt skips that read and
+uses turn finalization instead. Every successful, failed or cancelled turn
+requests a refresh without delaying turn dispatch. A permission replacement
+starts without a reading. An idle replacement with no pending turn publishes
+its state and reads once; if a turn is already queued, that turn's finalization
+supplies the next refresh. There is no idle polling. The wrapper coalesces
+concurrent triggers, allows one outstanding RPC per generation,
+waits at most 20 seconds, waits at least 60 seconds between successful
+readings, and retries a settled transient failure no sooner than five
+minutes. These are local load limits, not Grok quotas.
+
+Only a validated weekly response is projected. Malformed or unsupported
+successful responses clear the cached window. `-32601` disables reads for
+that generation. Transport and authentication failures keep the last valid
+window, even after its reset time; after an authentication failure that
+retained window may be stale and is replaced by the next successful reading.
+Generation replacement clears it. The wrapper preserves expired windows and
+does not synthesize zero utilization; consumers must stop trusting the value
+after `resets_at`. Diagnostics are static, emitted at most once per outcome
+and generation, and never contain billing fields or error bodies.
+
+The field semantics were measured against Grok Build 1.0.52 and ACP SDK
+1.8.0. Recheck the native response and percentage meaning when either version
+is upgraded; range checks alone cannot detect a change in vendor units.
+See the [dated rate-limit evidence](../../evidence/grok/2026-10-15-rate-limits.md).
+
 ## Upstream gaps and limits
 
 - Claude permission import has no compat switch. Command-text deny matching
@@ -454,7 +512,6 @@ and ACP does not expose it, so such a session shows the default window.
 - `session/set_mode` returned success for an unknown mode in the measured CLI;
   it cannot verify a permission-mode change and is never sent by the adapter.
 - Rules supplied on session/load did not replace the original session rules.
-- Rate and quota data are not exposed in ACP output.
 - `/context` in the Grok TUI floors its percentage to two decimals, and in a
   session whose only model call is its first one it shows a far smaller
   number than that call's prompt. From the second model call of a session it

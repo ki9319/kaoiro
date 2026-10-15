@@ -56,6 +56,7 @@ import {
 import { formatTurnWatchdogLine } from "@kaoiro/wrapper-core";
 import { resolveTurnWatchdogSettings } from "./settings.js";
 import { GrokLaunchError } from "./grok/errors.js";
+import { GrokRateLimitReader, type GrokRateLimits } from "./grok/rate_limits.js";
 import { stateChangeKey } from "./grok/state_key.js";
 import {
   parseModelState,
@@ -130,6 +131,7 @@ interface Generation {
   held: GrokWireMetadata[];
   heldDropped: number;
   models: GrokModel[];
+  rateLimitsReader: GrokRateLimitReader;
 }
 class SwitchTimeout extends Error {
   constructor() { super("grok configuration request timed out"); }
@@ -202,6 +204,7 @@ export class GrokHost implements EngineAdapter {
   #turnTokens: number | undefined;
   #contextGeneration = 0;
   #context: { generation: number; used: number; max: number } | undefined;
+  #rateLimits: GrokRateLimits | undefined;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #abortTimer: ReturnType<typeof setTimeout> | undefined;
   #resolveClosed!: () => void;
@@ -267,6 +270,7 @@ export class GrokHost implements EngineAdapter {
       ...(snapshot ? { resume_snapshot: snapshot, resume_drift: this.#resumeDrift(snapshot, status.resolved) } : {}),
       ...(permission ? { permission } : {}),
       ...(this.#current ? { permission_policy: this.#current.policy } : {}),
+      ...(this.#current && this.#rateLimits ? { rate_limits: this.#rateLimits } : {}),
       ...(this.#permissions.latest ? { permission_control: this.#permissions.latest } : {}),
       ...(this.#permissions.gate ? { permission_gate: this.#permissions.gate } : {}),
       session_capabilities: {
@@ -355,6 +359,7 @@ export class GrokHost implements EngineAdapter {
       ...whoami,
       ...(whoami.model === undefined ? { model: ext.model, model_source: ext.model_source } : {}),
       ...(ext.context ? { context: ext.context } : {}),
+      ...(ext.rate_limits ? { rate_limits: ext.rate_limits } : {}),
     };
   }
   // Until a configOptions reading passes the checks of #adoptGeneration the
@@ -451,11 +456,13 @@ export class GrokHost implements EngineAdapter {
     try {
       this.#starting = true;
       sandboxProfile(config, this.#options.cwd, this.#options.env ?? process.env, this.#platform);
-      await this.#inLane(() => this.#replace(this.#ceiling));
+      await this.#inLane(() => this.#replace(this.#ceiling, true));
       this.#starting = false;
       if (!this.#closing) {
         this.#started = true;
         this.#state("waiting_input");
+        const generation = this.#current;
+        if (prompt === undefined && generation) void this.#refreshRateLimits(generation);
         if (prompt !== undefined) void this.send(prompt).catch(() => {});
         void this.#drain();
       }
@@ -483,9 +490,13 @@ export class GrokHost implements EngineAdapter {
   async #retire(generation: Generation | undefined) {
     if (!generation) return;
     generation.role = "retired";
+    generation.rateLimitsReader.retire();
     generation.held = [];
     generation.heldDropped = 0;
-    if (this.#current === generation) this.#current = undefined;
+    if (this.#current === generation) {
+      this.#current = undefined;
+      this.#rateLimits = undefined;
+    }
     if (this.#loading === generation) this.#loading = undefined;
     generation.session.connection.close();
     generation.toolHost.close();
@@ -503,9 +514,10 @@ export class GrokHost implements EngineAdapter {
       this.close();
     }
   }
-  async #replace(selection: Selection) {
+  async #replace(selection: Selection, initialStart = false) {
     let step: LaneStep = "stopping";
     let generation: Generation | undefined;
+    let promoted: Generation | undefined;
     let toolHost: ToolHost | undefined;
     let expired = false;
     const abort = new AbortController();
@@ -565,7 +577,13 @@ export class GrokHost implements EngineAdapter {
         },
       }, grokExtension((notification) => { if (generation?.role === "current") this.#vendor(notification); }));
       generation = { role: "loading", process: childProcess, session: new AcpSession(connection), toolHost,
-        profile, policy, failed, fail, held: [], heldDropped: 0, models: [] };
+        profile, policy, failed, fail, held: [], heldDropped: 0, models: [],
+        rateLimitsReader: new GrokRateLimitReader({
+          request: (cancellationSignal) => connection.agent.request(
+            "_x.ai/billing", {}, { cancellationSignal },
+          ),
+          diagnostic: (line) => writeRedactedStderr(`${line}\n`),
+        }) };
       this.#loading = generation;
       const owned = generation;
       void connection.closed.then(() => this.#generationFailed(owned, new Error("grok ACP connection closed unexpectedly")));
@@ -604,6 +622,7 @@ export class GrokHost implements EngineAdapter {
       if (generation.failure) throw new LaneFailure("loading_exit");
       generation.role = "current";
       this.#current = generation;
+      promoted = generation;
       this.#loading = undefined;
       this.#sessionId = generation.session.sessionId;
       this.#completion = undefined;
@@ -618,6 +637,27 @@ export class GrokHost implements EngineAdapter {
       clearTimeout(timer);
       if (generation && generation.role !== "current") await this.#retire(generation);
       else if (!generation) toolHost?.close();
+    }
+    if (promoted && !initialStart && this.#started && !this.#closing &&
+        !this.#active && this.#queue.length === 0) {
+      this.#state(this.state);
+      void this.#refreshRateLimits(promoted);
+    }
+  }
+
+  async #refreshRateLimits(generation: Generation) {
+    if (this.#closing || generation.role !== "current" || this.#current !== generation) return;
+    const reading = await generation.rateLimitsReader.read();
+    if (this.#closing || generation.role !== "current" || this.#current !== generation) return;
+    if (reading.kind === "reading") {
+      const previous = this.#rateLimits?.seven_day;
+      this.#rateLimits = reading.value;
+      if (previous?.utilization !== reading.value.seven_day.utilization ||
+          previous?.resets_at !== reading.value.seven_day.resets_at)
+        this.#state(this.state);
+    } else if ((reading.kind === "invalid_shape" || reading.kind === "unsupported") && this.#rateLimits) {
+      this.#rateLimits = undefined;
+      this.#state(this.state);
     }
   }
 
@@ -806,6 +846,8 @@ export class GrokHost implements EngineAdapter {
         ...(error ? { error: { detail: "grok turn failed" } } : {}),
       });
       if (!this.#closing) this.#state("waiting_input");
+      const generation = this.#current;
+      if (!this.#closing && generation) void this.#refreshRateLimits(generation);
     }
   }
 
