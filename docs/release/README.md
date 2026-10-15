@@ -46,6 +46,7 @@ production run records outside the repository.
 
 | Release | Date | Previous | Highlights |
 |---|---|---|---|
+| [v2026.10.15.22](v2026.10.15.22.md) | 2026-10-16 | v2026.10.15.17 | Grok peers resumed from a full-access history run again, `whoami` reports the agent's display name |
 | [v2026.10.15.17](v2026.10.15.17.md) | 2026-10-16 | v2026.10.15.9 | HTTP/2 off pending a Bandit fix, display names and persona faces in the timeline, personas shirogane and moegi, `list_agents` names that follow renames |
 | [v2026.10.15.9](v2026.10.15.9.md) | 2026-10-15 | v2026.10.15.4 | `KAOIRO_AGENT` marker for managed engines, Codex session reset without a dialog under autonomous approval, Antigravity startup and Grok weekly rate limits |
 | [v2026.10.15.4](v2026.10.15.4.md) | 2026-10-15 | v2026.10.14.13 | Grok Build work units 3 and 4: cold resume, session discovery, history replay, launch catalog, live model and effort switching, context usage |
