@@ -8,6 +8,9 @@ import { createPermissionState, setPermissionSyncSupport, requestPermission,
 import type * as acp from "@agentclientprotocol/sdk";
 import {
   clipText,
+  computeResumeDrift,
+  effectiveStatusEnvelopeFields,
+  effectiveStatusWhoamiFields,
   initialMachineState,
   logEntryToPayload,
   makeLog,
@@ -16,13 +19,16 @@ import {
   stepState,
   writeRedactedStderr,
   type AdapterEvent,
+  type EffectiveStatusSnapshot,
   type EngineAdapter,
   type Envelope,
   type MachineState,
+  type ModelSource,
   type PendingPermissionExt,
   type PendingQuestionExt,
   type PermissionMode,
   type PermissionSelection,
+  type ResolvedSnapshotExt,
   type ToolDescriptor,
   type WrapperConfig,
 } from "@kaoiro/agent-common";
@@ -76,6 +82,10 @@ export interface GrokHostOptions {
   /** How long to wait, after the session exists, for Grok to list the kaoiro
    *  tools. Startup fails with the reason when it does not. */
   mcpReadyTimeoutMs?: number;
+  /** The stored session the first lane attaches to with `session/resume`. */
+  resumeSessionId?: string;
+  /** The snapshot the runner relayed with a resume, for `resume_drift`. */
+  resumeSnapshot?: ResolvedSnapshotExt;
   platform?: NodeJS.Platform;
   permissionSyncSupported?: boolean;
   waitForPermissionSync?: () => Promise<void>;
@@ -127,6 +137,16 @@ class SwitchTimeout extends Error {
 class LaneFailure extends Error {
   constructor(readonly step: PermissionGateExt["step"] | "stopping") { super("grok restart failed"); }
 }
+type Axis = "model" | "effort";
+/** A model or effort value waiting to be applied, with the source it will
+ *  carry once Grok confirms it. `operator` marks a live switch, as opposed to
+ *  the start selection (a launch pick or a resumed pair). */
+interface AxisRequest {
+  value: string;
+  source: ModelSource;
+  operator: boolean;
+}
+type AxisRecord = Partial<Record<Axis, AxisRequest>>;
 interface Turn {
   text: string;
   token: string;
@@ -165,10 +185,12 @@ export class GrokHost implements EngineAdapter {
   #catalog: GrokModel[] = [];
   #selection: { model: string; effort: string } | undefined;
   #switchable = false;
-  #modelSource: "default" | "config" = "default";
-  #effortSource: "default" | "config" = "default";
-  #pending: { model?: string; effort?: string } = {};
-  #inflight: { model?: string; effort?: string } = {};
+  #modelSource: ModelSource = "default";
+  #effortSource: ModelSource = "default";
+  #pending: AxisRecord = {};
+  #inflight: AxisRecord = {};
+  // Axes an operator switch has set; resume_drift leaves them out.
+  readonly #operatorSwitched = new Set<Axis>();
   #switchErrorOnce: SwitchErrorExt | undefined;
   #effortResetOnce = false;
   // The model-call prompt size of the running turn, and the last published
@@ -193,6 +215,14 @@ export class GrokHost implements EngineAdapter {
       network_access: options.config.network_access ?? sandbox !== "read-only" } };
     this.#permissions = createPermissionState(this.#ceiling,
       this.#platform === "linux" && options.permissionSyncSupported === true);
+    // The start selection is pending from the first status on, so no status
+    // can publish the session's previous model as if it were the choice.
+    // The source order is Codex's: a relayed source wins, else `config`.
+    const { model, model_source, effort, effort_source } = options.config;
+    if (model !== undefined && model !== "default")
+      this.#pending.model = { value: model, source: model_source ?? "config", operator: false };
+    if (effort !== undefined)
+      this.#pending.effort = { value: effort, source: effort_source ?? "config", operator: false };
     const resolved = resolveTurnWatchdogSettings(
       options.env ?? process.env,
       writeRedactedStderr,
@@ -218,30 +248,20 @@ export class GrokHost implements EngineAdapter {
     return this.#active?.token ?? null;
   }
   statusExtSnapshot(): Record<string, unknown> {
-    const profile = this.#current?.profile;
-    const observed = this.#permissions.current?.observation;
-    // issue #620: the launch profile is not projected over an unknown
-    // execution. Two roles are checked and kept apart: `latest` is the newest
-    // operator control, and `current` is the captured execution. A refused
-    // successor makes `latest` failed while the captured execution stays
-    // unknown, so both must be clear before the profile is projected.
-    const projectProfile = (!this.#permissions.latest || !this.#permissions.lastEffective)
-      && this.#permissions.latest?.status !== "unknown"
-      && this.#permissions.current?.status !== "unknown";
-    const pair = this.#ceiling.requested;
-    const projectedSandbox = profile === "off" ? "danger-full-access" : profile === "workspace" ? "workspace-write" : "read-only";
-    const permission = observed?.permission ?? (projectProfile && profile ? {
-      sandbox: projectedSandbox, approval: "on-request",
-      ...(profile === "off" ? {} : { enforcement: "os" }),
-    } : undefined);
-    const effective = observed ? { sandbox: observed.permission.sandbox, network_access: observed.network_access }
-      : projectProfile && profile ? { sandbox: projectedSandbox, network_access: profile !== "read-only" } : undefined;
+    const { status, permission } = this.#effectiveStatus();
     const switching = this.#platform === "linux" && this.#permissions.syncSupported;
+    const pair = this.#ceiling.requested;
+    const envelope = effectiveStatusEnvelopeFields(status);
+    // An empty `effective` would clear the stored effort (the server replaces
+    // effort as a pair), so it rides only with something to persist.
+    if (Object.keys(status.resolved).length === 0) delete envelope.effective;
+    const snapshot = this.#options.resumeSnapshot;
     return {
-      engine: "grok",
+      ...envelope,
       ...this.#selectionFields(),
+      cwd: this.#options.cwd,
+      ...(snapshot ? { resume_snapshot: snapshot, resume_drift: this.#resumeDrift(snapshot, status.resolved) } : {}),
       ...(permission ? { permission } : {}),
-      ...(effective ? { effective } : {}),
       ...(this.#current ? { permission_policy: this.#current.policy } : {}),
       ...(this.#permissions.latest ? { permission_control: this.#permissions.latest } : {}),
       ...(this.#permissions.gate ? { permission_gate: this.#permissions.gate } : {}),
@@ -265,42 +285,84 @@ export class GrokHost implements EngineAdapter {
         : {}),
     };
   }
+  /** The values this run enforces, for state_change.ext and whoami alike.
+   *  Model and effort are known once Grok's configOptions are adopted;
+   *  sandbox and network only when the permission is known. */
+  #effectiveStatus(): { status: EffectiveStatusSnapshot; permission: EffectiveStatusSnapshot["permission"] } {
+    const profile = this.#current?.profile;
+    const observed = this.#permissions.current?.observation;
+    // issue #620: the launch profile is not projected over an unknown
+    // execution. Two roles are checked and kept apart: `latest` is the newest
+    // operator control, and `current` is the captured execution. A refused
+    // successor makes `latest` failed while the captured execution stays
+    // unknown, so both must be clear before the profile is projected.
+    const projectProfile = (!this.#permissions.latest || !this.#permissions.lastEffective)
+      && this.#permissions.latest?.status !== "unknown"
+      && this.#permissions.current?.status !== "unknown";
+    const projectedSandbox: NonNullable<ResolvedSnapshotExt["sandbox"]> = profile === "off" ? "danger-full-access"
+      : profile === "workspace" ? "workspace-write" : "read-only";
+    const permission = observed?.permission ?? (projectProfile && profile ? {
+      sandbox: projectedSandbox, approval: "on-request",
+      ...(profile === "off" ? {} : { enforcement: "os" }),
+    } : undefined);
+    const effective = observed ? { sandbox: observed.permission.sandbox, network_access: observed.network_access }
+      : projectProfile && profile ? { sandbox: projectedSandbox, network_access: profile !== "read-only" } : undefined;
+    const selection = this.#switchable ? this.#selection : undefined;
+    const resolved: ResolvedSnapshotExt = {
+      ...(selection ? { model: selection.model, model_source: this.#modelSource,
+        effort: selection.effort, effort_source: this.#effortSource } : {}),
+      ...(effective ?? {}),
+    };
+    return { status: { engine: "grok", resolved, ...(permission ? { permission } : {}) }, permission };
+  }
+  // A field an operator switched on purpose is not drift; neither is a
+  // permission after an operator control, nor a value not read yet.
+  #resumeDrift(snapshot: ResolvedSnapshotExt, resolved: ResolvedSnapshotExt) {
+    return computeResumeDrift(snapshot, resolved).filter((entry) => {
+      if (entry.field === "sandbox" || entry.field === "network_access")
+        return !this.#permissions.latest && entry.now !== undefined;
+      const axis = entry.field.startsWith("effort") ? "effort" : entry.field.startsWith("model") ? "model" : undefined;
+      if (!axis) return true;
+      if (this.#operatorSwitched.has(axis) || this.#pending[axis] || this.#inflight[axis]) return false;
+      return entry.now !== undefined;
+    });
+  }
   statusSnapshot() {
     const ext = this.statusExtSnapshot();
+    const whoami = effectiveStatusWhoamiFields(this.#effectiveStatus().status);
     return {
-      engine: "grok",
-      model: ext.model,
-      model_source: ext.model_source,
-      ...(ext.effort ? { effort: ext.effort, effort_source: ext.effort_source } : {}),
+      ...whoami,
+      ...(whoami.model === undefined ? { model: ext.model, model_source: ext.model_source } : {}),
       ...(ext.context ? { context: ext.context } : {}),
-      ...(ext.permission ? { permission: ext.permission } : {}),
     };
   }
   // Until a configOptions reading passes the checks of #adoptGeneration the
   // catalog stays the account default, so the switch capabilities stay off.
+  // A value waiting to apply, or being applied, shows as pending throughout:
+  // the server keeps no snapshot while it does.
   #selectionFields(): Record<string, unknown> {
     const selection = this.#switchable ? this.#selection : undefined;
+    const pendingModel = (this.#pending.model ?? this.#inflight.model)?.value;
+    const pendingEffort = (this.#pending.effort ?? this.#inflight.effort)?.value;
+    const pending = {
+      ...(pendingModel === undefined ? {} : { pending_model: pendingModel }),
+      ...(pendingEffort === undefined ? {} : { pending_effort: pendingEffort }),
+    };
     if (!selection) {
       return {
         models: [{ value: "default", display_name: "Account default" }],
         model: "default",
         model_source: "default",
+        ...pending,
       };
     }
-    const pendingModel = this.#pending.model ?? this.#inflight.model;
-    const pendingEffort = this.#pending.effort ?? this.#inflight.effort;
     const context = this.#context;
     return {
       models: this.#catalog.map(({ window: _window, effort_levels, ...info }) => ({
         ...info,
         ...(effort_levels.length > 0 ? { effort_levels } : {}),
       })),
-      model: selection.model,
-      model_source: this.#modelSource,
-      effort: selection.effort,
-      effort_source: this.#effortSource,
-      ...(pendingModel === undefined ? {} : { pending_model: pendingModel }),
-      ...(pendingEffort === undefined ? {} : { pending_effort: pendingEffort }),
+      ...pending,
       ...(this.#effortResetOnce ? { effort_reset: true } : {}),
       ...(this.#switchErrorOnce ? { switch_error: this.#switchErrorOnce } : {}),
       ...(context && context.generation === this.#contextGeneration ? {
@@ -362,12 +424,6 @@ export class GrokHost implements EngineAdapter {
       throw new Error("grok host already started");
     }
     const config = this.#options.config;
-    if (config.model && config.model !== "default") {
-      throw new Error(
-        "grok work unit 1 supports only the account default model",
-      );
-    }
-    if (config.effort) throw new Error("grok effort selection is unsupported");
     if (config.permission_mode)
       throw new Error("grok permission mode is unsupported");
     try {
@@ -499,9 +555,21 @@ export class GrokHost implements EngineAdapter {
         throw new GrokLaunchError("grok does not support HTTP MCP servers");
       generation.models = parseModelState(initialized._meta);
       await at("load");
+      const resumeId = this.#options.resumeSessionId;
       if (this.#sessionId) {
         if (initialized.agentCapabilities?.loadSession !== true) throw new Error("grok session load unsupported");
         await wait(generation.session.load(this.#sessionId, this.#options.cwd, [toolHost.mcpServer()]));
+      } else if (resumeId !== undefined) {
+        if (initialized.agentCapabilities?.sessionCapabilities?.resume == null)
+          throw new GrokLaunchError("grok does not support session resume");
+        try {
+          await wait(generation.session.resume(resumeId, this.#options.cwd, [toolHost.mcpServer()]));
+        } catch (error) {
+          check();
+          // Grok answers -32603 for an unknown id and for a session bound to
+          // another cwd; neither carries detail worth relaying.
+          throw generation.failure ? error : new GrokLaunchError("grok could not resume the session");
+        }
       } else {
         await wait(generation.session.newSession(this.#options.cwd, [toolHost.mcpServer()],
           grokSessionMeta(this.#options.personaPrompt)));
@@ -888,16 +956,16 @@ export class GrokHost implements EngineAdapter {
     const selection = this.#requireSwitchable("model");
     if (!this.#catalog.some((entry) => entry.value === value))
       return this.#rejectSwitch("model", value, selection.model);
-    this.#pending = { ...this.#pending, model: value };
+    this.#pending = { ...this.#pending, model: { value, source: "config", operator: true } };
     this.#state(this.state);
     void this.#drain();
   }
   async setEffort(value: string) {
     const selection = this.#requireSwitchable("effort");
-    const target = this.#pending.model ?? this.#inflight.model ?? selection.model;
+    const target = this.#pending.model?.value ?? this.#inflight.model?.value ?? selection.model;
     const levels = this.#catalog.find((entry) => entry.value === target)?.effort_levels ?? [];
     if (!levels.includes(value)) return this.#rejectSwitch("effort", value, selection.effort);
-    this.#pending = { ...this.#pending, effort: value };
+    this.#pending = { ...this.#pending, effort: { value, source: "config", operator: true } };
     this.#state(this.state);
     void this.#drain();
   }
@@ -918,9 +986,56 @@ export class GrokHost implements EngineAdapter {
     const known = new Set(generation.models.map((entry) => entry.value));
     const switchable = selection !== undefined && known.size > 0 && selection.models.every((value) => known.has(value))
       && known.has(selection.model);
+    const previous = this.#switchable ? this.#selection : undefined;
     this.#catalog = generation.models;
     this.#switchable = switchable;
     this.#setSelection(switchable ? { model: selection.model, effort: selection.effort } : undefined);
+    if (!switchable) {
+      this.#dropUnappliable();
+      return;
+    }
+    // A later generation (session/load after a permission switch) keeps each
+    // source unless Grok now holds a different value than it last returned.
+    for (const axis of ["model", "effort"] as const) {
+      const before = previous?.[axis];
+      if (before !== undefined && before !== selection[axis] && !this.#pending[axis]) {
+        writeRedactedStderr(`[kaoiro] grok holds a different ${axis} after a restart than it returned before\n`);
+        this.#setSource(axis, "default");
+      }
+    }
+    const model = this.#pending.model;
+    if (model && !known.has(model.value)) {
+      // Not in the catalog: rejected without a request, as setModel would.
+      const { model: _rejected, ...rest } = this.#pending;
+      this.#pending = rest;
+      this.#switchErrorOnce = { kind: "model", requested: model.value, reason: "control_rejected", rolled_back_to: selection.model };
+    }
+    // A requested value Grok already holds needs no request; it takes its
+    // source now. The effort waits while a model change is pending, because
+    // the change can reset it.
+    if (this.#pending.model?.value === selection.model) this.#settle("model");
+    if (!this.#pending.model && this.#pending.effort?.value === selection.effort) this.#settle("effort");
+  }
+  #settle(axis: Axis) {
+    const request = this.#pending[axis];
+    if (!request) return;
+    const { [axis]: _settled, ...rest } = this.#pending;
+    this.#pending = rest;
+    this.#setSource(axis, request.source);
+    if (request.operator) this.#operatorSwitched.add(axis);
+  }
+  #setSource(axis: Axis, source: ModelSource) {
+    if (axis === "model") this.#modelSource = source;
+    else this.#effortSource = source;
+  }
+  // Without usable configOptions nothing can be applied.
+  #dropUnappliable() {
+    if (!this.#pending.model && !this.#pending.effort) return;
+    writeRedactedStderr("[kaoiro] grok offers no model or effort selection; the requested one is not applied\n");
+    const request = this.#pending.model ?? this.#pending.effort!;
+    this.#switchErrorOnce = { kind: this.#pending.model ? "model" : "effort", requested: request.value,
+      reason: "control_rejected", rolled_back_to: "default" };
+    this.#pending = {};
   }
   // A different model withdraws the context reading until a turn finishes on it.
   #setSelection(next: { model: string; effort: string } | undefined) {
@@ -942,11 +1057,11 @@ export class GrokHost implements EngineAdapter {
     if (!this.#closing) this.#state(this.state);
     return true;
   }
-  async #sendSwitch(generation: Generation, claimed: { model?: string; effort?: string }) {
+  async #sendSwitch(generation: Generation, claimed: AxisRecord) {
     const held = this.#selection!;
-    const target = claimed.model ?? held.model;
+    const target = claimed.model?.value ?? held.model;
     const entry = this.#catalog.find((candidate) => candidate.value === target);
-    let effort = claimed.effort ?? held.effort;
+    let effort = claimed.effort?.value ?? held.effort;
     let reset = false;
     if (entry && entry.effort_levels.length > 0 && !entry.effort_levels.includes(effort) && entry.default_effort) {
       effort = entry.default_effort;
@@ -959,10 +1074,13 @@ export class GrokHost implements EngineAdapter {
           this.#switchErrorOnce = { kind: "model", requested: target, reason: "control_rejected", rolled_back_to: held.model };
         return;
       }
-      this.#modelSource = "config";
     }
+    if (claimed.model) this.#confirmAxis("model", claimed.model);
     const now = this.#selection!;
-    if (effort === now.effort) return;
+    if (effort === now.effort) {
+      if (claimed.effort && !reset) this.#confirmAxis("effort", claimed.effort);
+      return;
+    }
     const failure = await this.#setOption(generation, "reasoning_effort", effort);
     if (failure) {
       if (failure !== "closing")
@@ -970,8 +1088,17 @@ export class GrokHost implements EngineAdapter {
           reason: reset ? "effort_reset_failed" : "control_rejected", rolled_back_to: now.effort };
       return;
     }
-    this.#effortSource = "config";
-    if (reset) this.#effortResetOnce = true;
+    if (reset) {
+      // Unit 4's reset contract: the substituted default is a config value.
+      this.#effortSource = "config";
+      this.#effortResetOnce = true;
+    } else {
+      this.#confirmAxis("effort", claimed.effort ?? { value: effort, source: "config", operator: true });
+    }
+  }
+  #confirmAxis(axis: Axis, request: AxisRequest) {
+    this.#setSource(axis, request.source);
+    if (request.operator) this.#operatorSwitched.add(axis);
   }
   // Sends one request and adopts the configOptions it returns. Resolves to
   // why it did not apply, or undefined when it did.

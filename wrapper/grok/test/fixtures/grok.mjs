@@ -207,15 +207,28 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           agentCapabilities:
             process.env.KAOIRO_TEST_GROK_MCP_MODE === "no-http"
               ? {}
-              : { loadSession: true, mcpCapabilities: { http: true, sse: true } },
+              : { loadSession: true, mcpCapabilities: { http: true, sse: true },
+                ...(process.env.KAOIRO_TEST_GROK_NO_RESUME === "1" ? {}
+                  : { sessionCapabilities: { list: {}, resume: {}, close: {} } }) },
           authMethods: [],
           ...(noConfig ? {} : { _meta: { modelState: modelState() } }),
         });
         break;
+      case "session/resume":
+        // Like Grok 1.0.52: -32603 for an unknown id or another cwd, and no
+        // replay before the response.
+        if (msg.params.sessionId !== sid || (process.env.KAOIRO_TEST_GROK_RESUME_CWD &&
+          msg.params.cwd !== process.env.KAOIRO_TEST_GROK_RESUME_CWD)) {
+          process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id,
+            error: { code: -32603, message: "RESUME_ERROR_BODY_MARKER" } }) + "\n");
+          break;
+        }
+      // falls through
       case "session/load":
       case "session/new": {
         const loading = msg.method === "session/load";
-        if (!loading) rules = msg.params._meta.rules;
+        const resuming = msg.method === "session/resume";
+        if (!loading && !resuming) rules = msg.params._meta.rules;
         else restore();
         if (loading) {
           update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "REPLAY_ONLY" } });
@@ -255,7 +268,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         // Like Grok, reply first and connect afterwards, and carry on without
         // the server when the connection fails.
         reply(msg.id, {
-          ...(loading ? {} : { sessionId: sid }),
+          ...(loading || resuming ? {} : { sessionId: sid }),
           ...(noConfig ? {} : { configOptions: configOptions() }),
         });
         // Like Grok 1.0.52: the session_start hook follows the response on

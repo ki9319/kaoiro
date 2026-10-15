@@ -75,7 +75,11 @@ describe("permission switch at the queued head boundary", () => {
     await host.send("no-prompt-id");
     expect(host.statusExtSnapshot().permission_control).toMatchObject({ status: "unknown" });
     expect(host.statusExtSnapshot()).not.toHaveProperty("permission");
-    expect(host.statusExtSnapshot()).not.toHaveProperty("effective");
+    // The model fields still persist; only the permission stays unknown.
+    expect(Object.keys(host.statusExtSnapshot().effective ?? {})).not.toEqual(
+      expect.arrayContaining(["sandbox"]));
+    expect(Object.keys(host.statusExtSnapshot().effective ?? {})).not.toEqual(
+      expect.arrayContaining(["network_access"]));
   });
   it("retires the old group before load, drops replay and sends one observed turn", async () => {
     const decide = vi.fn(async () => ({ allow: false }));
@@ -127,7 +131,11 @@ describe("permission switch at the queued head boundary", () => {
     expect(host.statusExtSnapshot().permission_control).toMatchObject({ status: "unknown" });
     expect(host.statusExtSnapshot().permission_gate).toMatchObject({ reason: "observation_unavailable" });
     expect(host.statusExtSnapshot()).not.toHaveProperty("permission");
-    expect(host.statusExtSnapshot()).not.toHaveProperty("effective");
+    // The model fields still persist; only the permission stays unknown.
+    expect(Object.keys(host.statusExtSnapshot().effective ?? {})).not.toEqual(
+      expect.arrayContaining(["sandbox"]));
+    expect(Object.keys(host.statusExtSnapshot().effective ?? {})).not.toEqual(
+      expect.arrayContaining(["network_access"]));
   });
   it("keeps the launch projection off across a refused successor after a first loss", async () => {
     const { host } = await started();
@@ -137,7 +145,11 @@ describe("permission switch at the queued head boundary", () => {
     expect(host.statusExtSnapshot().permission_control).toMatchObject({ revision: 1, status: "failed" });
     expect(host.statusExtSnapshot().permission_gate).toMatchObject({ revision: 0, reason: "observation_unavailable" });
     expect(host.statusExtSnapshot()).not.toHaveProperty("permission");
-    expect(host.statusExtSnapshot()).not.toHaveProperty("effective");
+    // The model fields still persist; only the permission stays unknown.
+    expect(Object.keys(host.statusExtSnapshot().effective ?? {})).not.toEqual(
+      expect.arrayContaining(["sandbox"]));
+    expect(Object.keys(host.statusExtSnapshot().effective ?? {})).not.toEqual(
+      expect.arrayContaining(["network_access"]));
   });
   it("keeps the launch projection off across a refused successor after a later loss", async () => {
     const { host } = await started();
@@ -147,7 +159,11 @@ describe("permission switch at the queued head boundary", () => {
     expect(host.statusExtSnapshot().permission_control).toMatchObject({ revision: 1, status: "failed" });
     expect(host.statusExtSnapshot().permission_gate).toMatchObject({ revision: 0, reason: "observation_unavailable" });
     expect(host.statusExtSnapshot()).not.toHaveProperty("permission");
-    expect(host.statusExtSnapshot()).not.toHaveProperty("effective");
+    // The model fields still persist; only the permission stays unknown.
+    expect(Object.keys(host.statusExtSnapshot().effective ?? {})).not.toEqual(
+      expect.arrayContaining(["sandbox"]));
+    expect(Object.keys(host.statusExtSnapshot().effective ?? {})).not.toEqual(
+      expect.arrayContaining(["network_access"]));
   });
   it("restores both display fields once a later observation is confirmed after a refused successor", async () => {
     const { host } = await started();
@@ -174,7 +190,11 @@ describe("permission switch at the queued head boundary", () => {
         constraints: { approval: "on-request", enforcement: "os" } } });
     expect(host.statusExtSnapshot().permission_control).toMatchObject({ revision: 1, status: "unknown" });
     expect(host.statusExtSnapshot()).not.toHaveProperty("permission");
-    expect(host.statusExtSnapshot()).not.toHaveProperty("effective");
+    // The model fields still persist; only the permission stays unknown.
+    expect(Object.keys(host.statusExtSnapshot().effective ?? {})).not.toEqual(
+      expect.arrayContaining(["sandbox"]));
+    expect(Object.keys(host.statusExtSnapshot().effective ?? {})).not.toEqual(
+      expect.arrayContaining(["network_access"]));
   });
   it("retains next after a refused raw toggle instead of capturing latest", async () => {
     const { host } = await started({ config: { ...config, sandbox: "danger-full-access", network_access: false } });

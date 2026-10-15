@@ -46,7 +46,6 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
   const args = (dependencies.parseCliArgs ?? parseCliArgs)(
     process.argv.slice(2),
   );
-  if (args.resume) throw new Error("grok resume is unsupported in work unit 1");
   const config = (dependencies.loadConfig ?? loadConfig)(args.configPath);
   const buildInfo = (dependencies.loadWrapperBuildInfo ?? loadWrapperBuildInfo)(
     fileURLToPath(new URL("../dist/build-info.json", import.meta.url)),
@@ -269,6 +268,8 @@ export async function runGrokCli(dependencies: GrokCliDependencies = {}) {
         onPermissionLifecycle: (event: WrapperPermissionLifecycleMessage) => link?.reportPermissionLifecycle(event),
         cwd: dependencies.cwd ?? process.cwd(),
         personaPrompt: rules,
+        ...(args.resume ? { resumeSessionId: args.resume } : {}),
+        ...(config.resume_snapshot ? { resumeSnapshot: config.resume_snapshot } : {}),
         send,
         toolDescriptors: [
           ...interAgent.descriptors(),

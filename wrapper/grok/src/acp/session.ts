@@ -44,6 +44,16 @@ export class AcpSession {
     return response;
   }
 
+  /** Attaches to a stored session without replaying its history. */
+  async resume(sessionId: string, cwd: string, mcpServers: acp.McpServer[]) {
+    const response = await this.connection.agent.request(acp.methods.agent.session.resume, {
+      sessionId, cwd, mcpServers,
+    });
+    this.sessionId = sessionId;
+    this.configOptions = response.configOptions ?? undefined;
+    return response;
+  }
+
   async setConfigOption(configId: string, value: string) {
     if (!this.sessionId) throw new Error("ACP session is not initialized");
     const response = await this.connection.agent.request(
