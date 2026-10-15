@@ -197,16 +197,20 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     switch (msg.method) {
       case "_x.ai/billing": {
         billingCalls += 1;
-        const mode = process.env.KAOIRO_TEST_GROK_BILLING ?? "valid";
+        // Default to valid to exercise the production startup publication in host tests.
+        const [initial, subsequent] = (process.env.KAOIRO_TEST_GROK_BILLING ?? "valid").split("-then-");
+        const mode = billingCalls > 1 && subsequent ? subsequent : initial;
         if (mode === "hang") break;
         if (mode === "delay")
           await new Promise((resolve) => setTimeout(resolve,
             Number(process.env.KAOIRO_TEST_GROK_BILLING_DELAY_MS ?? 10)));
-        if (mode === "unsupported" || mode === "auth") {
+        if (mode === "unsupported" || mode === "auth" || mode === "transport") {
           process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id,
             error: mode === "unsupported"
               ? { code: -32601, message: "Method not found" }
-              : { code: -32000, message: "fixture auth error", data: { status: 401 } } }) + "\n");
+              : mode === "auth"
+                ? { code: -32000, message: "fixture auth error", data: { status: 401 } }
+                : { code: -32603, message: "fixture transport error" } }) + "\n");
           break;
         }
         if (mode === "malformed") {
@@ -217,8 +221,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         const percent = mode === "sequence" ? 10 + billingCalls : 12.5;
         reply(msg.id, { config: {
           creditUsagePercent: percent,
-          currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY", start: "2099-12-24T00:00:00Z",
-            end: "2099-12-31T00:00:00Z" },
+          currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY",
+            start: mode === "expired" ? "2019-12-25T00:00:00Z" : "2099-12-24T00:00:00Z",
+            end: mode === "expired" ? "2020-01-01T00:00:00Z" : "2099-12-31T00:00:00Z" },
           billingPeriodEnd: "PRIVATE_BILLING_FIELD",
           subscription: { amount: 999 },
         } });

@@ -456,7 +456,7 @@ export class GrokHost implements EngineAdapter {
     try {
       this.#starting = true;
       sandboxProfile(config, this.#options.cwd, this.#options.env ?? process.env, this.#platform);
-      await this.#inLane(() => this.#replace(this.#ceiling, true));
+      await this.#inLane(() => this.#replace(this.#ceiling));
       this.#starting = false;
       if (!this.#closing) {
         this.#started = true;
@@ -514,10 +514,9 @@ export class GrokHost implements EngineAdapter {
       this.close();
     }
   }
-  async #replace(selection: Selection, initialStart = false) {
+  async #replace(selection: Selection) {
     let step: LaneStep = "stopping";
     let generation: Generation | undefined;
-    let promoted: Generation | undefined;
     let toolHost: ToolHost | undefined;
     let expired = false;
     const abort = new AbortController();
@@ -622,7 +621,6 @@ export class GrokHost implements EngineAdapter {
       if (generation.failure) throw new LaneFailure("loading_exit");
       generation.role = "current";
       this.#current = generation;
-      promoted = generation;
       this.#loading = undefined;
       this.#sessionId = generation.session.sessionId;
       this.#completion = undefined;
@@ -637,11 +635,6 @@ export class GrokHost implements EngineAdapter {
       clearTimeout(timer);
       if (generation && generation.role !== "current") await this.#retire(generation);
       else if (!generation) toolHost?.close();
-    }
-    if (promoted && !initialStart && this.#started && !this.#closing &&
-        !this.#active && this.#queue.length === 0) {
-      this.#state(this.state);
-      void this.#refreshRateLimits(promoted);
     }
   }
 

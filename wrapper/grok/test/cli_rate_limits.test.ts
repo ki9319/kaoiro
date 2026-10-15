@@ -26,7 +26,7 @@ function toolText(output: string): string {
   return result.content?.find((item) => item.type === "text")?.text ?? "";
 }
 
-it("projects the same weekly window through whoami and list_agents", async () => {
+it("whoami carries the own window and list_agents renders a peer's window", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "kaoiro-momo660-cli-rates-"));
   const envelopes: Envelope[] = [];
   const peerWindow = { seven_day: { utilization: 0.25, resets_at: 4_102_358_400 } };
