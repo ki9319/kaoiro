@@ -129,6 +129,36 @@ describe("accepted launch and lifecycle registry", () => {
     s.registry.observeFrame({ ...s.start, subtype: "task_notification", status: "stopped" });
     expect(s.registry.eligible(cap)).toBe(true);
   });
+  describe("a natural completion while a TaskStop is pending", () => {
+    const completed = (s: ReturnType<typeof setup>, status = "completed") =>
+      s.registry.observeFrame({ ...s.start, subtype: "task_notification", status });
+    it.each(["completed", "failed"])("%s drains once the last stop fails, and its idle budget starts then", status => {
+      const s = setup(); s.registry.observeFrame(s.start); s.outcome(); const cap = s.registry.byToken(s.token)!;
+      const now = performance.now(); s.registry.tick(false, now);
+      s.registry.stopAttempt("stop", "task"); completed(s, status);
+      expect(s.registry.eligible(cap)).toBe(false);
+      s.registry.tick(false, now + 50000);
+      s.registry.stopOutcome("stop", false);
+      expect(s.registry.eligible(cap)).toBe(true);
+      s.registry.tick(false, now + 55000); expect(s.registry.eligible(cap)).toBe(true);
+      s.registry.tick(false, now + 65001); expect(s.registry.eligible(cap)).toBe(false);
+    });
+    it("stays suspended until every pending stop fails", () => {
+      const s = setup(); s.registry.observeFrame(s.start); s.outcome(); const cap = s.registry.byToken(s.token)!;
+      s.registry.stopAttempt("one", "task"); s.registry.stopAttempt("two", "task"); completed(s);
+      s.registry.stopOutcome("one", false); expect(s.registry.eligible(cap)).toBe(false);
+      s.registry.stopOutcome("two", false); expect(s.registry.eligible(cap)).toBe(true);
+    });
+    it("closes for good when the stop succeeds, or when the terminal is stopped or killed", () => {
+      for (const [status, succeeded] of [["completed", true], ["stopped", false], ["killed", false]] as const) {
+        const s = setup(); s.registry.observeFrame(s.start); s.outcome();
+        s.registry.stopAttempt("stop", "task"); completed(s, status);
+        s.registry.stopOutcome("stop", succeeded);
+        expect(s.registry.byToken(s.token), status).toBeUndefined();
+        expect(s.registry.byTask("task"), status).toBeUndefined();
+      }
+    });
+  });
   it("does not instrument a live target; a successful resumed run needs its new accepted canonical message", () => {
     const s = setup(); s.registry.observeFrame(s.start); s.outcome();
     const map = s.basis.exportConfirmed({ token: "root" })!;
