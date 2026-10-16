@@ -16,6 +16,50 @@ const inbound = (n: number): Envelope => ({ version: "0", agent_id: "peer", pers
   type: "inter_agent_message", state: "thinking", payload: { to: "self", conversation_id: "c", turn_number: n, kind: "request", body: "launch",
     meta: { done: false, propose_next: "" }, owner: { kind: "user", id: "operator" }, new_conversation: false }, ext: {} });
 
+describe("native continuation preparation lifetime", () => {
+  it("retires a root's unreported preparations with the root so they stop counting against capacity", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "kaoiro-426-retire-")); scratch.push(dir);
+    const path = join(dir, "native.jsonl"); await writeFile(path, "");
+    const tool = new InterAgentTool({ config, getState: () => "thinking", send: () => {}, replyBasisMode: () => "v1",
+      sendInterAgent: async () => ({ kind: "accepted", stamp: null }) });
+    const warnings: string[] = [], prepared: boolean[] = [];
+    let host!: AgentHost;
+    const queryFn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => {
+      const fire = async (name: "UserPromptSubmit" | "PreToolUse", payload: Record<string, unknown>, callId?: string) =>
+        args.options.hooks![name]!.at(-1)!.hooks[0]!({ hook_event_name: name, session_id: "s", transcript_path: path, cwd: dir, ...payload } as HookInput,
+          callId, { signal: new AbortController().signal }) as { hookSpecificOutput?: { updatedInput?: unknown } };
+      const launch = async (promptId: string, n: number) => {
+        const out = await fire("PreToolUse", { prompt_id: promptId, tool_name: "Monitor", tool_use_id: `m${n}`,
+          tool_input: { command: "printf event", description: `watch ${n}`, timeout_ms: 1000 } }, `m${n}`);
+        prepared.push(out.hookSpecificOutput?.updatedInput !== undefined);
+      };
+      const script = async function* () {
+        const prompts = args.prompt[Symbol.asyncIterator]();
+        await prompts.next();
+        await fire("UserPromptSubmit", { prompt_id: "first", prompt: "launch", source: "sdk" });
+        yield frame({ type: "system", subtype: "init", session_id: "s" });
+        // Neither an outcome nor a denial ever arrives for these 64, then one more is refused at capacity.
+        for (let n = 0; n < 65; n++) await launch("first", n);
+        yield frame({ type: "result", session_id: "s", result_index: 0, uuid: "r0", subtype: "success", is_error: false, result: "done" });
+        await host.send("second");
+        await prompts.next();
+        await fire("UserPromptSubmit", { prompt_id: "second", prompt: "second", source: "sdk" });
+        await launch("second", 65);
+        yield frame({ type: "result", session_id: "s", result_index: 1, uuid: "r1", subtype: "success", is_error: false, result: "done" });
+      };
+      return Object.assign(script(), { interrupt: async () => {} }) as unknown as Query;
+    }) as NonNullable<AgentHostOptions["queryFn"]>;
+    host = new AgentHost(config, { queryFn, onState: () => {}, warn: message => warnings.push(message), nativeContinuations: true, nativeReplyBasis: tool.replyBasis,
+      onTurnStart: ({ turnToken, kind }) => { if (kind !== "sdk_notification") tool.replyBasis.begin(turnToken, [inbound(1)], undefined, true); },
+      onPromptAdmitted: token => tool.confirmReplyInput(token), onTurnEnd: ({ turnToken }) => { if (turnToken) tool.endReplyInput(turnToken); } });
+    try { await host.run("launch"); } finally { host.close(); }
+    expect(prepared.slice(0, 64).every(Boolean)).toBe(true);
+    expect(prepared[64]).toBe(false);
+    expect(warnings.some(message => message.includes("capacity reached"))).toBe(true);
+    expect(prepared[65]).toBe(true);
+  }, 10000);
+});
+
 describe("native continuation host and actual send path", () => {
   it.each(["peer", "peer-warning", "peer-unwrapped", "peer-two-frames", "peer-damage-before-send", "event", "non-system-row", "stop-before-send", "damage-before-send", "unknown-source", "delayed-row", "bash", "bash-damage-before-send", "workflow", "timeout-bash", "child-launch", "missing-row",
     "agent", "agent-no-output", "agent-mistyped-marker", "agent-wrong-run", "agent-missing-producer", "agent-optional-metadata", "agent-damage-before-send", "agent-fold", "agent-malformed-fold", "agent-fold-peer-own", "agent-fold-peer-quote", "agent-fold-bare",

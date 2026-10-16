@@ -5121,6 +5121,7 @@ export class AgentHost implements EngineAdapter {
       for (const [promptId, owner] of this.#promptOwners) if (owner.token === turn.turnToken) {
         this.#promptOwners.delete(promptId);
         this.#retiredPromptIds.add(promptId);
+        this.#nativeRegistry?.retirePrompt(promptId);
       }
     }
     this.#activeTurn = null;
