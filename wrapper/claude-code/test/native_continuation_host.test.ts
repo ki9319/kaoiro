@@ -15,7 +15,7 @@ const inbound = (n: number): Envelope => ({ version: "0", agent_id: "peer", pers
     meta: { done: false, propose_next: "" }, owner: { kind: "user", id: "operator" }, new_conversation: false }, ext: {} });
 
 describe("native continuation host and actual send path", () => {
-  it.each(["event", "stop-before-send", "damage-before-send", "unknown-source", "delayed-row", "bash", "bash-damage-before-send", "workflow", "timeout-bash", "child-launch", "missing-row"])("handles %s with its source-specific frozen basis", async variant => {
+  it.each(["event", "non-system-row", "stop-before-send", "damage-before-send", "unknown-source", "delayed-row", "bash", "bash-damage-before-send", "workflow", "timeout-bash", "child-launch", "missing-row"])("handles %s with its source-specific frozen basis", async variant => {
     const dir = await mkdtemp(join(tmpdir(), "kogane-426-host-")); scratch.push(dir);
     const path = join(dir, "native.jsonl"); await writeFile(path, "");
     const outgoing: Envelope[] = [], warnings: string[] = [], starts: string[] = [];
@@ -47,10 +47,10 @@ describe("native continuation host and actual send path", () => {
         if (source !== "Monitor") yield frame({ type: "system", subtype: "task_notification", session_id: "s", task_id: "task", run_id: "run", tool_use_id: "launch", status: "completed", output_file: "/tmp/output", summary: "done" });
         const prompt = source !== "Monitor" ? '<task-notification><task-id>task</task-id><tool-use-id>launch</tool-use-id><output-file>/tmp/output</output-file><status>completed</status><summary>done</summary></task-notification>' : `<task-notification><task-id>${variant === "unknown-source" ? "unknown" : "task"}</task-id><summary>Monitor event: "${effective.description}"</summary><event>hello</event></task-notification>`;
         const row = JSON.stringify({ type: "user", sessionId: "s", promptId: "return", uuid: "opener", isSidechain: false,
-          turnPosition: { promptIndex: 0 }, promptSource: "system", turnOrigin: "task_notification",
+          turnPosition: { promptIndex: 0 }, promptSource: variant === "non-system-row" ? "user" : "system", turnOrigin: "task_notification",
           origin: { kind: "task-notification", producer: "session-task" }, message: { role: "user", content: prompt } }) + "\n";
         if (variant !== "delayed-row" && variant !== "missing-row") await appendFile(path, row);
-        await fire("UserPromptSubmit", { prompt_id: "return", prompt, source: "system" });
+        await fire("UserPromptSubmit", { prompt_id: "return", prompt });
         const pending = fire("PreToolUse", { prompt_id: "return", tool_name: INTER_AGENT_TOOL_FQN, tool_use_id: "send", tool_input: {} }, "send");
         if (variant === "delayed-row") { await new Promise(r => setTimeout(r, 60)); await appendFile(path, row); }
         await pending;
@@ -75,10 +75,10 @@ describe("native continuation host and actual send path", () => {
       onTurnStart: ({ turnToken, kind }) => { starts.push(kind ?? "wrapper"); if (kind !== "sdk_notification") tool.replyBasis.begin(turnToken, [inbound(1)], undefined, true); },
       onPromptAdmitted: token => tool.confirmReplyInput(token), onTurnEnd: ({ turnToken }) => { if (turnToken) tool.endReplyInput(turnToken); } });
     try { await host.run("launch"); } finally { host.close(); }
-    const refused = variant === "unknown-source" || variant.endsWith("damage-before-send") || variant === "child-launch" || variant === "missing-row";
+    const refused = variant === "unknown-source" || variant === "non-system-row" || variant.endsWith("damage-before-send") || variant === "child-launch" || variant === "missing-row";
     expect(outgoing).toHaveLength(refused ? 0 : 1);
     expect(sendResult?.isError).toBe(refused ? true : undefined);
     if (!refused) expect((outgoing[0]!.payload as { in_reply_to: number }).in_reply_to).toBe(["bash", "workflow", "timeout-bash"].includes(variant) ? 3 : 1);
-    expect(starts).toHaveLength(["unknown-source", "child-launch", "missing-row"].includes(variant) ? 1 : 2);
+    expect(starts).toHaveLength(["unknown-source", "non-system-row", "child-launch", "missing-row"].includes(variant) ? 1 : 2);
   }, 10000);
 });

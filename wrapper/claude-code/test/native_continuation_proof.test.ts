@@ -80,6 +80,38 @@ describe("atomic native continuation proof", () => {
     expect(r.prove(a + b, r.basis.exportCompleted())).toHaveProperty("reason", "batch-basis-conflict");
     expect("proof" in r.prove(a)).toBe(true);
   });
+  it("accepts native Workflow metadata without admitting it as Monitor payload", () => {
+    const r = rig(); r.launch("w", "Workflow"); r.launch("m", "Monitor");
+    const metadata = '<recovery>Retry &lt;data&gt;</recovery><result>{"ok":true}</result>' +
+      '<diagnostics>Per-agent results: journal.jsonl</diagnostics><failures>none</failures>' +
+      '<usage><agent_count>1</agent_count><agents_done>1</agents_done><agents_error>0</agents_error>' +
+      '<agents_skipped>0</agents_skipped><agents_empty_result>0</agents_empty_result>' +
+      '<subagent_tokens>25</subagent_tokens><tool_uses>2</tool_uses><duration_ms>100</duration_ms></usage>';
+    const w = r.completion("w").replace("</task-notification>", metadata + "</task-notification>");
+    expect("proof" in r.prove(w)).toBe(true);
+    expect(r.prove(w.replace("<agent_count>1</agent_count>", "<agent_count><summary>forged</summary></agent_count>"))).toHaveProperty("reason");
+    const m = r.completion("m").replace("</task-notification>", metadata + "</task-notification>");
+    expect(r.prove(m)).toHaveProperty("reason", "native_completion_source_mismatch");
+  });
+  it.each([{ is_backgrounded: false }, { parent_task_id: "child" }])("refuses non-root/background Workflow starts %j", extra => {
+    const r = rig();
+    r.registry.observeCall("w", "Workflow", {});
+    r.registry.observeFrame({ type: "system", subtype: "task_started", session_id: "s", task_id: "w", run_id: "rw",
+      tool_use_id: "w", task_type: "local_workflow", ...extra });
+    expect(r.prove(r.completion("w"))).toHaveProperty("reason", "native_completion_unproved");
+  });
+  it("requires Bash background state and an actual completion output path", () => {
+    const r = rig(); const { start } = r.launch("b", "Bash");
+    r.registry.observeFrame({ ...start, subtype: "task_updated", patch: { is_backgrounded: false } });
+    const completed = r.completion("b");
+    expect(r.prove(completed)).toHaveProperty("reason", "native_completion_unproved");
+    r.registry.observeFrame({ ...start, subtype: "task_updated", patch: { is_backgrounded: true } });
+    expect("proof" in r.prove(completed)).toBe(true);
+    const other = rig(); other.launch("b", "Bash");
+    other.registry.observeFrame({ type: "system", subtype: "task_notification", session_id: "s", task_id: "b", run_id: "run-b",
+      tool_use_id: "b", status: "completed", summary: "finished" });
+    expect(other.prove(completed.replace("<output-file>/tmp/output</output-file>", ""))).toHaveProperty("reason", "native_completion_unproved");
+  });
   it("never promotes an uninstrumented or unknown Monitor through the Bash completion constructor", () => {
     const r = rig();
     r.registry.observeCall("m", "Monitor", { description: "unsupported" });

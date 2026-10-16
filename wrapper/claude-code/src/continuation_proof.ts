@@ -41,6 +41,7 @@ export class ContinuationProofs {
       for (const [position, block] of blocks.entries()) {
         const run = this.registry.source(block.taskId);
         if (!run || run.uncertain || !run.source || run.source === "Agent") return { reason: "native_source_unknown" };
+        if (block.workflowMetadata && run.source !== "Workflow") return { reason: "native_completion_source_mismatch" };
         const cap = this.registry.byTask(block.taskId);
         sources.push({ taskId: run.taskId, runId: run.runId });
         const terminal = run.terminal;
@@ -48,8 +49,9 @@ export class ContinuationProofs {
         const completionKey = JSON.stringify([block.taskId, run.runId, run.callId]);
         if (completed) {
           if (!terminal || !run.background || run.explicitStop || run.stops.size ||
-              block.toolUseId !== run.callId || terminal.tool_use_id !== run.callId ||
-              block.status !== terminal.status || block.outputFile !== terminal.output_file ||
+              !run.callId || block.toolUseId !== run.callId || terminal.tool_use_id !== run.callId ||
+              block.status !== terminal.status || typeof terminal.output_file !== "string" || !terminal.output_file ||
+              block.outputFile !== terminal.output_file ||
               block.summary !== escapeNativeScalar(String(terminal.summary)) || this.#completions.has(completionKey)) return { reason: "native_completion_unproved" };
         }
         if (run.source === "Monitor") {
@@ -63,7 +65,7 @@ export class ContinuationProofs {
           maps.push(cap.basis);
         } else {
           if (!completed || (run.source !== "Bash" && run.source !== "Workflow") ||
-              (run.source === "Bash" && (block.event !== undefined || block.result !== undefined))) return { reason: "native_completion_source_mismatch" };
+              block.event !== undefined || (run.source === "Bash" && block.result !== undefined)) return { reason: "native_completion_source_mismatch" };
           maps.push(openerBasis);
         }
         claims.push({ cap, key: completed ? completionKey : `${anchor.uuid}:${position}`, completion: completed,

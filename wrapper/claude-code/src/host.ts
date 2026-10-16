@@ -2454,7 +2454,8 @@ export class AgentHost implements EngineAdapter {
     }
     if (active === null) {
       this.#beginForeignOccupancy(input.prompt_id, input.session_id);
-      if (this.#options.nativeContinuations && input.source === "system" && !rejectedPushedReceipt && this.#options.nativeReplyBasis) {
+      // The pinned CLI omits hook source; the transcript proves system origin before any grant.
+      if (this.#options.nativeContinuations && input.source !== "sdk" && !rejectedPushedReceipt && this.#options.nativeReplyBasis) {
         this.#pendingNative = { promptId: input.prompt_id, sessionId: input.session_id, prompt: input.prompt,
           basis: this.#options.nativeReplyBasis.exportCompleted(), controller: new AbortController(), claimsLive: this.#pendingClaimGuard(input.prompt) };
       }

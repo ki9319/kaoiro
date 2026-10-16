@@ -3127,6 +3127,8 @@ function localReplyError(code: string, guidance?: string): InterAgentToolResult 
       ? "This tool call is not bound to a confirmed live input. No message was sent. Wait for a new confirmed input before sending again. Retrying in this continuation, changing conversation_id, or adding a reply ticket cannot bind this call."
       : code === "stale_tool_call"
       ? "The input that owned this tool call has ended or been cancelled. No message was sent. Do not retry this call; send from a new live wrapper-delivered input."
+      : code === "missing_native_proof_validator" || code === "native_proof_invalid" || code === "native_evidence_damaged" || code === "stale_native_lease"
+      ? "Native continuation proof is unavailable or no longer valid. No message was sent. Do not retry in this continuation or change conversation_id to bypass it; wait for a new confirmed input. If admission has stopped, restore the wrapper after disconnection."
       : code === "admission_fail_stop"
       ? "The host stopped admission. No message was sent. Ask the operator to terminate the wrapper and restore it after disconnection."
       : "Spent or expired authorization cannot be reused; use a fresh authorization or the next input turn.") }) }] };
