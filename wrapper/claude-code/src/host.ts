@@ -2659,7 +2659,9 @@ export class AgentHost implements EngineAdapter {
             this.#warn(`native continuation refused: ${result.reason}`); break;
           }
           await this.#nativeReader.validate(anchor);
-          if (!live() || performance.now() >= deadline || !result.proof.commit()) break;
+          // A reset during the await outdates the basis: refuse this root before the slot is spent.
+          if (!live() || performance.now() >= deadline || !this.#options.nativeReplyBasis!.isCurrentDetached(result.proof.basis) ||
+              !result.proof.commit()) break;
           const turn: NotificationTurn = { kind: "sdk_notification", turnToken: randomUUID(), conversationIds: [], promptId };
           const reader = this.#nativeReader;
           this.#options.nativeReplyBasis!.beginDetached(turn.turnToken, result.proof.basis, async () => {

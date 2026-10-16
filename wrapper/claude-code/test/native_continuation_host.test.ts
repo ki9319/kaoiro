@@ -2,15 +2,17 @@ import { peerFixture, recordedPeer } from "./fixtures/native_peer_opener.js";
 import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HookInput, Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { InterAgentTool, INTER_AGENT_TOOL_FQN, type Envelope } from "@kaoiro/agent-common";
 import { AgentHost, type AgentHostOptions } from "../src/host.js";
 import { escapeNativeScalar } from "../src/continuation_markers.js";
+import { ContinuationProofs } from "../src/continuation_proof.js";
+import { NativeTranscriptReader } from "../src/native_transcript.js";
 
 const config = { agent_id: "self", persona: { id: "p", name: "P", sprite_set: "p" }, display_name: "P", server_url: "ws://localhost" };
 const scratch: string[] = [];
-afterEach(async () => { await Promise.all(scratch.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
+afterEach(async () => { vi.restoreAllMocks(); await Promise.all(scratch.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 const frame = (value: unknown) => value as SDKMessage;
 const inbound = (n: number): Envelope => ({ version: "0", agent_id: "peer", persona: config.persona, display_name: "P", ts: "2026-10-16T00:00:00Z",
   type: "inter_agent_message", state: "thinking", payload: { to: "self", conversation_id: "c", turn_number: n, kind: "request", body: "launch",
@@ -63,13 +65,32 @@ describe("native continuation preparation lifetime", () => {
 describe("native continuation host and actual send path", () => {
   it.each(["peer", "peer-warning", "peer-unwrapped", "peer-two-frames", "peer-damage-before-send", "event", "non-system-row", "stop-before-send", "damage-before-send", "unknown-source", "delayed-row", "bash", "bash-damage-before-send", "workflow", "timeout-bash", "child-launch", "missing-row",
     "agent", "agent-no-output", "agent-mistyped-marker", "agent-wrong-run", "agent-missing-producer", "agent-optional-metadata", "agent-damage-before-send", "agent-fold", "agent-malformed-fold", "agent-fold-peer-own", "agent-fold-peer-quote", "agent-fold-bare",
-    "agent-stop-measured-fail", "agent-stop-failure-hook", "agent-stop-unmeasured-result"])("handles %s with its source-specific frozen basis", async variant => {
+    "agent-stop-measured-fail", "agent-stop-failure-hook", "agent-stop-unmeasured-result", "agent-reset-in-validate", "agent-reset-and-damage-in-validate"])("handles %s with its source-specific frozen basis", async variant => {
     const dir = await mkdtemp(join(tmpdir(), "kogane-426-host-")); scratch.push(dir);
     const path = join(dir, "native.jsonl"); await writeFile(path, "");
-    const outgoing: Envelope[] = [], warnings: string[] = [], starts: string[] = [];
+    const outgoing: Envelope[] = [], warnings: string[] = [], starts: string[] = [], failStops: unknown[] = [];
     const tool = new InterAgentTool({ config, getState: () => "thinking", send: () => {}, replyBasisMode: () => "v1",
       sendInterAgent: async envelope => { outgoing.push(envelope); return { kind: "accepted", stamp: null }; } });
     let host!: AgentHost;
+    let commits = 0;
+    if (variant.includes("-in-validate")) {
+      const prove = ContinuationProofs.prototype.prove;
+      vi.spyOn(ContinuationProofs.prototype, "prove").mockImplementation(function (this: ContinuationProofs, ...args) {
+        const result = prove.apply(this, args);
+        if ("proof" in result) { const commit = result.proof.commit; result.proof.commit = () => { commits++; return commit(); }; }
+        return result;
+      });
+      // The reset (and damage) lands while the host awaits the pre-commit validation of the proved opener.
+      const validate = NativeTranscriptReader.prototype.validate;
+      let fired = false;
+      vi.spyOn(NativeTranscriptReader.prototype, "validate").mockImplementation(async function (this: NativeTranscriptReader, anchor) {
+        if (!fired) {
+          fired = true; tool.replyBasis.reset();
+          if (variant === "agent-reset-and-damage-in-validate") await writeFile(path, "");
+        }
+        return validate.call(this, anchor);
+      });
+    }
     let bound: Awaited<ReturnType<AgentHost["resolveToolOrigin"]>>;
     let sendResult: { isError?: boolean } | undefined;
     const queryFn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => {
@@ -162,14 +183,18 @@ describe("native continuation host and actual send path", () => {
       return Object.assign(script(), { interrupt: async () => {} }) as unknown as Query;
     }) as NonNullable<AgentHostOptions["queryFn"]>;
     host = new AgentHost(config, { queryFn, onState: () => {}, warn: message => warnings.push(message), nativeContinuations: true, nativeReplyBasis: tool.replyBasis,
+      onAdmissionFailStop: info => failStops.push(info),
       onTurnStart: ({ turnToken, kind }) => { starts.push(kind ?? "wrapper"); if (kind !== "sdk_notification") tool.replyBasis.begin(turnToken, [inbound(1)], undefined, true); },
       onPromptAdmitted: token => tool.confirmReplyInput(token), onTurnEnd: ({ turnToken }) => { if (turnToken) tool.endReplyInput(turnToken); } });
     try { await host.run("launch"); } finally { host.close(); }
     const refusedPeer = ["peer-warning", "peer-unwrapped", "peer-two-frames"].includes(variant);
-    const refused = refusedPeer || variant === "unknown-source" || variant === "non-system-row" || variant.endsWith("damage-before-send") || variant === "child-launch" || variant === "missing-row" || variant === "agent-wrong-run" || variant === "agent-missing-producer" || variant === "agent-fold" || variant === "agent-fold-peer-own" || variant === "agent-stop-unmeasured-result";
+    const refused = refusedPeer || variant === "unknown-source" || variant === "non-system-row" || variant.endsWith("damage-before-send") || variant === "child-launch" || variant === "missing-row" || variant === "agent-wrong-run" || variant === "agent-missing-producer" || variant === "agent-fold" || variant === "agent-fold-peer-own" || variant === "agent-stop-unmeasured-result" || variant.includes("-in-validate");
     expect(outgoing).toHaveLength(refused ? 0 : 1);
     expect(sendResult?.isError).toBe(refused ? true : undefined);
     if (!refused) expect((outgoing[0]!.payload as { in_reply_to: number }).in_reply_to).toBe(["bash", "workflow", "timeout-bash"].includes(variant) ? 3 : 1);
-    expect(starts).toHaveLength(refusedPeer || ["unknown-source", "non-system-row", "child-launch", "missing-row", "agent-wrong-run", "agent-missing-producer", "agent-fold", "agent-fold-peer-own", "agent-stop-unmeasured-result"].includes(variant) ? 1 : 2);
+    expect(starts).toHaveLength(refusedPeer || ["unknown-source", "non-system-row", "child-launch", "missing-row", "agent-wrong-run", "agent-missing-producer", "agent-fold", "agent-fold-peer-own", "agent-stop-unmeasured-result", "agent-reset-in-validate", "agent-reset-and-damage-in-validate"].includes(variant) ? 1 : 2)
+    if (variant.includes("-in-validate")) expect(commits).toBe(0);
+    if (variant === "agent-reset-in-validate") expect(failStops).toHaveLength(0);
+    if (variant === "agent-reset-and-damage-in-validate") expect(failStops.length).toBeGreaterThan(0);;
   }, 10000);
 });

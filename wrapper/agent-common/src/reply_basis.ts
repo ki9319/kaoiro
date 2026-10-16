@@ -136,6 +136,8 @@ export class ReplyBasis {
     return !!a && !!b && a.epoch === this.#epoch && b.epoch === this.#epoch &&
       a.basis.size === b.basis.size && [...a.basis].every(([k, n]) => b.basis.get(k) === n);
   }
+  /** True while a detached snapshot belongs to the live epoch, i.e. beginDetached would accept it. */
+  isCurrentDetached(detached: DetachedReplyBasis): boolean { return this.#detached.get(detached)?.epoch === this.#epoch; }
   beginDetached(token: string, detached: DetachedReplyBasis, validateProof: ReplyProofValidator, signal?: AbortSignal, validateState?: () => boolean): void {
     const data = this.#detached.get(detached);
     if (!data || data.epoch !== this.#epoch) throw Error("invalid detached reply basis");
