@@ -2387,9 +2387,10 @@ export class InterAgentTool {
           // the model its delegation had landed when no peer would ever
           // see it — ADR-0051 D3-2 requires reject and timeout to surface
           // here.
+          const proofError = captured && await this.replyBasis.validateBeforeSend(captured);
           const originError = this.#options.canSendInterAgent?.() === false
             ? "admission_fail_stop"
-            : captured && this.replyBasis.beforeSend(captured);
+            : proofError || (captured && this.replyBasis.beforeSend(captured));
           const acceptance: InterAgentAcceptance = originError
             ? { kind: "rejected", reason: originError }
             : await this.#dispatch(envelope, generation);

@@ -22,6 +22,40 @@ function expectUsageGuidance(parsed: Record<string, unknown>, present: boolean):
 }
 
 describe("input-bound reply tickets", () => {
+  it("exports only confirmed defaults and detached imports keep the issuance map across parent retirement", async () => {
+    const basis = new ReplyBasis();
+    basis.begin("parent", [inbound(1)], undefined, true);
+    expect(basis.exportConfirmed({ token: "parent" })).toBeUndefined();
+    basis.confirmInput("parent");
+    const snapshot = basis.exportConfirmed({ token: "parent" })!;
+    const ticket = basis.prepare({ token: "parent" }, "c", "peer", 1)!; ticket.activate();
+    basis.retire("parent");
+    basis.begin("newer", [inbound(3)]); basis.retire("newer");
+    basis.beginDetached("return", snapshot, async () => undefined);
+    const attempt = basis.capture({ token: "return" }, "c", "peer");
+    expect(attempt).toMatchObject({ basis: 1 });
+    expect(basis.capture({ token: "return" }, "c", "peer", 1, ticket.authorization.reply_ticket)).toBe("invalid_reply_ticket");
+    expect(basis.sameDetached(snapshot, basis.exportCompleted())).toBe(false);
+    basis.reset();
+    expect(() => basis.beginDetached("old", snapshot, async () => undefined)).toThrow("invalid detached");
+  });
+  it("awaits the native validator inside the actual send and rechecks retirement after it", async () => {
+    let release!: (result: string | undefined) => void;
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const sendInterAgent = vi.fn(async () => ({ kind: "accepted" as const, stamp: null }));
+    const tool = new InterAgentTool({ config, getState: () => "thinking", send: () => {},
+      replyBasisMode: () => "v1", sendInterAgent });
+    tool.replyBasis.begin("parent", [inbound(1)]);
+    const detached = tool.replyBasis.exportConfirmed({ token: "parent" })!;
+    tool.replyBasis.beginDetached("native", detached, () => { entered(); return new Promise(resolve => { release = resolve; }); });
+    const result = tool.invoke({ to: "peer", conversation_id: "c", kind: "response", body: "reply" }, { origin: { token: "native" } });
+    await started;
+    expect(sendInterAgent).not.toHaveBeenCalled();
+    tool.replyBasis.retire("native"); release(undefined);
+    expect((await result).isError).toBe(true);
+    expect(sendInterAgent).not.toHaveBeenCalled();
+  });
   it("activates a fold ticket only after its hook and credits a used ticket without changing the live default", async () => {
     const prepared = vi.fn();
     const used = vi.fn();
