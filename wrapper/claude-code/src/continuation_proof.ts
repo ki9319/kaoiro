@@ -1,6 +1,7 @@
 import type { DetachedReplyBasis, ReplyBasis } from "@kaoiro/agent-common";
 import { escapeNativeScalar, parseContinuationBlocks, reportToken, MARKER_PREFIX, type NotificationBlock } from "./continuation_markers.js";
 import { ContinuationRegistry, type LaunchCapability } from "./continuation_registry.js";
+import { matchesPeerOpener } from "./native_peer_opener.js";
 import type { NativeAnchor } from "./native_transcript.js";
 
 export interface ContinuationProof {
@@ -57,13 +58,14 @@ export class ContinuationProofs {
     const row = anchor.row;
     const origin = row.origin as Record<string, unknown> | undefined;
     const message = row.message as { role?: unknown; content?: unknown } | undefined;
-    if (!origin || row.promptSource !== "system" || message?.role !== "user" || message.content !== prompt) return { reason: "native_opener_mismatch" };
+    if (!origin || row.promptSource !== "system" || message?.role !== "user") return { reason: "native_opener_mismatch" };
     const claims: Claim[] = [];
     const maps: DetachedReplyBasis[] = [];
     const sources: Array<{ taskId: string; runId: string }> = [];
     if (origin.kind === "peer") {
       if (row.turnOrigin !== "peer" || origin.handback !== true || typeof origin.body !== "string" ||
           typeof origin.senderTaskId !== "string" || origin.from !== origin.senderTaskId) return { reason: "native_peer_mismatch" };
+      if (!matchesPeerOpener(message.content, prompt, origin.from)) return { reason: "native_opener_mismatch" };
       const token = reportToken(origin.body);
       const cap = token ? this.registry.byToken(token) : undefined;
       if (!cap || cap.source !== "Agent" || !this.registry.eligible(cap) || cap.taskId !== origin.senderTaskId ||
@@ -71,6 +73,7 @@ export class ContinuationProofs {
       claims.push({ cap, key: anchor.uuid, completion: false, live: () => this.registry.eligible(cap) }); maps.push(cap.basis);
       sources.push({ taskId: cap.taskId!, runId: cap.runId! });
     } else if (origin.kind === "task-notification") {
+      if (message.content !== prompt) return { reason: "native_opener_mismatch" };
       if (row.turnOrigin !== "task_notification" || (origin.producer !== undefined && origin.producer !== "session-task")) return { reason: "native_task_origin_mismatch" };
       const blocks = parseContinuationBlocks(prompt);
       if (!blocks) return { reason: "native_notification_malformed" };

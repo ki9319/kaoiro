@@ -655,6 +655,12 @@ or tuple-bound completion observed only as a fold quarantines that same slot
 from creating a later root. A quoted marker cannot quarantine another launch. Native fold attachment that cannot be
 proved remains denial-only.
 
+The peer opener uses the pinned native descendant preamble and warning around
+the exact single hook frame, with native sender escaping and no unwrapped
+fallback. Only the two outer frame tags may occur at column zero. Missing or
+changed warning, mid-turn wrapping, extra frames or surrounding bytes refuse.
+Task-notification bodies still equal the hook bytes directly.
+
 The registry holds at most 64 capabilities, 8,192 source calls and task histories,
 and 256 retired run IDs per task. It never evicts live authority to make room;
 capacity exhaustion refuses new claims with a diagnostic. Instrumented text is
