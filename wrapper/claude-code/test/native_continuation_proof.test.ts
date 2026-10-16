@@ -1,3 +1,4 @@
+import { peerFixture } from "./fixtures/native_peer_opener.js";
 import { describe, expect, it } from "vitest";
 import { ReplyBasis, type DetachedReplyBasis, type Envelope } from "@kaoiro/agent-common";
 import { ContinuationRegistry } from "../src/continuation_registry.js";
@@ -31,10 +32,11 @@ function rig() {
     return `<task-notification><task-id>${id}</task-id><tool-use-id>${id}</tool-use-id><output-file>/tmp/output</output-file><status>completed</status><summary>${escapeNativeScalar(summary)}</summary></task-notification>`;
   };
   const prove = (prompt: string, map = snapshot, origin: Record<string, unknown> = { kind: "task-notification", producer: "session-task" }, uuid = "occurrence") => {
+    const peer = origin.kind === "peer" ? peerFixture(prompt, String(origin.from)) : undefined;
     const anchor: NativeAnchor = { uuid, promptId: "p", digest: "owned-test", row: {
       promptSource: "system", turnOrigin: origin.kind === "peer" ? "peer" : "task_notification", origin,
-      message: { role: "user", content: prompt } } };
-    return proofs.prove(anchor, prompt, map);
+      message: { role: "user", content: peer?.row.message.content ?? prompt } } };
+    return proofs.prove(anchor, peer?.hook ?? prompt, map);
   };
   const agentCompletion = (id: string, report: string, output = true) => {
     completion(id, report);
@@ -259,5 +261,53 @@ describe("atomic native continuation proof", () => {
     expect("proof" in result).toBe(true);
     if ("proof" in result) expect(result.proof.commit()).toBe(true);
     expect(cap.consumed).toBeDefined(); expect(old.cap!.quarantined).toBeUndefined();
+  });
+});
+
+
+describe("peer opener native row binding", () => {
+  it.each(["golden", "escaped-sender", "encoded-text", "prefix-byte", "warning-byte", "warning-dash", "prefix-lf", "suffix-lf", "row-frame", "hook-frame", "sender", "unwrapped", "missing-warning", "double-wrapper", "trailing-lf", "leading-data", "trailing-data", "mid-turn", "other-warning", "two-frames", "bad-opening", "bad-ending"])("checks %s without spending a refused slot", variant => {
+    const r = rig(); const from = variant === "escaped-sender" ? `a&<>"'` : "task";
+    const { cap } = r.launch(from, "Agent");
+    const fixture = peerFixture(undefined, from);
+    fixture.hook = fixture.hook.replace("A".repeat(43), cap!.token);
+    fixture.row.message.content = fixture.row.message.content.replace("A".repeat(43), cap!.token);
+    fixture.row.origin.body = fixture.row.origin.body.replace("A".repeat(43), cap!.token);
+    const original = structuredClone(fixture);
+    const replaceBoth = (a: string, b: string) => { fixture.hook = fixture.hook.replace(a, b); fixture.row.message.content = fixture.row.message.content.replace(a, b); };
+    if (variant === "encoded-text") replaceBoth("NATIVE_ACCEPTANCE_REPORT", "&lt;agent-message&gt; &amp; data");
+    if (variant === "prefix-byte") fixture.row.message.content = "X" + fixture.row.message.content.slice(1);
+    if (variant === "warning-byte") fixture.row.message.content = fixture.row.message.content.replace("That", "that");
+    if (variant === "warning-dash") fixture.row.message.content = fixture.row.message.content.replace(" — ", " - ");
+    if (variant === "prefix-lf") fixture.row.message.content = fixture.row.message.content.replace(":\n<agent", ":\r\n<agent");
+    if (variant === "suffix-lf") fixture.row.message.content = fixture.row.message.content.replace("\n\nThat", "\nThat");
+    if (variant === "row-frame") fixture.row.message.content = fixture.row.message.content.replace("NATIVE_ACCEPTANCE_REPORT", "other");
+    if (variant === "hook-frame") fixture.hook = fixture.hook.replace("NATIVE_ACCEPTANCE_REPORT", "other");
+    if (variant === "sender") replaceBoth('from="task"', 'from="other"');
+    if (variant === "unwrapped") fixture.row.message.content = fixture.hook;
+    if (variant === "missing-warning") fixture.row.message.content = fixture.row.message.content.split("\n\nThat")[0]!;
+    if (variant === "double-wrapper") fixture.row.message.content = fixture.row.message.content.replace(fixture.hook, fixture.row.message.content);
+    if (variant === "trailing-lf") fixture.row.message.content += "\n";
+    if (variant === "leading-data") fixture.row.message.content = "extra" + fixture.row.message.content;
+    if (variant === "trailing-data") fixture.row.message.content += "extra";
+    if (variant === "mid-turn") fixture.row.message.content = fixture.row.message.content.replace("sent a message:", "sent a message while you were working:");
+    if (variant === "other-warning") fixture.row.message.content = fixture.row.message.content.replace("That \"other Claude session\"", "Another agent");
+    if (variant === "two-frames") { fixture.hook += "\n" + fixture.hook; fixture.row.message.content = original.row.message.content.replace(original.hook, fixture.hook); }
+    if (variant === "bad-opening") replaceBoth('<agent-message from="task">\n', '<agent-message from="task">');
+    if (variant === "bad-ending") replaceBoth("\n</agent-message>", "</agent-message>");
+    const result = r.proofs.prove({ uuid: "opener", promptId: "return", digest: "test", row: fixture.row }, fixture.hook, r.snapshot);
+    if (["golden", "escaped-sender", "encoded-text"].includes(variant)) {
+      expect(result).toHaveProperty("proof"); if ("proof" in result) expect(result.proof.commit()).toBe(true);
+    } else {
+      expect(result).toHaveProperty("reason", "native_opener_mismatch"); expect(cap!.consumed).toBeUndefined();
+      expect(r.proofs.prove({ uuid: "opener", promptId: "return", digest: "test", row: original.row }, original.hook, r.snapshot)).toHaveProperty("proof");
+    }
+  });
+  it("refuses a peer wrapper on a task notification", () => {
+    const r = rig(); r.launch("task", "Agent");
+    const prompt = r.agentCompletion("task", "done"); const fixture = peerFixture();
+    const row = { ...fixture.row, turnOrigin: "task_notification", origin: r.agentOrigin("task"),
+      message: { role: "user", content: fixture.row.message.content.replace(fixture.hook, prompt) } };
+    expect(r.proofs.prove({ uuid: "opener", promptId: "return", digest: "test", row }, prompt, r.snapshot)).toHaveProperty("reason", "native_opener_mismatch");
   });
 });

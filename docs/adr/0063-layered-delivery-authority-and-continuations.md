@@ -246,6 +246,15 @@ fallback. Explicitly canceled or claim-retired runs cannot create new claims;
 already proved leases continue until their root's terminal or host authority invalidation.
 
 Agent peer hand-back retains its canonical marker and native peer proof.
+Peer hand-back binds the current hook's entire single `agent-message` frame
+to the native descendant root row: the fixed CLI 2.1.293 preamble, that exact
+frame, then the fixed descendant warning. Sender attribute escaping matches
+the native formatter; only the outer opening and closing frame tags may occur
+at column zero. Plain peer rows, missing or changed warnings, mid-turn wrappers,
+extra frames and surrounding data refuse. No report sanitizer is duplicated;
+`origin.body` remains the canonical-marker proof field. Task notifications
+continue to require byte-equal hook/row bodies and never accept this wrapper.
+
 Agent native completion uses the same accepted launch capability, selected by
 that completion's native call/task/run tuple and the B opener's matching
 origin.runId with producer=session-task. This includes unset/default permission

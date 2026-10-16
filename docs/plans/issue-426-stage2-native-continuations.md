@@ -718,7 +718,7 @@ review either. The following are acceptance on the reviewed product candidate:
 | P6 fold/terminal | Native missing fold attachment remains denial-only. Accept 1/2/16 proved blocks, multiple Monitor completions/events and Monitor+Bash/Workflow with a common basis; one receipt/owner and atomic consumption. Completion+event within one block is one claim; WS close's optional producer settles once | Foreign opener then marked fold, second launch's fold, fresh-root overlap, wrong folded sender terminal, conflicting/regressing result index. Quarantined token cannot admit another root; late row cannot revive a refused call. Duplicate completion+event cannot double start/settle; 17 blocks, one unproved sibling, duplicate source occurrence or incompatible snapshots commit nothing. For Monitor(n)+Bash/Workflow(n+1) and Monitor(n)+Monitor(n+1), assert the accepted legacy control versus unified-mode visible batch-basis-conflict refusal, zero new owner/send and zero partial consumption. Mutate all-block/rollback and bound guards; mixed-map conflict never unions or selects a first/newest map |
 | P7 live evidence | Append-only growth and actual compact boundary retaining anchor preserve legitimate owner | At binding and final dispatch separately truncate/delete/replace/restore/change earlier bytes/drop opener/conflict identity. Product gate sends zero. Cut validator wiring and integrity guard separately for red/restored |
 | P8 description/permission | Command or ws URL/options and payload/EOF/stderr/status/lifecycle behavior unchanged; exact final suffix/description in notices/display, including native error/expiry/suppression/re-arm notices and binary handling when exposed; native/broker allow/deny/ask and original-input rejecting hook. Two hook orders do not assume update chaining | Refused original command remains unexecuted after metadata change; ask still reaches broker in the approved exact permission modes/settings. Canonical SendMessage message reaches the new child while stale content cannot select/arm a capability. Mutate command-preservation, actual-success join and native permission plumbing separately; compare effective inputs/execution marks and invalidate preparation when another hook overwrites marker/command/message. Mutation that arms from planned input alone or broadens allowedTools must fail; no native-parser duplicate or broker override |
-| P9 landing | Default off and startup exclusivity; affected wrapper full suites/typecheck/build and mandatory runner typecheck/test; reviewer gates exact final landing candidate; production-equivalent CI | Missing mandatory validator and oldMatch-or-newProof bypass must be caught through production entry point. Rebase/target changes require final evidence; no helper asset is part of description-only candidate |
+| P9 landing | Recorded native peer row/hook golden independent of product constants; installed SDK version and Linux x64 native binary hash checked in CI, requiring review on pin updates; default off and startup exclusivity; affected wrapper full suites/typecheck/build and mandatory runner typecheck/test; reviewer gates exact final landing candidate; production-equivalent CI | Missing mandatory validator and oldMatch-or-newProof bypass must be caught through production entry point. Rebase/target changes require final evidence; no helper asset is part of description-only candidate |
 
 M1's strict delayed-old-report negative is not measured by R301 or E7. R301
 proves a new execution can reuse an old marker; E7 demonstrates fresh-message
@@ -777,6 +777,15 @@ Agent reports have two proof variants with one shared capability/accepted-call/
 task/run slot. This section takes precedence over peer-only Agent clauses above.
 Permission mode never grants authority or changes the selected proof.
 
+Peer hand-back binds the current hook's entire single `agent-message` frame
+to the native descendant root row: the fixed CLI 2.1.293 preamble, that exact
+frame, then the fixed descendant warning. Sender attribute escaping matches
+the native formatter; only the outer opening and closing frame tags may occur
+at column zero. Plain peer rows, missing or changed warnings, mid-turn wrappers,
+extra frames and surrounding data refuse. No report sanitizer is duplicated;
+`origin.body` remains the canonical-marker proof field. Task notifications
+continue to require byte-equal hook/row bodies and never accept this wrapper.
+
 Peer hand-back requires the canonical suffix marker and native peer sender,
 handback and task consistency. Completion selects the capability through the
 same recorded native task_notification's tool_use_id/task_id/run_id, with
@@ -832,3 +841,14 @@ fold reservation, duplicate slots, mixed maps, reactivation and actual-send
 validator mutations for an old source and Agent. Auto-only evidence does not
 establish whole-class acceptance. Final native acceptance and independent
 implementation review remain pending.
+
+
+Peer opener acceptance also measures a hand-back arriving while a root is busy,
+then opening its own root after that root finishes. Record whether formatting
+happens on arrival or dispatch; a mid-turn-shaped row must refuse, and an actual
+fold follows the existing quarantine rule. Golden row/hook bytes come from the
+recorded native run with only identities and working directory redacted. Mutate
+one warning character, wrapper equality, frame sender/boundaries, single-frame
+count and completion body equality separately; each relevant negative must
+fail before restoring the guard. The installed-pin check must fail for a changed
+native artifact; it does not claim compatibility with an unmeasured platform.
