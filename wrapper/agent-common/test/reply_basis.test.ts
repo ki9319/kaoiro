@@ -39,6 +39,16 @@ describe("input-bound reply tickets", () => {
     basis.reset();
     expect(() => basis.beginDetached("old", snapshot, async () => undefined)).toThrow("invalid detached");
   });
+  it("reports a detached snapshot as stale once the epoch advances", () => {
+    const basis = new ReplyBasis();
+    basis.begin("parent", [inbound(1)]);
+    const snapshot = basis.exportConfirmed({ token: "parent" })!;
+    expect(basis.isCurrentDetached(snapshot)).toBe(true);
+    expect(basis.isCurrentDetached(Object.freeze({}) as typeof snapshot)).toBe(false);
+    basis.reset();
+    expect(basis.isCurrentDetached(snapshot)).toBe(false);
+    expect(basis.isCurrentDetached(basis.exportCompleted())).toBe(true);
+  });
   it("awaits the native validator inside the actual send and rechecks retirement after it", async () => {
     let release!: (result: string | undefined) => void;
     let entered!: () => void;
