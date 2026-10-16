@@ -88,6 +88,11 @@ reports and Monitor events/completions. Source-owner retirement does not erase
 that copy. It contains no waiter, recovery or fold tickets, abort signal, or
 pending input, and session reset invalidates it. An inactive reactivation gets
 a new snapshot from its confirmed root; known live-target messages do not.
+Agent peer hand-back and native completion share one report slot and the same
+launch snapshot. Completion selects that snapshot by its native call/task/run
+and matching opener runId; result markers are ignored. Only peer hand-back
+requires the canonical report marker. Default permission mode can return by
+completion without advertising a hand-back tool.
 
 Bash and Workflow retain the completed-map snapshot taken at their opener.
 A folded notice keeps the already-live owner's snapshot. Multiple proved blocks

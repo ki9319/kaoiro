@@ -495,8 +495,9 @@ Measure large-transcript prefix cost before setting a performance criterion.
 
 Choose conservative reservation/quarantine now; remove E5 as a pre-design
 external-availability prerequisite. A folded marker grants no origin. A known
-live Agent marker observed in an unresolved delivered input reserves or
-quarantines that capability against a different root's claim. Denial-only
+live Agent peer marker or native tuple-bound completion observed in an unresolved
+delivered input reserves or quarantines that capability against a different
+root's claim. Completion result markers are never scanned. Denial-only
 quarantine is distinct from a positive, consumed report occurrence. An
 unproved source cannot grant rights merely because its text contains a token.
 

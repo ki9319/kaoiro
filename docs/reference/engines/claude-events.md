@@ -623,13 +623,17 @@ are allowed; replacement, deletion, truncation, malformed complete rows or prior
 byte changes invalidate the epoch. The actual send awaits this check again,
 then checks the live origin synchronously before dispatch.
 
-Monitor event and completion blocks are parsed structurally, before scalar
+Agent completion and Monitor event/completion blocks are parsed structurally, before scalar
 comparison. Escaped tag-looking payload remains data. One prompt may contain
 1–16 complete independently proved blocks; invalid siblings and incompatible
 reply snapshots refuse the whole batch without partial consumption. Workflow
 metadata is allowed only for Workflow; ordinary Bash still requires its exact
 native output path and summary, and Workflow retains the root implicit-background
 rule. Unknown `local_bash` tasks cannot be inferred to be Bash instead of Monitor.
+Agent's note, numeric usage, fixed relayed-Artifact warning and optional worktree
+fields have a separate strict grammar. Available native metadata must agree;
+paths are inert and never opened to obtain a report. A known completion output
+path is required, while omission from an Agent notice is allowed.
 
 Task/run IDs are opaque. A newer observed execution retires old claims even when
 no replacement token was issued. TaskStop suspends the exact captured run until
