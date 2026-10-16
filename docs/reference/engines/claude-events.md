@@ -650,7 +650,9 @@ fail-stop, close and generation replacement still revoke it. A folded report
 never rebinds a live owner. Agent peer hand-back and native completion share
 one report slot. Completion selects the accepted call/task/run from its native
 frame, requires opener producer=session-task and matching origin.runId, and
-compares the frame report to result. Result markers are ignored. A peer marker
+compares the frame report to result. A prompt carries one origin.runId, so
+Agent completions of different runs in one prompt refuse the whole batch
+([ADR-0063](../../adr/0063-layered-delivery-authority-and-continuations.md)). Result markers are ignored. A peer marker
 or tuple-bound completion observed only as a fold quarantines that same slot
 from creating a later root. A quoted marker cannot quarantine another launch. Native fold attachment that cannot be
 proved remains denial-only.

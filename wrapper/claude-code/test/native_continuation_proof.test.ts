@@ -246,6 +246,22 @@ describe("atomic native continuation proof", () => {
     const valid = r.prove(prompt + bash, r.snapshot, r.agentOrigin("a")); expect("proof" in valid).toBe(true);
     if ("proof" in valid) expect(valid.proof.commit()).toBe(true);
   });
+  describe("one origin run per prompt", () => {
+    it("refuses Agent completions of different runs on one map, consuming neither", () => {
+      const r = rig(); const a = r.launch("a", "Agent").cap!, b = r.launch("b", "Agent").cap!;
+      const both = r.agentCompletion("a", "report a") + r.agentCompletion("b", "report b");
+      expect(r.prove(both, r.snapshot, r.agentOrigin("a"))).toHaveProperty("reason", "native_agent_origin_mismatch");
+      expect(r.prove(both, r.snapshot, r.agentOrigin("b"))).toHaveProperty("reason", "native_agent_origin_mismatch");
+      expect(a.consumed).toBeUndefined(); expect(b.consumed).toBeUndefined();
+    });
+    it("accepts one Agent completion whose run is the origin, alone or beside a Monitor event", () => {
+      const r = rig(); const a = r.launch("a", "Agent").cap!; r.launch("m", "Monitor");
+      const report = r.agentCompletion("a", "report a");
+      const alone = r.prove(report, r.snapshot, r.agentOrigin("a"), "alone"), mixed = r.prove(report + r.event("m"), r.snapshot, r.agentOrigin("a"), "mixed");
+      expect("proof" in alone && "proof" in mixed).toBe(true);
+      if ("proof" in mixed) { expect(mixed.proof.commit()).toBe(true); expect(a.consumed).toBeDefined(); }
+    });
+  });
   it("reactivation selects the SendMessage call even when run2 repeats run1's marker", () => {
     const r = rig(); const old = r.launch("a", "Agent"); r.agentCompletion("a", "old report");
     const effective = r.registry.prepare("resume", "SendMessage", { to: "a", message: "resume" }, "new-parent", r.snapshot)!;

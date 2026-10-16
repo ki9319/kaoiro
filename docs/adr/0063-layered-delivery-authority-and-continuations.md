@@ -219,7 +219,7 @@ for all peers since then.
 
 ## Amendment (2026-10-16, launch-bound native continuations)
 
-The operator selected the wrapper-issued capability design for [issue #426](https://github.com/sakuraiyuta/kaoiro/issues/426), including [issue #674](https://github.com/sakuraiyuta/kaoiro/issues/674). The director approved the design after five review rounds with no remaining must-fix finding. This amendment records the accepted decision; final implementation acceptance and independent implementation review are pending. Landing remains default off, and production enablement requires a separate operator decision.
+The operator selected the wrapper-issued capability design for [issue #426](https://github.com/sakuraiyuta/kaoiro/issues/426), including [issue #674](https://github.com/sakuraiyuta/kaoiro/issues/674). The director approved the design after eight independent design review rounds (six must-fix findings in total, none remaining). This amendment records the accepted decision; final implementation acceptance and independent implementation review are pending. Landing remains default off, and production enablement requires a separate operator decision.
 
 ### D6 supplement: launch proof and native occurrence
 
@@ -369,7 +369,15 @@ opener map can make the whole batch refuse. Two Monitor completions launched
 under different maps can likewise refuse. Legacy treated all those completions
 with the common opener-time map and could admit them. The director accepted this bounded regression under the approved design. P6 requires visible
 batch-basis-conflict refusal without partial consumption; do not claim full
-legacy compatibility or introduce multiple owners to hide the difference. Historical
+legacy compatibility or introduce multiple owners to hide the difference.
+A second limit is not a basis conflict: a prompt carries one `origin.runId`, and
+every Agent completion block must match it. Agent completions with different
+run IDs in one prompt therefore refuse the whole batch even when their maps
+agree, and nothing is partially consumed; legacy admitted them when every
+candidate matched. Native may never batch Agent completions this way, which is
+unmeasured. Relaxing the match needs a pin showing one row with several Agent
+completions and an origin that names only one of them, as a separate design
+change. Historical
 Monitor suffixes are preserved; repeated re-arm can reach a length bound and
 refuse instrumentation visibly, rather than silently strip/truncate text. E9 establishes applicable auto-mode explicit ask/deny/allow and independent
 reject controls, with a bounded whole-Agent exclusion disposition rather than
