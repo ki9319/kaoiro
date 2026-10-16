@@ -185,7 +185,7 @@ export type {
 } from "./types.js";
 
 export { ReplyBasis, REPLY_AUTHORIZATION_USAGE_GUIDANCE, ordinaryPeerInput, bindToolResultHandoff, handoffToolResult, discardToolResult } from "./reply_basis.js";
-export type { ReplyOrigin, ReplyAttempt, ReplyAuthorization } from "./reply_basis.js";
+export type { ReplyOrigin, ReplyAttempt, ReplyAuthorization, DetachedReplyBasis, ReplyProofValidator } from "./reply_basis.js";
 
 export { ToolOrigins } from "./tool_origins.js";
 export { workToolDescriptors } from "./work_tools.js";

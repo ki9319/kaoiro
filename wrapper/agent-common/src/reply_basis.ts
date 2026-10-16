@@ -6,6 +6,10 @@ export interface ReplyOrigin {
   readonly token: string;
   readonly signal?: AbortSignal;
 }
+declare const detachedBasisBrand: unique symbol;
+/** Opaque default map: it carries neither a source signal nor reply tickets. */
+export interface DetachedReplyBasis { readonly [detachedBasisBrand]: true }
+export type ReplyProofValidator = () => Promise<string | undefined>;
 export interface ReplyAuthorization {
   in_reply_to: number;
   reply_ticket: string;
@@ -15,6 +19,9 @@ interface Snapshot {
   controller: AbortController;
   basis: ReadonlyMap<string, number>;
   signal?: AbortSignal;
+  proofRequired?: boolean;
+  validateProof?: ReplyProofValidator;
+  validateState?: () => boolean;
 }
 interface Ticket {
   token: string;
@@ -59,6 +66,8 @@ export function ordinaryPeerInput(envelope: Envelope): boolean {
 
 /** Session-owned input provenance. Queue receipt never calls observe(). */
 export class ReplyBasis {
+  readonly #detached = new WeakMap<DetachedReplyBasis, { epoch: number; basis: ReadonlyMap<string, number> }>();
+  #epoch = 0;
   readonly #delivered = new Map<string, number>();
   readonly #completed = new Map<string, number>();
   readonly #confirmedByToken = new Map<string, Map<string, number>>();
@@ -112,6 +121,40 @@ export class ReplyBasis {
     const controller = new AbortController();
     this.#snapshots.set(token, { controller, basis: new Map(this.#completed), signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal });
   }
+  #detach(basis: ReadonlyMap<string, number>): DetachedReplyBasis {
+    const detached = Object.freeze({}) as DetachedReplyBasis;
+    this.#detached.set(detached, { epoch: this.#epoch, basis: new Map(basis) });
+    return detached;
+  }
+  exportConfirmed(origin: ReplyOrigin): DetachedReplyBasis | undefined {
+    if (this.live(origin) || this.#pendingInputByToken.has(origin.token)) return undefined;
+    return this.#detach(this.#snapshots.get(origin.token)!.basis);
+  }
+  exportCompleted(): DetachedReplyBasis { return this.#detach(this.#completed); }
+  sameDetached(left: DetachedReplyBasis, right: DetachedReplyBasis): boolean {
+    const a = this.#detached.get(left), b = this.#detached.get(right);
+    return !!a && !!b && a.epoch === this.#epoch && b.epoch === this.#epoch &&
+      a.basis.size === b.basis.size && [...a.basis].every(([k, n]) => b.basis.get(k) === n);
+  }
+  beginDetached(token: string, detached: DetachedReplyBasis, validateProof: ReplyProofValidator, signal?: AbortSignal, validateState?: () => boolean): void {
+    const data = this.#detached.get(detached);
+    if (!data || data.epoch !== this.#epoch) throw Error("invalid detached reply basis");
+    if (this.#snapshots.has(token)) throw Error("SDK turn token reused");
+    const controller = new AbortController();
+    this.#confirmedByToken.set(token, new Map());
+    this.#snapshots.set(token, { basis: new Map(data.basis), controller,
+      signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+      proofRequired: true, validateProof, ...(validateState ? { validateState } : {}) });
+  }
+  async validateBeforeSend(attempt: ReplyAttempt): Promise<string | undefined> {
+    const invalid = this.beforeSend(attempt);
+    if (invalid) return invalid;
+    const snapshot = this.#snapshots.get(attempt.origin.token)!;
+    if (!snapshot.proofRequired) return undefined;
+    if (!snapshot.validateProof) return "missing_native_proof_validator";
+    try { return await snapshot.validateProof() ?? this.beforeSend(attempt); }
+    catch { return "native_proof_invalid"; }
+  }
   confirmInput(token: string): void {
     const pending = this.#pendingInputByToken.get(token);
     if (!pending || !this.#snapshots.has(token)) return;
@@ -141,7 +184,7 @@ export class ReplyBasis {
     for (const [value, ticket] of this.#tickets) if (ticket.cid === cid) this.#tickets.delete(value);
     // Keep issuance facts across forget(): deleting a live ticket must not make an issued tuple look never-issued.
   }
-  reset(): void { for (const token of this.#snapshots.keys()) this.retire(token); this.#delivered.clear(); this.#completed.clear(); this.#confirmedByToken.clear(); this.#pendingInputByToken.clear(); this.#tickets.clear(); this.#issuedHistory.clear(); }
+  reset(): void { this.#epoch++; for (const token of this.#snapshots.keys()) this.retire(token); this.#delivered.clear(); this.#completed.clear(); this.#confirmedByToken.clear(); this.#pendingInputByToken.clear(); this.#tickets.clear(); this.#issuedHistory.clear(); }
   live(origin: ReplyOrigin | undefined): string | undefined {
     if (!origin) return "unbound_tool_call";
     const snapshot = this.#snapshots.get(origin.token);
@@ -200,7 +243,13 @@ export class ReplyBasis {
     history.tuples.add(tuple);
   }
   beforeSend(attempt: ReplyAttempt): string | undefined {
-    return this.live(attempt.origin) ?? (attempt.ticket && this.#clock() >= attempt.ticket.expires ? "expired_reply_ticket" : undefined);
+    const live = this.live(attempt.origin);
+    if (live) return live;
+    const snapshot = this.#snapshots.get(attempt.origin.token)!;
+    if (snapshot.proofRequired && !snapshot.validateProof) return "missing_native_proof_validator";
+    try { if (snapshot.validateState?.() === false) return "stale_native_lease"; }
+    catch { return "stale_native_lease"; }
+    return attempt.ticket && this.#clock() >= attempt.ticket.expires ? "expired_reply_ticket" : undefined;
   }
   prepare(origin: ReplyOrigin, cid: string, peer: string, basis: number, renewal = false): {
     authorization: ReplyAuthorization; valid: () => boolean; activate: () => boolean; discard: () => void;
