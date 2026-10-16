@@ -48,7 +48,7 @@ kaoiro — a system that visualizes the state of multiple CLI AI agents as chara
 ## Commands
 
 - wrapper (TypeScript): `cd wrapper && pnpm test` / `pnpm typecheck` /
-  `pnpm build` (fan-out shim for four packages).
+  `pnpm build` (fan-out shim for six packages).
 - runner (TypeScript): `cd runner && pnpm test` / `pnpm typecheck` /
   `pnpm build`.
 - dashboard (Svelte): `cd dashboard && pnpm test` / `pnpm check` /

@@ -177,24 +177,27 @@ pids+=("$!")
 # wrapper code, run
 #   pnpm -r --filter '@kaoiro/wrapper-core' \
 #     --filter '@kaoiro/agent-common' --filter '@kaoiro/claude-code' \
-#     --filter '@kaoiro/codex' run build
+#     --filter '@kaoiro/codex' --filter '@kaoiro/antigravity' \
+#     --filter '@kaoiro/grok' run build
 # and restart the target agent from the dashboard (「復元」). To opt back
 # into wrapper hot reload (only when you know no running agent is the
 # editing Claude wrapper), export KAOIRO_WRAPPER_DEV=1 before invoking
 # scripts/dev.sh.
 #
-# Prebuild the 5 wrapper packages before tsx starts: their package.json all
+# Prebuild the 6 wrapper packages before tsx starts: their package.json all
 # point `main` at `./dist/index.js` (phase-13 "typecheck/test は src、runtime
 # は dist" 分離; ADR-0017/0032 F1/0057 F1). Under the default (dist) launch
 # the runner needs those dist files to exist; under KAOIRO_WRAPPER_DEV=1 the
 # tsx entry still resolves `@kaoiro/codex` etc. at top-level
 # (runner/src/config.ts) so a missing dist ENOENTs before the watch loop
-# even starts. `wrapper/` 直下は非メンバの meta shim なので root から
-# `-r --filter` で 5 パッケージだけ topo build させる。
+# even starts. `wrapper/` itself is a non-member meta shim, so build the six
+# packages from the root with `-r --filter` in topological order. grok is
+# required because the runner imports `@kaoiro/grok`.
 ( cd "$root/runner" && pnpm install </dev/null &&
   cd "$root" && pnpm -r --filter '@kaoiro/wrapper-core' \
     --filter '@kaoiro/agent-common' --filter '@kaoiro/claude-code' \
-    --filter '@kaoiro/codex' --filter '@kaoiro/antigravity' run build &&
+    --filter '@kaoiro/codex' --filter '@kaoiro/antigravity' \
+    --filter '@kaoiro/grok' run build &&
   cd "$root/runner" &&
   exec pnpm exec tsx watch src/cli.ts runner.config.json
 ) </dev/null 2>&1 | tee -a "$logdir/runner.log" &

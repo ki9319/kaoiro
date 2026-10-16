@@ -115,9 +115,10 @@ trap cleanup INT TERM EXIT
 # ADR-0057 F1 — package `main` points at `./dist/index.js`). `pnpm install`
 # runs FIRST because each package's build is `tsc -p tsconfig.build.json`
 # — on a fresh clone the filtered build would otherwise fail with `tsc:
-# not found` before node_modules is ever populated. `wrapper/` 直下は非メ
-# ンバの meta shim なので root から `-r --filter` で 6 パッケージだけ topo
-# build させる。runner が `@kaoiro/grok` を import するため grok も必須。
+# not found` before node_modules is ever populated. `wrapper/` itself is a
+# non-member meta shim, so build the six packages from the root with
+# `-r --filter` in topological order. grok is required because the runner
+# imports `@kaoiro/grok`.
 echo "dogfood: installing workspace deps + building wrapper packages..."
 ( cd "$root" && pnpm install </dev/null &&
   pnpm -r --filter '@kaoiro/wrapper-core' \
