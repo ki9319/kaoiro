@@ -10,7 +10,7 @@ import { marker, parseContinuationBlocks, reportToken } from "../src/continuatio
 const scratch: string[] = [];
 afterEach(async () => { await Promise.all(scratch.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 async function file() {
-  const dir = await mkdtemp(join(tmpdir(), "kogane-426-reader-")); scratch.push(dir);
+  const dir = await mkdtemp(join(tmpdir(), "kaoiro-426-reader-")); scratch.push(dir);
   return join(dir, "transcript.jsonl");
 }
 const row = { type: "user", sessionId: "s", promptId: "p", uuid: "u", isSidechain: false,
