@@ -1,3 +1,8 @@
+import type { ReplyBasis, DetachedReplyBasis, ReplyOrigin } from "@kaoiro/agent-common";
+import { NativeTranscriptReader, type NativeAnchor } from "./native_transcript.js";
+import { ContinuationRegistry } from "./continuation_registry.js";
+import { ContinuationProofs } from "./continuation_proof.js";
+import { parseContinuationBlocks } from "./continuation_markers.js";
 import { MAX_COALESCED_BYTES, MAX_COALESCED_MESSAGES, ToolOrigins, withAgentMarker } from "@kaoiro/agent-common";
 import { DeliveryPolicyController } from "@kaoiro/wrapper-core";
 // Agent host — runs a query() session, derives state from its message stream,
@@ -379,6 +384,8 @@ export type {
 } from "@kaoiro/agent-common";
 
 export interface AgentHostOptions {
+  nativeContinuations?: boolean;
+  nativeReplyBasis?: ReplyBasis;
   deliveryPolicy?: DeliveryPolicyController;
   /** Invoked on every state transition with the common envelope. */
   onState: (envelope: Envelope) => void;
@@ -803,6 +810,13 @@ export class AgentHost implements EngineAdapter {
    * abort. #input() will not yield another queued input until this becomes
    * null, applying wrapper-side backpressure to the SDK's eager pull. */
   #activeTurn: QueuedTurn | NotificationTurn | null = null;
+  #nativeRegistry: ContinuationRegistry | undefined;
+  #nativeProofs: ContinuationProofs | undefined;
+  #nativeReader: NativeTranscriptReader | undefined;
+  #nativeEpoch = 0;
+  #pendingNative: { promptId: string; sessionId: string; prompt: string; basis: DetachedReplyBasis; controller: AbortController; claimsLive: () => boolean } | undefined;
+  readonly #nativeCallDeadlines = new Map<string, number>();
+  readonly #nativeLeases = new Map<string, { anchor: NativeAnchor; origin: Record<string, unknown>; sources: ReadonlyArray<{ taskId: string; runId: string }>; epoch: number }>();
   readonly #notificationCandidates = new Map<string, NotificationCandidate>();
   readonly #taskRecords = new Map<string, TaskRecord>();
   #taskRecordsFullWarned = false;
@@ -1688,6 +1702,7 @@ export class AgentHost implements EngineAdapter {
    *  Clears the TTL GC interval so the host does not keep the Node event
    *  loop alive after the session has settled. */
   close(): void {
+    this.#invalidateNative();
     this.toolOrigins.retire();
     if (this.#activeTurn?.kind === "sdk_notification") this.toolOrigins.retireIndependent(this.#activeTurn.turnToken);
     this.#clearNotificationCandidates();
@@ -1739,6 +1754,8 @@ export class AgentHost implements EngineAdapter {
    *  inheriting half-staged state. With no pending uploads the loop is a
    *  no-op, preserving the legacy interrupt-only behaviour. */
   async interrupt(): Promise<void> {
+    const control = this.#nativeRegistry?.beginInterrupt();
+    this.#pendingNative?.controller.abort();
     this.toolOrigins.retire();
     if (this.#activeTurn?.kind === "sdk_notification") this.toolOrigins.retireIndependent(this.#activeTurn.turnToken);
     this.#clearNotificationCandidates();
@@ -1751,6 +1768,10 @@ export class AgentHost implements EngineAdapter {
     this.#pendingUploads.clear();
     try {
       await this.#query?.interrupt();
+      if (control !== undefined) this.#nativeRegistry?.endInterrupt(control, true);
+    } catch (error) {
+      if (control !== undefined) this.#nativeRegistry?.endInterrupt(control, false);
+      throw error;
     } finally {
       // `Query.interrupt()` resolves when its control request is acknowledged,
       // not when the current output stream has drained. Keep the active token
@@ -1759,6 +1780,11 @@ export class AgentHost implements EngineAdapter {
       // B was yielded (issue #236 review must-fix 1).
       await this.#reconcilePendingTasklistRefreshes("interrupt");
     }
+  }
+
+  async stopTask(taskId: string): Promise<void> {
+    this.#nativeRegistry?.stopTask(taskId);
+    await this.#query?.stopTask(taskId);
   }
 
   /** Requests an interrupt only when this exact watchdog token still owns the
@@ -1850,6 +1876,7 @@ export class AgentHost implements EngineAdapter {
   }
 
   #openInterval(known: string | null = this.#sessionId): void {
+    this.#nativeRegistry?.tick(true);
     this.#intervalSession = known;
   }
 
@@ -1890,6 +1917,7 @@ export class AgentHost implements EngineAdapter {
    * the caller has already validated. The result is displayed but settles no
    * admitted token. */
   #drainForeignOccupancy(message: SDKMessage, result: ResultPayload): void {
+    this.#nativeRegistry?.tick(false);
     const occupancy = this.#foreignOccupancy!;
     if (message.type !== "result") return;
     this.#emitResult(result, sdkMessageToCost(message));
@@ -1908,6 +1936,7 @@ export class AgentHost implements EngineAdapter {
     cancellationKind: "watchdog_fail_stop" | "admission_fail_stop" | "receipt_timeout_fail_stop",
     onFreeze: () => void,
   ): boolean {
+    this.#invalidateNative();
     this.#admissionFailStopped = true;
     this.#closed = true;
     this.#wakeReceiptWaiters();
@@ -2271,7 +2300,7 @@ export class AgentHost implements EngineAdapter {
   }
 
   #rememberNotification(message: SDKMessage): void {
-    if (message.type !== "system" || message.subtype !== "task_notification") return;
+    if (this.#options.nativeContinuations || message.type !== "system" || message.subtype !== "task_notification") return;
     const record = this.#taskRecords.get(message.task_id);
     // A notification from another run leaves the current run's record in
     // place for its own notification.
@@ -2364,7 +2393,7 @@ export class AgentHost implements EngineAdapter {
         (Array.isArray(wrapperContent) && wrapperContent.some(block => block.type === "text" && block.text === input.prompt)));
     const notifications = parseNotificationPrompt(input.prompt);
     const candidates = notifications?.map((item) => this.#notificationCandidates.get(item.taskId));
-    const notificationMatch = notifications !== null && candidates !== undefined &&
+    const notificationMatch = !this.#options.nativeContinuations && notifications !== null && candidates !== undefined &&
       new Set(notifications.map(item => item.taskId)).size === notifications.length && candidates.every((candidate, index) =>
       candidate !== undefined && candidate.sessionId === input.session_id && candidate.toolUseId === notifications[index]!.toolUseId &&
       candidate.status === notifications[index]!.status && (
@@ -2389,6 +2418,10 @@ export class AgentHost implements EngineAdapter {
       (this.#intervalSession === null || this.#intervalSession === input.session_id);
     this.#noteIntervalSession(input.session_id);
     if (owner) {
+      if (this.#options.nativeContinuations && !wrapperMatch) {
+        this.#reserveNativeFold(input.prompt, input.prompt_id);
+        return;
+      }
       if (input.prompt.includes("<task-notification>")) {
         if (notificationMatch && !wrapperMatch && !owner.tainted && owner.kind === "wrapper_input" &&
             owner.token === active?.turnToken && owner.sessionId === input.session_id &&
@@ -2403,6 +2436,7 @@ export class AgentHost implements EngineAdapter {
     }
     const occupancy = this.#foreignOccupancy;
     if (occupancy !== null) {
+      if (this.#options.nativeContinuations) this.#reserveNativeFold(input.prompt, input.prompt_id);
       this.#observeHookUnderOccupancy(occupancy, input.prompt_id, notificationMatch ? candidates! : null);
       return;
     }
@@ -2418,7 +2452,13 @@ export class AgentHost implements EngineAdapter {
         return;
       }
     }
-    if (active === null) this.#beginForeignOccupancy(input.prompt_id, input.session_id);
+    if (active === null) {
+      this.#beginForeignOccupancy(input.prompt_id, input.session_id);
+      if (this.#options.nativeContinuations && input.source === "system" && !rejectedPushedReceipt && this.#options.nativeReplyBasis) {
+        this.#pendingNative = { promptId: input.prompt_id, sessionId: input.session_id, prompt: input.prompt,
+          basis: this.#options.nativeReplyBasis.exportCompleted(), controller: new AbortController(), claimsLive: this.#pendingClaimGuard(input.prompt) };
+      }
+    }
   }
 
   #consumeNotificationCandidates(candidates: ReadonlyArray<NotificationCandidate | undefined>): void {
@@ -2554,6 +2594,167 @@ export class AgentHost implements EngineAdapter {
     return true;
   }
 
+  #invalidateNative(): void {
+    this.#nativeEpoch++;
+    this.#nativeRegistry?.invalidate();
+    this.#nativeReader?.invalidate();
+    this.#pendingNative?.controller.abort();
+    this.#pendingNative = undefined;
+    this.#nativeLeases.clear();
+  }
+
+  async #observeNativeHook(input: HookInput): Promise<void> {
+    if (!this.#options.nativeContinuations || input.agent_id || this.#closed || this.#admissionFailStopped ||
+        input.hook_event_name !== "UserPromptSubmit" || !input.prompt_id) return;
+    if (!this.#nativeRegistry) {
+      this.#nativeRegistry = new ContinuationRegistry(input.session_id, this.#warn);
+      if (this.#options.nativeReplyBasis) this.#nativeProofs = new ContinuationProofs(this.#nativeRegistry, this.#options.nativeReplyBasis);
+      this.#nativeReader = new NativeTranscriptReader(input.transcript_path, input.session_id);
+    }
+    if (this.#nativeRegistry.sessionId !== input.session_id || this.#nativeReader?.path !== input.transcript_path) {
+      this.#failStopLive("native continuation session or transcript path changed"); return;
+    }
+    this.#nativeRegistry.tick(this.#activeTurn !== null || this.#foreignOccupancy !== null);
+    try { await this.#nativeReader.capture(input.prompt_id); }
+    catch { this.#failStopLive("native transcript evidence damaged; restart required"); }
+  }
+
+  #reserveNativeFold(prompt: string, occurrence: string): void {
+    for (const match of prompt.matchAll(/\[kaoiro-continuation:([A-Za-z0-9_-]{43})\]/g)) {
+      this.#nativeRegistry?.quarantine(match[1]!, occurrence);
+    }
+  }
+
+  #pendingClaimGuard(prompt: string): () => boolean {
+    const registry = this.#nativeRegistry!;
+    const blocks = parseContinuationBlocks(prompt);
+    const caps = blocks ? blocks.map(block => registry.byTask(block.taskId)).filter(cap => cap !== undefined) :
+      [...prompt.matchAll(/\[kaoiro-continuation:([A-Za-z0-9_-]{43})\]/g)].map(match => registry.byToken(match[1]!)).filter(cap => cap !== undefined);
+    const runs = blocks?.map(block => registry.source(block.taskId)).filter(run => run !== undefined) ?? [];
+    // These text-derived hints can only cancel a wait; the native row still proves every grant.
+    return () => caps.every(cap => cap.state !== "closed" && (cap.state === "prepared" || registry.eligible(cap))) &&
+      runs.every(run => registry.source(run.taskId) === run && !run.uncertain && !run.explicitStop && run.stops.size === 0);
+  }
+
+  async #acquireNativePrompt(promptId: string, callId: string, signal: AbortSignal): Promise<void> {
+    const pending = this.#pendingNative;
+    if (!pending || pending.promptId !== promptId || !this.#nativeReader || !this.#nativeProofs) return;
+    const deadline = this.#nativeCallDeadlines.get(callId) ?? performance.now() + 5000;
+    this.#nativeCallDeadlines.set(callId, deadline);
+    const epoch = this.#nativeEpoch;
+    const live = () => this.#pendingNative === pending && !pending.controller.signal.aborted && !signal.aborted &&
+      !this.#closed && !this.#admissionFailStopped && !this.#intervalAmbiguous && epoch === this.#nativeEpoch &&
+      this.#foreignOccupancy?.promptId === promptId && this.#activeTurn === null && pending.claimsLive();
+    try {
+      while (live() && performance.now() < deadline) {
+        const anchor = await this.#nativeReader.capture(promptId);
+        if (anchor) {
+          const result = this.#nativeProofs.prove(anchor, pending.prompt, pending.basis);
+          if ("reason" in result) {
+            this.#warn(`native continuation refused: ${result.reason}`); break;
+          }
+          await this.#nativeReader.validate(anchor);
+          if (!live() || performance.now() >= deadline || !result.proof.commit()) break;
+          const turn: NotificationTurn = { kind: "sdk_notification", turnToken: randomUUID(), conversationIds: [], promptId };
+          const reader = this.#nativeReader;
+          this.#options.nativeReplyBasis!.beginDetached(turn.turnToken, result.proof.basis, async () => {
+            if (!this.#nativeLeaseLive(turn.turnToken, epoch)) return "stale_native_lease";
+            try { await reader.validate(anchor); }
+            catch {
+              this.#failStopLive("native transcript evidence damaged before dispatch; restart required");
+              return "native_evidence_damaged";
+            }
+            return this.#nativeLeaseLive(turn.turnToken, epoch) ? undefined : "stale_native_lease";
+          }, undefined, () => this.#nativeLeaseLive(turn.turnToken, epoch));
+          this.#pendingNative = undefined;
+          this.#foreignOccupancy = null;
+          this.#activeTurn = turn;
+          this.#nativeLeases.set(turn.turnToken, { anchor, origin: result.proof.origin, sources: result.proof.sources, epoch });
+          this.#pausePendingRootClock();
+          this.#everStartedTurn = true;
+          this.toolOrigins.beginIndependent(turn.turnToken);
+          this.#promptOwners.set(promptId, { sessionId: pending.sessionId, token: turn.turnToken, kind: turn.kind });
+          this.#options.onTurnStart?.({ turnToken: turn.turnToken, conversationIds: [], kind: turn.kind });
+          return;
+        }
+        await new Promise<void>(resolve => {
+          const done = () => { clearTimeout(timer); signal.removeEventListener("abort", done); pending.controller.signal.removeEventListener("abort", done); resolve(); };
+          const timer = setTimeout(done, Math.min(50, Math.max(0, deadline - performance.now())));
+          signal.addEventListener("abort", done, { once: true }); pending.controller.signal.addEventListener("abort", done, { once: true });
+        });
+      }
+    } catch {
+      this.#failStopLive("native transcript acquisition failed; restart required");
+    }
+    this.toolOrigins.reject(callId);
+    pending.controller.abort();
+    this.#warn("native continuation proof acquisition refused; call cannot revive");
+  }
+
+  #nativeLeaseLive(token: string, epoch: number): boolean {
+    return !this.#closed && !this.#admissionFailStopped && !this.#intervalAmbiguous &&
+      this.#nativeEpoch === epoch && this.#activeTurn?.turnToken === token && this.#nativeLeases.has(token);
+  }
+
+  #nativeTerminalMatches(origin: Record<string, unknown>, sources: ReadonlyArray<{ taskId: string; runId: string }>, message: SDKMessage): boolean {
+    if (message.type !== "result") return false;
+    const terminal = message.origin as Record<string, unknown> | undefined;
+    if (!terminal || terminal.kind !== origin.kind) return false;
+    if (terminal.runId !== undefined && !sources.some(source => source.runId === terminal.runId &&
+        (terminal.taskId === undefined || source.taskId === terminal.taskId))) return false;
+    if (terminal.taskId !== undefined && !sources.some(source => source.taskId === terminal.taskId)) return false;
+    if (origin.kind === "peer") return terminal.senderTaskId === origin.senderTaskId && terminal.from === origin.from && terminal.handback === true;
+    return terminal.kind === "task-notification" && (terminal.producer === undefined || terminal.producer === "session-task");
+  }
+
+  async #nativePreTool(input: HookInput, callId: string | undefined, signal: AbortSignal): Promise<Record<string, unknown> | undefined> {
+    if (!this.#options.nativeContinuations || input.hook_event_name !== "PreToolUse" || !callId || callId !== input.tool_use_id ||
+        this.#admissionFailStopped || this.#closed) return undefined;
+    const registry = this.#nativeRegistry;
+    if (!registry) return undefined;
+    if (input.session_id !== registry.sessionId) { this.#failStopLive("native tool session mismatch"); return undefined; }
+    if (!input.tool_input || typeof input.tool_input !== "object" || Array.isArray(input.tool_input)) return undefined;
+    const toolInput = input.tool_input as Record<string, unknown>;
+    registry.observeCall(callId, input.tool_name, toolInput);
+    if (input.tool_name === "TaskStop" && typeof toolInput.task_id === "string") registry.stopAttempt(callId, toolInput.task_id);
+    if (input.agent_id || !input.prompt_id) return undefined;
+    await this.#acquireNativePrompt(input.prompt_id, callId, signal);
+    const owner = this.#promptOwners.get(input.prompt_id);
+    if (!owner || owner.tainted || owner.token !== this.#activeTurn?.turnToken || owner.sessionId !== input.session_id || signal.aborted) return undefined;
+    const basis = this.#options.nativeReplyBasis?.exportConfirmed({ token: owner.token });
+    return basis ? registry.prepare(callId, input.tool_name, toolInput, input.prompt_id, basis) : undefined;
+  }
+
+  #nativePostTool(input: HookInput): void {
+    if (!this.#options.nativeContinuations || (input.hook_event_name !== "PostToolUse" && input.hook_event_name !== "PostToolUseFailure") ||
+        input.session_id !== this.#nativeRegistry?.sessionId) return;
+    if (!input.tool_input || typeof input.tool_input !== "object" || Array.isArray(input.tool_input)) return;
+    const toolInput = input.tool_input as Record<string, unknown>;
+    const failed = input.hook_event_name === "PostToolUseFailure";
+    const response = input.hook_event_name === "PostToolUse" ? input.tool_response : undefined;
+    this.#nativeRegistry.outcome(input.tool_use_id, toolInput, response, failed);
+    if (input.tool_name === "TaskStop") {
+      const result = response as { task_id?: unknown; message?: unknown } | undefined;
+      // The pinned TaskStop success has its exact target, not a generic hook success bit.
+      if (!failed && result && result.task_id === toolInput.task_id && typeof result.message === "string" &&
+          result.message.startsWith(`Successfully stopped task: ${String(toolInput.task_id)} `)) {
+        this.#nativeRegistry.stopOutcome(input.tool_use_id, true);
+      } else if (input.hook_event_name === "PostToolUseFailure" && input.is_interrupt === false) {
+        this.#nativeRegistry.stopOutcome(input.tool_use_id, false);
+      }
+    }
+  }
+
+  async resolveToolOrigin(id: unknown): Promise<ReplyOrigin | undefined> {
+    if (!this.#options.nativeContinuations || typeof id !== "string") return this.toolOrigins.resolveBound(id);
+    if (!this.#nativeCallDeadlines.has(id) && this.#nativeCallDeadlines.size >= 8192) { this.toolOrigins.reject(id); return undefined; }
+    const deadline = this.#nativeCallDeadlines.get(id) ?? performance.now() + 5000;
+    this.#nativeCallDeadlines.set(id, deadline);
+    const origin = await this.toolOrigins.resolveBound(id, Math.max(0, deadline - performance.now()));
+    if (!origin || origin.signal?.aborted || performance.now() >= deadline) { this.toolOrigins.reject(id); return undefined; }
+    return origin;
+  }
+
   #observePromptTool(input: HookInput, toolUseId: string | undefined): void {
     if (this.#admissionFailStopped || input.hook_event_name !== "PreToolUse" || input.agent_id || input.tool_name !== INTER_AGENT_TOOL_FQN ||
         !input.prompt_id || !toolUseId || toolUseId !== input.tool_use_id) return;
@@ -2650,11 +2851,31 @@ export class AgentHost implements EngineAdapter {
         ...userHooks,
         UserPromptSubmit: [
           ...(userHooks.UserPromptSubmit ?? []),
-          { hooks: [async (input) => { this.#admitPrompt(input); return {}; }] },
+          { hooks: [async (input) => { await this.#observeNativeHook(input); this.#admitPrompt(input); return {}; }] },
         ],
         PreToolUse: [
           ...(userHooks.PreToolUse ?? []),
-          { hooks: [async (input, toolUseId) => { this.#observePromptTool(input, toolUseId); return {}; }] },
+          { hooks: [async (input, toolUseId, context) => {
+            const update = await this.#nativePreTool(input, toolUseId, context.signal);
+            this.#observePromptTool(input, toolUseId);
+            return update ? { hookSpecificOutput: { hookEventName: "PreToolUse" as const, updatedInput: update } } : {};
+          }] },
+        ],
+        PostToolUse: [
+          ...(userHooks.PostToolUse ?? []),
+          { hooks: [async input => { this.#nativePostTool(input); return {}; }] },
+        ],
+        PostToolUseFailure: [
+          ...(userHooks.PostToolUseFailure ?? []),
+          { hooks: [async input => { this.#nativePostTool(input); return {}; }] },
+        ],
+        PermissionDenied: [
+          ...(userHooks.PermissionDenied ?? []),
+          { hooks: [async input => {
+            if (this.#options.nativeContinuations && input.hook_event_name === "PermissionDenied" &&
+                input.session_id === this.#nativeRegistry?.sessionId) this.#nativeRegistry.rejectCall(input.tool_use_id);
+            return {};
+          }] },
         ],
         Stop: [
           ...(userHooks.Stop ?? []),
@@ -2680,11 +2901,13 @@ export class AgentHost implements EngineAdapter {
       // waiting_permission.
       canUseTool: async (toolName, input, options) => {
         if (toolName === INTER_AGENT_TOOL_FQN && this.#options.queryOptions?.mcpServers?.kaoiro) {
-          const origin = await this.toolOrigins.resolveBound(options.toolUseID);
+          const origin = await this.resolveToolOrigin(options.toolUseID);
           if (!origin?.signal || origin.signal.aborted || options.signal.aborted) return { behavior: "deny", message: "unbound or retired inter-agent tool call" };
           return this.#canUseTool(toolName, input, AbortSignal.any([origin.signal, options.signal]));
         }
-        return this.#canUseTool(toolName, input, options.signal);
+        const decision = await this.#canUseTool(toolName, input, options.signal);
+        if (decision.behavior === "deny") this.#nativeRegistry?.rejectCall(options.toolUseID);
+        return decision;
       },
       // Set last, same reasoning as canUseTool above: close() depends on
       // aborting THIS controller (issue #391), so a caller-supplied
@@ -2747,6 +2970,7 @@ export class AgentHost implements EngineAdapter {
         this.#noteIntervalSession(id);
         if (id !== null && id !== this.#sessionId) {
           const hadPriorSession = this.#sessionId !== null;
+          if (this.#nativeRegistry && this.#nativeRegistry.sessionId !== id) this.#invalidateNative();
           if (hadPriorSession) {
             if (this.#pendingPushedReceipt !== null) {
               this.#resolvePushedReceipt(this.#pendingPushedReceipt, "unknown", "session_changed");
@@ -2849,6 +3073,8 @@ export class AgentHost implements EngineAdapter {
         // ADR-0019 F2 requires task info to stay off the parent's own
         // KaoiroState / state_change entirely.
         const taskEvent = sdkMessageToTask(message);
+        this.#nativeRegistry?.tick(this.#activeTurn !== null || this.#foreignOccupancy !== null);
+        this.#nativeRegistry?.observeFrame(message as unknown as Record<string, unknown>);
         if (message.type === "system" && message.subtype === "task_started") this.#recordTaskStart(message);
         if (message.type === "system" && message.subtype === "task_updated") this.#recordTaskUpdate(message);
         this.#rememberNotification(message);
@@ -2953,7 +3179,14 @@ export class AgentHost implements EngineAdapter {
             this.#failStopLive("a retired result index was reused with a different identity; host admission stopped until this wrapper is relaunched");
             continue;
           }
-          const notificationResult = (message as { origin?: { kind?: string } }).origin?.kind === "task-notification";
+          this.#pendingNative?.controller.abort();
+          this.#pendingNative = undefined;
+          const lease = this.#activeTurn ? this.#nativeLeases.get(this.#activeTurn.turnToken) : undefined;
+          if (lease && !this.#nativeTerminalMatches(lease.origin, lease.sources, message)) {
+            this.#failStopLive("native continuation terminal origin conflicts with its opener");
+            continue;
+          }
+          const notificationResult = lease !== undefined || (message as { origin?: { kind?: string } }).origin?.kind === "task-notification";
           const ownerKind = this.#activeTurn?.kind;
           const liveInterval = this.#foreignOccupancy !== null || this.#activeTurn !== null;
           if (liveInterval && !this.#resultIndexAdvances(message)) {
@@ -3015,6 +3248,7 @@ export class AgentHost implements EngineAdapter {
         throw err;
       }
     } finally {
+      this.#invalidateNative();
       // A stream can end without a result (for example when its process dies),
       // and query construction/iteration can throw before a ResultMessage.
       // Both are hard terminal boundaries for every accepted turn.
@@ -4880,6 +5114,8 @@ export class AgentHost implements EngineAdapter {
       }
     }
     this.#activeTurn = null;
+    this.#nativeRegistry?.tick(this.#foreignOccupancy !== null);
+    if (turn) this.#nativeLeases.delete(turn.turnToken);
     this.#wakeReceiptWaiters();
     if (turn !== null) this.#foldsUsedByTurn.delete(turn.turnToken);
     if (this.#pendingPushedReceipt !== null) {

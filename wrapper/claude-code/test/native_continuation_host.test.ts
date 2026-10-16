@@ -1,0 +1,84 @@
+import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import type { HookInput, Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { InterAgentTool, INTER_AGENT_TOOL_FQN, type Envelope } from "@kaoiro/agent-common";
+import { AgentHost, type AgentHostOptions } from "../src/host.js";
+
+const config = { agent_id: "self", persona: { id: "p", name: "P", sprite_set: "p" }, display_name: "P", server_url: "ws://localhost" };
+const scratch: string[] = [];
+afterEach(async () => { await Promise.all(scratch.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
+const frame = (value: unknown) => value as SDKMessage;
+const inbound = (n: number): Envelope => ({ version: "0", agent_id: "peer", persona: config.persona, display_name: "P", ts: "2026-10-16T00:00:00Z",
+  type: "inter_agent_message", state: "thinking", payload: { to: "self", conversation_id: "c", turn_number: n, kind: "request", body: "launch",
+    meta: { done: false, propose_next: "" }, owner: { kind: "user", id: "operator" }, new_conversation: false }, ext: {} });
+
+describe("native continuation host and actual send path", () => {
+  it.each(["event", "stop-before-send", "damage-before-send", "unknown-source", "delayed-row", "bash", "bash-damage-before-send", "workflow", "timeout-bash", "child-launch", "missing-row"])("handles %s with its source-specific frozen basis", async variant => {
+    const dir = await mkdtemp(join(tmpdir(), "kogane-426-host-")); scratch.push(dir);
+    const path = join(dir, "native.jsonl"); await writeFile(path, "");
+    const outgoing: Envelope[] = [], warnings: string[] = [], starts: string[] = [];
+    const tool = new InterAgentTool({ config, getState: () => "thinking", send: () => {}, replyBasisMode: () => "v1",
+      sendInterAgent: async envelope => { outgoing.push(envelope); return { kind: "accepted", stamp: null }; } });
+    let host!: AgentHost;
+    let bound: Awaited<ReturnType<AgentHost["resolveToolOrigin"]>>;
+    let sendResult: { isError?: boolean } | undefined;
+    const queryFn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => {
+      const fire = async (name: "UserPromptSubmit" | "PreToolUse" | "PostToolUse", payload: Record<string, unknown>, callId?: string) =>
+        args.options.hooks![name]!.at(-1)!.hooks[0]!({ hook_event_name: name, session_id: "s", transcript_path: path, cwd: dir, ...payload } as HookInput,
+          callId, { signal: new AbortController().signal });
+      const script = async function* () {
+        await args.prompt[Symbol.asyncIterator]().next();
+        await fire("UserPromptSubmit", { prompt_id: "parent", prompt: "launch", source: "sdk" });
+        yield frame({ type: "system", subtype: "init", session_id: "s" });
+        const source = variant.startsWith("bash") || variant === "timeout-bash" ? "Bash" : variant === "workflow" ? "Workflow" : "Monitor";
+        const input = { command: "printf event", description: "watch", timeout_ms: 1000 };
+        const updated = await fire("PreToolUse", { prompt_id: "parent", tool_name: source, tool_use_id: "launch", tool_input: input, ...(variant === "child-launch" ? { agent_id: "child" } : {}) }, "launch") as { hookSpecificOutput?: { updatedInput?: Record<string, unknown> } };
+        const effective = updated.hookSpecificOutput?.updatedInput ?? input;
+        if (variant === "child-launch") expect(updated.hookSpecificOutput).toBeUndefined();
+        expect(effective.command).toBe(input.command);
+        yield frame({ type: "system", subtype: "task_started", session_id: "s", task_id: "task", run_id: "run", tool_use_id: "launch",
+          task_type: source === "Workflow" ? "local_workflow" : "local_bash", ...(source === "Workflow" ? {} : { is_backgrounded: variant !== "timeout-bash" }), description: effective.description });
+        await fire("PostToolUse", { prompt_id: "parent", tool_name: source, tool_use_id: "launch", tool_input: effective, tool_response: { taskId: "task", timeoutMs: 1000, persistent: false } }, "launch");
+        yield frame({ type: "result", session_id: "s", result_index: 0, uuid: "r0", subtype: "success", is_error: false, result: "launched" });
+        tool.replyBasis.begin("newer", [inbound(3)]); tool.replyBasis.retire("newer");
+        if (variant === "timeout-bash") yield frame({ type: "system", subtype: "task_updated", session_id: "s", task_id: "task", run_id: "run", tool_use_id: "launch", patch: { is_backgrounded: true } });
+        if (source !== "Monitor") yield frame({ type: "system", subtype: "task_notification", session_id: "s", task_id: "task", run_id: "run", tool_use_id: "launch", status: "completed", output_file: "/tmp/output", summary: "done" });
+        const prompt = source !== "Monitor" ? '<task-notification><task-id>task</task-id><tool-use-id>launch</tool-use-id><output-file>/tmp/output</output-file><status>completed</status><summary>done</summary></task-notification>' : `<task-notification><task-id>${variant === "unknown-source" ? "unknown" : "task"}</task-id><summary>Monitor event: "${effective.description}"</summary><event>hello</event></task-notification>`;
+        const row = JSON.stringify({ type: "user", sessionId: "s", promptId: "return", uuid: "opener", isSidechain: false,
+          turnPosition: { promptIndex: 0 }, promptSource: "system", turnOrigin: "task_notification",
+          origin: { kind: "task-notification", producer: "session-task" }, message: { role: "user", content: prompt } }) + "\n";
+        if (variant !== "delayed-row" && variant !== "missing-row") await appendFile(path, row);
+        await fire("UserPromptSubmit", { prompt_id: "return", prompt, source: "system" });
+        const pending = fire("PreToolUse", { prompt_id: "return", tool_name: INTER_AGENT_TOOL_FQN, tool_use_id: "send", tool_input: {} }, "send");
+        if (variant === "delayed-row") { await new Promise(r => setTimeout(r, 60)); await appendFile(path, row); }
+        await pending;
+        bound = await host.resolveToolOrigin("send");
+        if (variant === "stop-before-send") {
+          await fire("PreToolUse", { prompt_id: "return", tool_name: "TaskStop", tool_use_id: "stop", tool_input: { task_id: "task" } }, "stop");
+          yield frame({ type: "system", subtype: "task_notification", session_id: "s", task_id: "task", run_id: "run", tool_use_id: "launch", status: "stopped", summary: "watch" });
+          await fire("PostToolUse", { prompt_id: "return", tool_name: "TaskStop", tool_use_id: "stop", tool_input: { task_id: "task" }, tool_response: { task_id: "task" } }, "stop");
+        }
+        if (variant.endsWith("damage-before-send")) await writeFile(path, "");
+        if (variant === "missing-row") {
+          await appendFile(path, row);
+          await fire("PreToolUse", { prompt_id: "return", tool_name: INTER_AGENT_TOOL_FQN, tool_use_id: "send", tool_input: {} }, "send");
+          expect(await host.resolveToolOrigin("send")).toBeUndefined();
+        }
+        sendResult = await tool.invoke({ to: "peer", conversation_id: "c", kind: "response", body: "report" }, bound ? { origin: bound } : {});
+        yield frame({ type: "result", session_id: "s", result_index: 1, uuid: "r1", subtype: "success", is_error: false, result: "reported", origin: { kind: "task-notification", producer: "session-task" } });
+      };
+      return Object.assign(script(), { interrupt: async () => {} }) as unknown as Query;
+    }) as NonNullable<AgentHostOptions["queryFn"]>;
+    host = new AgentHost(config, { queryFn, onState: () => {}, warn: message => warnings.push(message), nativeContinuations: true, nativeReplyBasis: tool.replyBasis,
+      onTurnStart: ({ turnToken, kind }) => { starts.push(kind ?? "wrapper"); if (kind !== "sdk_notification") tool.replyBasis.begin(turnToken, [inbound(1)], undefined, true); },
+      onPromptAdmitted: token => tool.confirmReplyInput(token), onTurnEnd: ({ turnToken }) => { if (turnToken) tool.endReplyInput(turnToken); } });
+    try { await host.run("launch"); } finally { host.close(); }
+    const refused = variant === "unknown-source" || variant.endsWith("damage-before-send") || variant === "child-launch" || variant === "missing-row";
+    expect(outgoing).toHaveLength(refused ? 0 : 1);
+    expect(sendResult?.isError).toBe(refused ? true : undefined);
+    if (!refused) expect((outgoing[0]!.payload as { in_reply_to: number }).in_reply_to).toBe(["bash", "workflow", "timeout-bash"].includes(variant) ? 3 : 1);
+    expect(starts).toHaveLength(["unknown-source", "child-launch", "missing-row"].includes(variant) ? 1 : 2);
+  }, 10000);
+});
