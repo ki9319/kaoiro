@@ -157,6 +157,12 @@ export class ContinuationRegistry {
     if (call.capability) { call.capability.state = "closed"; this.#tokens.delete(call.capability.token); }
   }
 
+  /** A root that ends without an outcome or deny cannot launch its preparation later; armed claims outlive the root. */
+  retirePrompt(promptId: string): void {
+    for (const cap of this.#tokens.values()) if (cap.promptId === promptId && cap.state === "prepared") cap.state = "closed";
+    this.#collectClosed();
+  }
+
   #arm(call: Call): void {
     const cap = call.capability, start = call.start;
     if (!cap || cap.state !== "prepared" || call.rejected || !start || !call.successTask) return;

@@ -159,6 +159,44 @@ describe("accepted launch and lifecycle registry", () => {
       }
     });
   });
+  describe("root retirement", () => {
+    const monitor = (n: string) => ({ description: `watch ${n}`, command: "echo x" });
+    it("closes only the retiring root's prepared claims, so unreported launches stop counting against capacity", () => {
+      const s = setup(); const map = s.basis.exportConfirmed({ token: "root" })!;
+      const kept = s.registry.prepare("kept", "Monitor", monitor("kept"), "q", map)!;
+      const keptToken = /\[kaoiro-continuation:([^\]]+)\]/.exec(String(kept.description))![1]!;
+      for (let n = 0; n < 62; n++) expect(s.registry.prepare(`o${n}`, "Monitor", monitor(String(n)), "p", map)).toBeDefined();
+      expect(s.registry.prepare("over", "Monitor", monitor("over"), "p", map)).toBeUndefined();
+      s.registry.retirePrompt("p");
+      expect(s.registry.byToken(s.token)).toBeUndefined();
+      expect(s.registry.byToken(keptToken)?.state).toBe("prepared");
+      for (let n = 0; n < 62; n++) expect(s.registry.prepare(`again${n}`, "Monitor", monitor(`again ${n}`), "q", map)).toBeDefined();
+    });
+    it("frees a SendMessage target held by an unreported preparation", () => {
+      const s = setup(); s.registry.observeFrame(s.start); s.outcome();
+      s.registry.observeFrame({ ...s.start, subtype: "task_notification", status: "completed" });
+      const map = s.basis.exportConfirmed({ token: "root" })!;
+      const resume = { to: "task", message: "resume" };
+      expect(s.registry.prepare("first", "SendMessage", resume, "r", map)).toBeDefined();
+      expect(s.registry.prepare("second", "SendMessage", resume, "r2", map)).toBeUndefined();
+      s.registry.retirePrompt("r");
+      expect(s.registry.prepare("second", "SendMessage", resume, "r2", map)).toBeDefined();
+    });
+    it("does not let a late success of a retired preparation arm", () => {
+      const s = setup(); s.registry.retirePrompt("p");
+      s.registry.observeFrame(s.start); s.outcome();
+      expect(s.registry.byToken(s.token)).toBeUndefined();
+      expect(s.registry.byTask("task")).toBeUndefined();
+      expect(s.registry.prepare("call", "Agent", s.input, "p", s.basis.exportConfirmed({ token: "root" })!)).toBeUndefined();
+    });
+    it("leaves armed and draining claims to outlive the root", () => {
+      const s = setup(); s.registry.observeFrame(s.start); s.outcome();
+      const cap = s.registry.byToken(s.token)!;
+      s.registry.retirePrompt("p"); expect(s.registry.eligible(cap)).toBe(true);
+      s.registry.observeFrame({ ...s.start, subtype: "task_notification", status: "completed" });
+      s.registry.retirePrompt("p"); expect(s.registry.eligible(cap)).toBe(true);
+    });
+  });
   it("does not instrument a live target; a successful resumed run needs its new accepted canonical message", () => {
     const s = setup(); s.registry.observeFrame(s.start); s.outcome();
     const map = s.basis.exportConfirmed({ token: "root" })!;
