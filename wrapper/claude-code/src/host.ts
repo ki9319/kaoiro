@@ -3,6 +3,7 @@ import { NativeTranscriptReader, type NativeAnchor } from "./native_transcript.j
 import { ContinuationRegistry } from "./continuation_registry.js";
 import { ContinuationProofs } from "./continuation_proof.js";
 import { parseContinuationBlocks } from "./continuation_markers.js";
+import { peerReportToken } from "./native_peer_opener.js";
 import { MAX_COALESCED_BYTES, MAX_COALESCED_MESSAGES, ToolOrigins, withAgentMarker } from "@kaoiro/agent-common";
 import { DeliveryPolicyController } from "@kaoiro/wrapper-core";
 // Agent host — runs a query() session, derives state from its message stream,
@@ -2625,16 +2626,15 @@ export class AgentHost implements EngineAdapter {
       this.#nativeProofs?.reserveCompletionFold(prompt, occurrence);
       return;
     }
-    for (const match of prompt.matchAll(/\[kaoiro-continuation:([A-Za-z0-9_-]{43})\]/g)) {
-      this.#nativeRegistry?.quarantine(match[1]!, occurrence);
-    }
+    const token = peerReportToken(prompt);
+    if (token) this.#nativeRegistry?.quarantine(token, occurrence);
   }
 
   #pendingClaimGuard(prompt: string): () => boolean {
     const registry = this.#nativeRegistry!;
     const blocks = parseContinuationBlocks(prompt);
     const caps = blocks ? blocks.map(block => registry.byTask(block.taskId)).filter(cap => cap !== undefined) : prompt.includes("<task-notification>") ? [] :
-      [...prompt.matchAll(/\[kaoiro-continuation:([A-Za-z0-9_-]{43})\]/g)].map(match => registry.byToken(match[1]!)).filter(cap => cap !== undefined);
+      [peerReportToken(prompt)].map(token => token ? registry.byToken(token) : undefined).filter(cap => cap !== undefined);
     const runs = blocks?.map(block => registry.source(block.taskId)).filter(run => run !== undefined) ?? [];
     // These text-derived hints can only cancel a wait; the native row still proves every grant.
     return () => caps.every(cap => cap.state !== "closed" && (cap.state === "prepared" || registry.eligible(cap))) &&
