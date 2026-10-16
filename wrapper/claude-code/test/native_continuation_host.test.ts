@@ -18,7 +18,7 @@ const inbound = (n: number): Envelope => ({ version: "0", agent_id: "peer", pers
 
 describe("native continuation host and actual send path", () => {
   it.each(["peer", "peer-warning", "peer-unwrapped", "peer-two-frames", "peer-damage-before-send", "event", "non-system-row", "stop-before-send", "damage-before-send", "unknown-source", "delayed-row", "bash", "bash-damage-before-send", "workflow", "timeout-bash", "child-launch", "missing-row",
-    "agent", "agent-no-output", "agent-mistyped-marker", "agent-wrong-run", "agent-missing-producer", "agent-optional-metadata", "agent-damage-before-send", "agent-fold", "agent-malformed-fold"])("handles %s with its source-specific frozen basis", async variant => {
+    "agent", "agent-no-output", "agent-mistyped-marker", "agent-wrong-run", "agent-missing-producer", "agent-optional-metadata", "agent-damage-before-send", "agent-fold", "agent-malformed-fold", "agent-fold-peer-own", "agent-fold-peer-quote", "agent-fold-bare"])("handles %s with its source-specific frozen basis", async variant => {
     const dir = await mkdtemp(join(tmpdir(), "kogane-426-host-")); scratch.push(dir);
     const path = join(dir, "native.jsonl"); await writeFile(path, "");
     const outgoing: Envelope[] = [], warnings: string[] = [], starts: string[] = [];
@@ -47,7 +47,7 @@ describe("native continuation host and actual send path", () => {
           task_type: source === "Agent" ? "local_agent" : source === "Workflow" ? "local_workflow" : "local_bash", ...(source === "Workflow" ? {} : { is_backgrounded: variant !== "timeout-bash" }), description: effective.description, prompt: effective.prompt });
         await fire("PostToolUse", { prompt_id: "parent", tool_name: source, tool_use_id: "launch", tool_input: effective,
           tool_response: source === "Agent" ? { isAsync: true, status: "async_launched", agentId: "task", prompt: effective.prompt } : { taskId: "task", timeoutMs: 1000, persistent: false } }, "launch");
-        const folding = variant === "agent-fold" || variant === "agent-malformed-fold";
+        const folding = variant.startsWith("agent-fold") || variant === "agent-malformed-fold";
         if (!folding) {
           yield frame({ type: "result", session_id: "s", result_index: 0, uuid: "r0", subtype: "success", is_error: false, result: "launched" });
           tool.replyBasis.begin("newer", [inbound(3)]); tool.replyBasis.retire("newer");
@@ -72,7 +72,12 @@ describe("native continuation host and actual send path", () => {
         const origin = peer ? peerData.row.origin : { kind: "task-notification", ...(variant === "agent-missing-producer" ? {} : { producer: "session-task" }),
           ...(source === "Agent" ? { runId: variant === "agent-wrong-run" ? "other" : "run" } : {}) };
         if (folding) {
-          await fire("UserPromptSubmit", { prompt_id: "parent", prompt: prompt + (variant === "agent-malformed-fold" ? "malformed trailing data" : "") });
+          const launchMarker = String(effective.prompt).match(/\[kaoiro-continuation:[A-Za-z0-9_-]{43}\]/)![0];
+          const recordedReport = recordedPeer.row.origin.body;
+          const folded = variant === "agent-fold-peer-own" ? peerFixture(recordedReport.replace(`[kaoiro-continuation:${"A".repeat(43)}]`, launchMarker)).hook :
+            variant === "agent-fold-peer-quote" ? peerFixture(`quoted ${launchMarker} then ` + recordedReport).hook :
+            variant === "agent-fold-bare" ? `done ${launchMarker}` : prompt + (variant === "agent-malformed-fold" ? "malformed trailing data" : "");
+          await fire("UserPromptSubmit", { prompt_id: "parent", prompt: folded });
           yield frame({ type: "result", session_id: "s", result_index: 0, uuid: "r0", subtype: "success", is_error: false, result: "launched" });
           tool.replyBasis.begin("newer", [inbound(3)]); tool.replyBasis.retire("newer");
         }
@@ -106,10 +111,10 @@ describe("native continuation host and actual send path", () => {
       onPromptAdmitted: token => tool.confirmReplyInput(token), onTurnEnd: ({ turnToken }) => { if (turnToken) tool.endReplyInput(turnToken); } });
     try { await host.run("launch"); } finally { host.close(); }
     const refusedPeer = ["peer-warning", "peer-unwrapped", "peer-two-frames"].includes(variant);
-    const refused = refusedPeer || variant === "unknown-source" || variant === "non-system-row" || variant.endsWith("damage-before-send") || variant === "child-launch" || variant === "missing-row" || variant === "agent-wrong-run" || variant === "agent-missing-producer" || variant === "agent-fold";
+    const refused = refusedPeer || variant === "unknown-source" || variant === "non-system-row" || variant.endsWith("damage-before-send") || variant === "child-launch" || variant === "missing-row" || variant === "agent-wrong-run" || variant === "agent-missing-producer" || variant === "agent-fold" || variant === "agent-fold-peer-own";
     expect(outgoing).toHaveLength(refused ? 0 : 1);
     expect(sendResult?.isError).toBe(refused ? true : undefined);
     if (!refused) expect((outgoing[0]!.payload as { in_reply_to: number }).in_reply_to).toBe(["bash", "workflow", "timeout-bash"].includes(variant) ? 3 : 1);
-    expect(starts).toHaveLength(refusedPeer || ["unknown-source", "non-system-row", "child-launch", "missing-row", "agent-wrong-run", "agent-missing-producer", "agent-fold"].includes(variant) ? 1 : 2);
+    expect(starts).toHaveLength(refusedPeer || ["unknown-source", "non-system-row", "child-launch", "missing-row", "agent-wrong-run", "agent-missing-producer", "agent-fold", "agent-fold-peer-own"].includes(variant) ? 1 : 2);
   }, 10000);
 });
