@@ -2621,6 +2621,10 @@ export class AgentHost implements EngineAdapter {
   }
 
   #reserveNativeFold(prompt: string, occurrence: string): void {
+    if (prompt.includes("<task-notification>")) {
+      this.#nativeProofs?.reserveCompletionFold(prompt, occurrence);
+      return;
+    }
     for (const match of prompt.matchAll(/\[kaoiro-continuation:([A-Za-z0-9_-]{43})\]/g)) {
       this.#nativeRegistry?.quarantine(match[1]!, occurrence);
     }
@@ -2629,7 +2633,7 @@ export class AgentHost implements EngineAdapter {
   #pendingClaimGuard(prompt: string): () => boolean {
     const registry = this.#nativeRegistry!;
     const blocks = parseContinuationBlocks(prompt);
-    const caps = blocks ? blocks.map(block => registry.byTask(block.taskId)).filter(cap => cap !== undefined) :
+    const caps = blocks ? blocks.map(block => registry.byTask(block.taskId)).filter(cap => cap !== undefined) : prompt.includes("<task-notification>") ? [] :
       [...prompt.matchAll(/\[kaoiro-continuation:([A-Za-z0-9_-]{43})\]/g)].map(match => registry.byToken(match[1]!)).filter(cap => cap !== undefined);
     const runs = blocks?.map(block => registry.source(block.taskId)).filter(run => run !== undefined) ?? [];
     // These text-derived hints can only cancel a wait; the native row still proves every grant.
