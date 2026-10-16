@@ -643,8 +643,12 @@ observation policies, not proofs that later native frames cannot arrive.
 A claim already admitted to a root is distinct from the source's remaining
 claims: later source stop does not revoke that root's lease. Terminal, host
 fail-stop, close and generation replacement still revoke it. A folded report
-never rebinds a live owner; a valid Agent marker observed only as a fold is
-quarantined from creating a later root. Native fold attachment that cannot be
+never rebinds a live owner. Agent peer hand-back and native completion share
+one report slot. Completion selects the accepted call/task/run from its native
+frame, requires opener producer=session-task and matching origin.runId, and
+compares the frame report to result. Result markers are ignored. A peer marker
+or tuple-bound completion observed only as a fold quarantines that same slot
+from creating a later root. A quoted marker cannot quarantine another launch. Native fold attachment that cannot be
 proved remains denial-only.
 
 The registry holds at most 64 capabilities, 8,192 source calls and task histories,

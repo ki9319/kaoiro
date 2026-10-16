@@ -10,8 +10,8 @@ baseline: 6ea69f479c6e3033932c24468e5cdfbb2b1e38dc
 Accepted design for [issue #426](https://github.com/sakuraiyuta/kaoiro/issues/426),
 including [issue #674](https://github.com/sakuraiyuta/kaoiro/issues/674).
 The director [approved the design](https://github.com/sakuraiyuta/kaoiro/issues/426#issuecomment-6206887089)
-after five review rounds. The approved source document has SHA-256
-`6920982727403651eaa40f9141e12251a85dcf52189e2c43721f129eec0726a9`.
+with the Agent completion addendum reviewed in round seven. The approved source document has SHA-256
+`10715ff3ccdb9108ce4c62c0fe5d01daf5a00609f81e4a3e0b17e96ca4edae7d`.
 This public rendering retains the normative contract and acceptance obligations;
 private evidence locations and review correspondence are omitted.
 
@@ -30,8 +30,8 @@ preimplementation evidence, not final product acceptance.
 
 
 Use a wrapper-issued launch capability **AND** a B transcript opener/occurrence
-proof **AND** a live root owner. The capability joins a marked report to an
-accepted launch and its frozen default reply basis. B joins it to this root's
+proof **AND** a live root owner. The capability selects the accepted launch by an eligible peer-report marker or
+Agent completion native call/task/run tuple and retains its frozen default reply basis. B joins it to this root's
 actual opener or a fold. No whole-prompt token search, latest-task lookup,
 arrival-order heuristic, transcript-only grant or fallback after a failed
 token proof is permitted.
@@ -47,7 +47,7 @@ constructor, feeding the same owner reducer and final validation gate.
 | Two launches return in reverse order | Exact capability, source and task consistency select the issued snapshot | Deliberately copied valid bearers are not cryptographically authenticated |
 | Task resumes; old token was unspent | Confirmed new run retires previous-run records and unresolved claims | Strict delayed-old-delivery scheduling remains product acceptance |
 | Marker occurs only in later fold | Existing owner stays fixed; foreign root is not promoted | Model context still contains the folded content |
-| Agent omits/duplicates marker | No new report-derived right | No universal model-compliance promise |
+| Agent peer hand-back omits/duplicates marker | No new report-derived right | No universal model-compliance promise |
 | Active Monitor repeats identical content | Same delivery is idempotent; each fresh root uses the same launch basis | Shared launch token cannot universally distinguish replay from a genuine identical event |
 | Explicitly canceled or claim-retired token | No new claims; late input cannot revive the capability | Already proved leases keep their original rights until their root terminal |
 | Host authority canceled or SDK restart | Host lease epoch invalidated; dependent sends fail | Host/session/reset/fail-stop cancellation is distinct from stopping a producer |
@@ -202,7 +202,7 @@ and is not the selected solution. Failure of the canonical-only policy returns
 D9 to design; it is not hidden by passing the alias test.
 
 History can contain old instructions; model compliance remains uncertain.
-Old-only return rejects; old plus new rejects as multiple markers, even if the
+Peer hand-back old-only return rejects; old plus new rejects as multiple markers, even if the
 old entry is retired. Never select the convenient live token and discard the
 conflicting one.
 
@@ -373,7 +373,8 @@ settlement. Legacy matching cannot independently begin a turn in unified mode.
 
 | Classified source/input | Proof in unified mode | Basis and disposition |
 | --- | --- | --- |
-| Agent initial/reactivated report | Accepted current-run capability with claim eligibility (armed or draining), exactly one canonical report marker, native peer/task consistency and B opener | Launch snapshot; one report occurrence |
+| Agent initial/reactivated peer hand-back | Accepted current-run capability with claim eligibility (armed or draining), exactly one canonical report marker, native peer/task consistency and B opener | Launch snapshot; one shared report slot |
+| Agent native completion | Accepted same-notification task/run/call capability, exact native report and B opener runId; result markers ignored | Same launch snapshot and report slot |
 | Monitor event/natural expiry with eligible description marker | Live eligible capability, exact registered marker/description at native outer summary boundary, native local-task provenance, all available outer task consistency and B opener | Launch snapshot; repeated distinct occurrences, including expiry during normal drain |
 | Instrumented Monitor normal completion, possibly containing final event | Exact claim-eligible registry/task/run/tool-use join to native completion frame, strict per-block structure, all-block atomic proof and B opener; final validator mandatory; explicitly canceled or claim-retired runs cannot create claims | Launch snapshot; one receipt for combined completion + last event, independent of final event or token presence |
 | Uninstrumented/unknown/unsupported Monitor or Agent | No positive report capability; source classification retained | Never fall through to ordinary Bash |
@@ -433,9 +434,9 @@ with the source index; outer task-id text alone grants nothing.
 
 The opener's eligible field contains the marker for marked-report sources.
 Do not search assistant output, tool arguments, previous rows, later folds or
-ordinary peer/operator input. Multiple different Agent report marker candidates
+ordinary peer/operator input. Multiple different Agent peer-report marker candidates
 reject;
-old+new Agent report markers reject before selecting the live entry. Monitor
+old+new Agent peer-report markers reject before selecting the live entry. Monitor
 uses its exact registered-description suffix and strict per-block outer
 summary contract per block; preserved description-prefix markers are not candidates. Unknown,
 misspelled or absent marker cannot be repaired by similarity/timing. An
@@ -710,7 +711,7 @@ review either. The following are acceptance on the reviewed product candidate:
 | P0 issue wiring | Final encoding in actual effective Agent/Monitor/SendMessage input; accepted root launch correctly arms; no-injection construction reaches first meaningful lifecycle | Cut updatedInput, accepted-launch join and root-only guard separately; denied/failed/child launch cannot issue. Conflicting repeated call ID cannot rebind |
 | P1 whole class | Agent initial/resumed report and known-running message; explicit bg Bash independent/fold; timeout-promoted Bash; Workflow; command/WS Monitor events and natural expiry/close; independent command completion with/without event/marker | Record attempt/acceptance/requester receipt separately. Mutate common proof gate on an old source and a new source separately. No private cache condition becomes an unstated production default |
 | P2 fixed basis | Different requester inputs/owners and reversed launch returns; after n+1 is confirmed, launch A still attempts n. Nested d4 launches do not advance the map | Mutate export/import to latest ledger/union/return-time completed state. Assert actual outgoing in_reply_to, including expected stale rejection. Recovery tickets remain separately checked |
-| P3 report markers | Agent suffix; each Monitor block has outer summary before event and registered description/source/task. Native escaped block-looking payload stays payload. Known running-target SendMessage stays unchanged and run1/T1 report is accepted | Wrong/omitted/copied marker/source, old+new Agent marker, raw nested block/event-injected summary, one invalid sibling among valid blocks, 17-block overflow and duplicate/conflicting claims refuse the whole prompt. Mutate native escape, per-block parsing, all-block gate/atomic commit and summary/source guards separately; wrong producer or unknown source refuses |
+| P3 report markers | Agent peer suffix; completion result markers ignored; each Monitor block has outer summary before event and registered description/source/task. Native escaped block-looking payload stays payload. Known running-target SendMessage stays unchanged and run1/T1 report is accepted | Wrong/omitted/copied peer marker/source, old+new Agent peer marker, raw nested block/event-injected summary, one invalid sibling among valid blocks, 17-block overflow and duplicate/conflicting claims refuse the whole prompt. Mutate native escape, per-block parsing, all-block gate/atomic commit and summary/source guards separately; wrong producer or unknown source refuses |
 | P4 retirement/capacity | Event-derived root stops its own Monitor, then replies and requester receives it. Other proved leases continue through pending/successful command and WS TaskStop. Natural WS stopped frame then event B/close gains legitimate drained claims; same delivery, repeated Monitor, early drain, busy capacity/recovery | Hold run1 report, start run2, deliver T1 on run2 first and run1 later: zero new origins. Exercise progress/notification before missing start and known late-old frames. Queue success discards T2 without retiring T1; uninstrumented live→completed race refuses run2/T1. After explicit-stop intent plus matched frame before PostToolUse, and after success, late independent/folded input creates no origin/timer revival. Hand-back-only, killed-update-only and failed-stop-only records cannot prepare a new SendMessage token; an exact-run terminal can, subject to the real successful join. Removing the stop reason must not turn natural WS stopped into cancellation; removing explicit-stop matching must not reopen canceled claims. Interrupt with no matching task end leaves a running Monitor/Agent's capability usable: prove/send its later report and requester receipt after current-root drain. Exact in-window stopped/killed witnesses close only their captured task/run; completed/failed, wrong/new/old run and outside-window frames cannot blanket-close survivors. Test ACK/error/window bounds, overlapping-control ACK isolation and no-end expiry. Named stopTask blocks its target's late claims, while unrelated reports succeed. Mutate target/witness projection and every control entry, including the incorrect close-all-on-interrupt variant, for red/restored. Existing host root cancellation still blocks its lease. Unlisted cause follows the documented drain/contradiction policy. Mutate retirement and claim-vs-lease separation guards; cover unspent/reserved/child restart, post-grace, overflow, unknown source |
 | P5 bounded wait | Natural delayed opener appears while first-send hook is held; source snapshot frozen before wait | Hide row to reach 5,000 ms then expose late; cancel/terminal while pending. No stacked resolver wait, transport or call revival. Remove deadline/tombstone wiring for red/restored |
 | P6 fold/terminal | Native missing fold attachment remains denial-only. Accept 1/2/16 proved blocks, multiple Monitor completions/events and Monitor+Bash/Workflow with a common basis; one receipt/owner and atomic consumption. Completion+event within one block is one claim; WS close's optional producer settles once | Foreign opener then marked fold, second launch's fold, fresh-root overlap, wrong folded sender terminal, conflicting/regressing result index. Quarantined token cannot admit another root; late row cannot revive a refused call. Duplicate completion+event cannot double start/settle; 17 blocks, one unproved sibling, duplicate source occurrence or incompatible snapshots commit nothing. For Monitor(n)+Bash/Workflow(n+1) and Monitor(n)+Monitor(n+1), assert the accepted legacy control versus unified-mode visible batch-basis-conflict refusal, zero new owner/send and zero partial consumption. Mutate all-block/rollback and bound guards; mixed-map conflict never unions or selects a first/newest map |
@@ -768,3 +769,65 @@ owner/lease callbacks, early eligibility, shutdown/reset and unread integration.
 It preserves frozen launch snapshots and one owner per root. Do not merge the
 frozen server-queue branch as a prerequisite.
 
+
+## Agent completion and peer hand-back
+
+Agent reports have two proof variants with one shared capability/accepted-call/
+task/run slot. This section takes precedence over peer-only Agent clauses above.
+Permission mode never grants authority or changes the selected proof.
+
+Peer hand-back requires the canonical suffix marker and native peer sender,
+handback and task consistency. Completion selects the capability through the
+same recorded native task_notification's tool_use_id/task_id/run_id, with
+source Agent, local_agent task type, current session/generation and accepted
+background execution. SendMessage reactivation uses that call's ID. Normal
+producer completion drains the capability; it does not spend the report slot.
+
+Completion requires a known native output_file. Omission from the notice is
+allowed; a supplied path must match. Compare the native frame summary to the
+result scalar escaped once, never to the outer Agent-finished summary. Result
+markers are content: missing, mistyped, stale, duplicated, another launch's
+marker and old+new combinations neither grant nor refuse authority and never
+select or quarantine a launch. In particular run2 may repeat run1's marker.
+
+The complete native user opener must be non-sidechain, promptIndex=0,
+promptSource=system, turnOrigin=task_notification, with the current hook's
+session/prompt/path and byte-equal body. Its origin.kind is task-notification,
+producer must be session-task, and origin.runId must equal the accepted run.
+Every supplied task/call identity must agree. Monitor's absent-producer
+exception and peer sender fields do not apply.
+
+Parse canonical task-id, tool-use-id, optional output-file, status, summary,
+optional note, optional fixed native relayed-Artifact warning, result, optional
+usage and optional worktree metadata. Summary/result are unique required
+scalars. Agent usage contains numeric subagent_tokens/tool_uses/duration_ms,
+without Workflow agent_count. The exact warning is the native self-closing
+artifact-content-authored-by-others tag and fixed relayed-content warning;
+arbitrary text is rejected. Worktree contains worktreePath followed by an
+optional worktreeBranch. Paths remain inert and branch escaping is native.
+Available native metadata must agree. Unknown/duplicate/reordered fields,
+raw nesting and trailing material refuse the collection. Encoded report tags
+remain scalar data and are not recursively parsed.
+
+All 1–16 blocks prove before any consumption, with compatible immutable maps.
+Agent uses its launch map; Bash/Workflow use the opener-completed map. Duplicate
+Agent slots refuse the batch. Peer and completion race for the same slot:
+first valid atomic commit wins; a distinct delivery never creates another
+owner. Reobserving the same decision is idempotent. A fold retains its existing
+owner/map. An unresolved tuple-bound completion quarantines its identified
+launch without examining result markers; a peer fold still uses its eligible
+marker. Missing inclusion cannot later promote that fold or a foreign root.
+Real root ambiguity/cancellation remains authoritative, and only the admitted
+root's matching native result settles it once. Producer terminal frames and
+task-display removal cannot settle or revoke an already proved lease.
+
+Acceptance includes native unset/default completion and auto hand-back,
+matched legacy/unified default controls, omitted-marker completion, and native
+escaping. Worktree/Artifact grammar has pin inspection and focused parser/host
+coverage; separate live variants are not claimed. Deterministic tests include
+missing/wrong/old/duplicate marker positives, peer-marker negatives, native
+tuple and opener-run mutations separately, both route orders and races,
+fold reservation, duplicate slots, mixed maps, reactivation and actual-send
+validator mutations for an old source and Agent. Auto-only evidence does not
+establish whole-class acceptance. Final native acceptance and independent
+implementation review remain pending.
