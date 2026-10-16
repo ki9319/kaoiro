@@ -245,6 +245,18 @@ and final validator remain mandatory. It is not an expiry substitute or Bash
 fallback. Explicitly canceled or claim-retired runs cannot create new claims;
 already proved leases continue until their root's terminal or host authority invalidation.
 
+Agent peer hand-back retains its canonical marker and native peer proof.
+Agent native completion uses the same accepted launch capability, selected by
+that completion's native call/task/run tuple and the B opener's matching
+origin.runId with producer=session-task. This includes unset/default permission
+mode; permission mode does not supply authority. Compare the frame report to
+the once-escaped result scalar, not outer summary. A known output_file remains
+required, but notice omission is allowed. Every result marker is ignored for
+authority, refusal and quarantine, including missing, wrong, stale, duplicated
+and another launch's marker. Native note/usage, fixed relayed-Artifact warning
+and worktree metadata have strict source-specific grammar; they supply no
+permission or reply basis.
+
 ### D7 supplement: issuance-bounded snapshots and lifecycle
 
 A root accepted launch exports immutable confirmed default-basis data without
@@ -256,7 +268,13 @@ work does not assert all sources use issuance-time basis. Long-running Monitor
 default replies can be stale after newer requester input and are not refreshed
 automatically to force acceptance.
 
-Agent capabilities accept one report occurrence; Monitor capabilities can serve
+Agent peer and completion share one report slot per accepted capability/call/
+task/run, including atomic commit and fold reservation. The first proved route
+spends it; another route or distinct delivery cannot obtain another owner.
+Reobservation preserves the same decision. A fold keeps its existing owner;
+unresolved tuple-bound completion quarantines only that launch and never a
+marker quoted in result. Producer completion does not settle the report root.
+Only its matching native result settles the owner once. Monitor capabilities can serve
 multiple occurrences from the same launch. Source-root completion retains the
 detached capability. Normal producer completion drains queued eligible reports
 within the accepted idle grace. Consumed/drained records cannot create another
@@ -275,7 +293,8 @@ A fresh token arms only after actual resumption success and its accepted new
 background task/run/call/effective-message join. Queued success without
 resumedAgentId discards preparation and does not retire the old capability;
 broker acceptance/PostToolUse alone is not a new execution. Old instructions do not replace registry retirement.
-Old-only and old+new markers fail closed. Unresolved folds use denial-only
+Peer old-only and old+new markers fail closed; completion result markers do
+not affect native-lineage admission. Unresolved folds use denial-only
 reservation/quarantine; no positive grant is inferred before inclusion proof.
 Reliable explicit-stop evidence closes the attributed run's new claims,
 including before TaskStop success, but does not revoke a proved lease. Raw
@@ -308,7 +327,10 @@ The token is a model/native-description-visible bearer, not content authenticati
 approval or work authority. Copy/replay is not universally prevented, especially
 identical Monitor payloads under a shared launch marker. The defensible
 property bounds default authority by the issued snapshot. Real models may
-omit/mistype a marker or return both old and new; those reports gain no right.
+omit/mistype a marker or return both old and new; those peer hand-backs gain no
+right. Native Agent completion has no marker-compliance gate; it still requires
+accepted instrumentation and exact native lineage, and cannot authenticate
+report content or work permission.
 
 Validate reader identity/committed evidence before grant and actual dispatch;
 definite damage invalidates the epoch and uses visible fail-stop. Compaction
@@ -349,7 +371,11 @@ choice instead of silently falling back to Bash or tokenless admission.
 
 The 2026-10-16 unfreeze permits design on develop independently of frozen [issue #214](https://github.com/sakuraiyuta/kaoiro/issues/214). It does not remove foreign occupancy or authorize production enablement.
 Mode selection is startup-only, exclusive, default off; one class landing
-follows complete acceptance and independent review. E9 permission/variant
+follows complete acceptance and independent review. Agent acceptance includes
+unset/default native completion and auto peer hand-back, compared with legacy
+default behavior; an auto-only fixture cannot establish whole-class coverage.
+Optional worktree/Artifact grammar is pin-inspected and tested structurally,
+not claimed as separately live-measured. E9 permission/variant
 dispositions are bounded to the inspected pin/configuration and constructed
 native surfaces, and require independent design approval. Real-model classifier
 invariance, arbitrary new content-sensitive hooks and every WS lifecycle
