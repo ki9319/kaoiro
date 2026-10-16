@@ -2,7 +2,7 @@
 title: Input-bound inter-agent replies
 description: Negotiated reply basis, single-use tickets, recovery handoff, and engine origin guards.
 status: provisional
-last_updated: 2026-10-08
+last_updated: 2026-10-16
 related: [messages, conversations, delivery, send-and-wait]
 ---
 
@@ -56,7 +56,7 @@ turn, after coalescing and terminal-item removal. If turns N and N+2 from the sa
 peer/CID survive in one batch, its default is N+2. Queue arrival and delivery ack
 alone do not publish input. Inline waiter/recovery results affect future input
 snapshots but never update the current turn's default. Confirmed inputs from a
-completed turn are merged by CID and peer into a session-local ledger. A new
+completed turn are merged by CID and peer into a session-local ledger. A new legacy
 Claude SDK notification turn copies that ledger; queued or unconfirmed input
 does not enter it. A notification folded into a live wrapper turn keeps that
 turn's earlier snapshot.
@@ -79,6 +79,31 @@ call. Unknown notification shapes and reused retired prompt IDs remain unbound.
 | Codex exec | A private ToolHost endpoint and captured token per execution turn; endpoint lifetime ends before another turn begins |
 | Codex app-server | Bridge-preserved `x-codex-turn-metadata` thread/turn IDs matched to the authoritative start result and wrapper token; absent/mismatched metadata is rejected |
 | Antigravity | Native engine boundary remains a measurement gate; no full-engine protection claim or v1 activation follows from ToolHost-only measurements |
+
+## Opt-in native continuation snapshots
+
+The [Claude native continuation mode](../engines/claude-events.md#opt-in-native-continuation-ownership)
+uses a detached immutable copy of the confirmed launch owner's map for Agent
+reports and Monitor events/completions. Source-owner retirement does not erase
+that copy. It contains no waiter, recovery or fold tickets, abort signal, or
+pending input, and session reset invalidates it. An inactive reactivation gets
+a new snapshot from its confirmed root; known live-target messages do not.
+
+Bash and Workflow retain the completed-map snapshot taken at their opener.
+A folded notice keeps the already-live owner's snapshot. Multiple proved blocks
+must all select the same map: a Monitor launched at N combined with Bash opened
+after N+1, or two Monitors launched under different maps, refuses atomically with
+`batch-basis-conflict`. Maps are never merged or replaced by the latest ledger.
+This can reject a batch that legacy mode would accept.
+
+A long-running Monitor can therefore send with an older default and receive
+`stale_reply_basis` after newer confirmed input. Existing recovery rules apply;
+no current-input guessing is permitted. Each detached origin requires its
+asynchronous native-evidence validator at the actual common send site, followed
+by a synchronous lease check. Missing or invalid proof refuses locally before a
+transport attempt. Source claim retirement and the admitted root lease are
+separate: stopping the source blocks future claims without borrowing or erasing
+an already-admitted root's authority.
 
 ## Explicit replies and tickets
 

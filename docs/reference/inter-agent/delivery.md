@@ -318,6 +318,15 @@ observation is in the
 [C0 baseline record](../../evidence/issue-463/2026-10-09-c0-baseline-and-codex-evidence.md). Live per-agent policy
 toggles need a revisioned server acknowledgement and are outside this phase.
 
+### Claude native continuation ownership
+
+The default-off [native continuation mode](../engines/claude-events.md#opt-in-native-continuation-ownership)
+changes how an independent native report obtains a root send origin. It does not
+change server delivery modes, receipt acknowledgements, sender wait behavior,
+early/fold selection or their budgets. Ordinary peer roots retain their existing
+ownership. A native report folded into a live root cannot replace that root's
+reply snapshot or create a second owner; an unproved fold grants no authority.
+
 ### Claude recipient handoff
 
 The Claude wrapper advertises `early: "fold"` and `yield: "tool_boundary"` only

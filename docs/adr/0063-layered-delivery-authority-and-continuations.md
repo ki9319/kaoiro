@@ -216,3 +216,147 @@ for all peers since then.
 - **Antigravity.** Phase 4 is not waived. It is tracked at
   [issue #567](https://github.com/sakuraiyuta/kaoiro/issues/567), which waits for
   issue #541 and is coordinated with issues #416 and #412.
+
+## Amendment (2026-10-16, launch-bound native continuations)
+
+The operator selected the wrapper-issued capability design for [issue #426](https://github.com/sakuraiyuta/kaoiro/issues/426), including [issue #674](https://github.com/sakuraiyuta/kaoiro/issues/674). The director approved the design after five review rounds with no remaining must-fix finding. This amendment records the accepted decision; final implementation acceptance and independent implementation review are pending. Landing remains default off, and production enablement requires a separate operator decision.
+
+### D6 supplement: launch proof and native occurrence
+
+Under the operator's O1=A decision, opted-in Claude Queries use
+one native-continuation reducer with disjoint proof variants. Agent reports
+and Monitor event inputs need a wrapper-issued accepted-launch capability
+plus proof of the actual native root opener/occurrence. Accumulated prompt text
+does not grant authority. This replaces the prior all-native task-execution
+requirement for those sources; .293/.301 native J2 findings remain unchanged.
+
+Run-aware Bash/Workflow and the accepted Monitor completion variant enter the
+same reducer through strict native completion evidence. A failed token event
+cannot fall back to Bash. Source classification survives missing instrumentation
+and capacity refusal. Combined completion and last event are one receipt.
+Monitor.description supplies the launch marker to the measured event, normal
+completion and natural-expiry summaries. Natural expiry uses the same capability
+and native opener proof as events, without a separate expiry constructor or
+an expiry-specific send-less policy. The former D8 expiry limitation can be
+withdrawn; unproved individual inputs still fail closed and unmeasured variants
+are not declared covered. Fully proved eligible instrumented Monitor completion
+is accepted with or without a marker/final event; frozen launch basis, B opener
+and final validator remain mandatory. It is not an expiry substitute or Bash
+fallback. Explicitly canceled or claim-retired runs cannot create new claims;
+already proved leases continue until their root's terminal or host authority invalidation.
+
+### D7 supplement: issuance-bounded snapshots and lifecycle
+
+A root accepted launch exports immutable confirmed default-basis data without
+source AbortSignal or recovery tickets. Its proved standalone report imports
+that map into a new owner lease. Folds keep their existing owner/default map.
+Later confirmed input and persistence do not advance a d4 snapshot. Existing
+Bash/Workflow opener-completed policy remains explicit and unchanged; this
+work does not assert all sources use issuance-time basis. Long-running Monitor
+default replies can be stale after newer requester input and are not refreshed
+automatically to force acceptance.
+
+Agent capabilities accept one report occurrence; Monitor capabilities can serve
+multiple occurrences from the same launch. Source-root completion retains the
+detached capability. Normal producer completion drains queued eligible reports
+within the accepted idle grace. Consumed/drained records cannot create another
+origin, while proved owner leases continue to their native terminal.
+Attributed explicit TaskStop/cancellation closes new claims immediately without
+invalidating those leases, including the root that stops its own Monitor and then reports. Host
+session/generation end, reset/fail-stop and root lifecycle still invalidate
+leases. Any native task frame establishing a newer run closes the old Agent
+claims, even without task_started/new-token support; unknown order fails closed.
+Opaque run IDs are never compared lexically. New-run preparation is not deleted by that retirement.
+
+SendMessage instruments only a positively inactive/resumable target, updates
+canonical message and preserves the historical content preview. Running/waking/
+unknown targets receive unchanged input. Authority never derives from content.
+A fresh token arms only after actual resumption success and its accepted new
+background task/run/call/effective-message join. Queued success without
+resumedAgentId discards preparation and does not retire the old capability;
+broker acceptance/PostToolUse alone is not a new execution. Old instructions do not replace registry retirement.
+Old-only and old+new markers fail closed. Unresolved folds use denial-only
+reservation/quarantine; no positive grant is inferred before inclusion proof.
+Reliable explicit-stop evidence closes the attributed run's new claims,
+including before TaskStop success, but does not revoke a proved lease. Raw
+Monitor status stopped can also mean natural WS close and then uses normal
+drain; do not classify cancellation from that string alone. Native delivery
+can continue after either terminal; an explicit-stop token cannot be revived
+or reset by a late event, while natural close retains its queued reports. The reporting root's authority rests on its earlier proof,
+not on whether its producer remains running. Explicit stop sources include root/child TaskStop,
+named SDK stopTask calls and exact native explicit-cancellation witnesses. Query
+interrupt/watchdog/SIGINT alone neither closes nor suspends background claims;
+only precise ends for captured task/run pairs in its bounded observation window
+are attributed. Surviving producers retain their capability. Named stopTask
+closes only its target before dispatch. Existing interrupt cancellation of the
+current host root and its buffered-result barrier remain unchanged. Unknown/unobservable termination
+without explicit-stop evidence uses normal drain, so a late queued report can
+still be admitted within grace; conflicts stay suspended. The old SDK 0.3.220
+control observation does not establish current-pin delivery order or background
+termination. P4 tests surviving reports as well as exact-task end attribution,
+including ACK+1,000 ms / call+5,000 ms window boundaries. Natural WS
+stopped frames arriving in that window can be temporally attributed;
+this ambiguity never closes another task's claims. No raw killed/stopped status or ACK replaces the intent record. SDK generation/
+session end clears records and dependent authority. Native session history
+cannot reconstruct a capability.
+
+### D9 supplement: boundary, concerns and rollout
+
+Same-host/same-OS-user agents are trusted. Intentional coherent same-UID
+tampering is outside protection; live accident detection remains mandatory.
+The token is a model/native-description-visible bearer, not content authentication, human
+approval or work authority. Copy/replay is not universally prevented, especially
+identical Monitor payloads under a shared launch marker. The defensible
+property bounds default authority by the issued snapshot. Real models may
+omit/mistype a marker or return both old and new; those reports gain no right.
+
+Validate reader identity/committed evidence before grant and actual dispatch;
+definite damage invalidates the epoch and uses visible fail-stop. Compaction
+is allowed only while the attribution anchor stays valid. There is no atomic
+filesystem/network guarantee. No arbitrary active Monitor TTL is added;
+completion loss can retain a bounded record until process end. Busy-paused
+draining can fill capacity; refusal is visible and does not erase source kind.
+
+The command-wrapper strategy is rejected: E4 changed native deny into a broker
+ask that could be approved and executed. No custom permission parser/broker
+override repairs that strategy. The selected candidate carries the marker in Monitor.description, preserving
+command/stdout and adding no helper process. E6 establishes measured transport
+and one deny; metadata changes in notices/model context/display are intentional.
+SendMessage content can show the original preview while effective message has
+the instruction; that preview is not an authority surface. A registry/native
+race can queue an already injected T2 instruction into run1: T2 never arms,
+but compliant output can lose liveness. Conversely an uninstrumented message
+can start run2 after run1 completes; old T1 is refused. Do not claim either
+race is transparent or repair it with guessed authority. Monitor envelopes accept 1–16 strict top-level blocks, each independently
+proved before atomic root admission/consumption; every Monitor summary precedes
+its event. The pinned Wt escape of &, < and > keeps block-looking payload inert
+and must be pinned by native acceptance/mutation. Raw nested/unproved sibling blocks
+refuse the whole prompt. Mixed-source snapshots must agree; no basis union.
+This is an accepted legacy regression: after a newer confirmed input, a Monitor
+completion retaining its launch map and a Bash/Workflow completion using the
+opener map can make the whole batch refuse. Two Monitor completions launched
+under different maps can likewise refuse. Legacy treated all those completions
+with the common opener-time map and could admit them. The director accepted this bounded regression under the approved design. P6 requires visible
+batch-basis-conflict refusal without partial consumption; do not claim full
+legacy compatibility or introduce multiple owners to hide the difference. Historical
+Monitor suffixes are preserved; repeated re-arm can reach a length bound and
+refuse instrumentation visibly, rather than silently strip/truncate text. E9 establishes applicable auto-mode explicit ask/deny/allow and independent
+reject controls, with a bounded whole-Agent exclusion disposition rather than
+a claimed live deny comparison. Other hooks can see only original input;
+actual accepted-input checking remains the issuer's responsibility. Do not enable hidden Monitor features or claim
+untested variants covered. A failed variant returns to a concrete design/scope
+choice instead of silently falling back to Bash or tokenless admission.
+
+The 2026-10-16 unfreeze permits design on develop independently of frozen [issue #214](https://github.com/sakuraiyuta/kaoiro/issues/214). It does not remove foreign occupancy or authorize production enablement.
+Mode selection is startup-only, exclusive, default off; one class landing
+follows complete acceptance and independent review. E9 permission/variant
+dispositions are bounded to the inspected pin/configuration and constructed
+native surfaces, and require independent design approval. Real-model classifier
+invariance, arbitrary new content-sensitive hooks and every WS lifecycle
+schedule are not claimed. A changed configuration requires new applicable
+premise checks; final product acceptance/landing have their own later gates. Existing reserved reset behavior and ADR-0036 F6 remain unchanged.
+
+Monitor acceptance is conditional on exposing Monitor in an isolated test
+cache. The cache belongs only to the test's isolated home; no operator setting,
+peer cache, production configuration or additional unpublished variant is
+changed. Production Monitor distribution and availability remain unmeasured.

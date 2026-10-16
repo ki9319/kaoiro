@@ -215,3 +215,14 @@ ticket. The tool result says no message was sent and directs a new
 confirmed input. Retrying that same call, changing its conversation ID, or
 adding a ticket cannot repair an unbound origin. A Claude notification with
 unknown task metadata is rejected rather than assigned the latest turn.
+
+## Native continuation proof errors
+
+In the opt-in [Claude native continuation mode](../engines/claude-events.md#opt-in-native-continuation-ownership),
+`missing_native_proof_validator`, `native_proof_invalid`,
+`native_evidence_damaged` and `stale_native_lease` are local refusals with
+`send_not_attempted: true`. No message was sent. Retrying in that continuation,
+changing conversation ID or supplying a ticket cannot create the missing native
+proof. Wait for a new confirmed input; when admission has fail-stopped, restore
+the wrapper after disconnection. A mixed snapshot batch is diagnosed as
+`batch-basis-conflict` and grants no owner or partial claim consumption.
