@@ -212,6 +212,7 @@ export async function runClaudeCli(dependencies: ClaudeCliDependencies = {}): Pr
 
   // Engine-split default-model env (ADR-0032 F4bc addendum, phase-15 D1).
   const envDefaultModel = process.env.KAOIRO_CLAUDE_CODE_DEFAULT_MODEL;
+  const nativeContinuations = process.env.KAOIRO_CLAUDE_NATIVE_CONTINUATIONS === "1";
 
   // Source vocabulary for ext.model_source (ADR-0032 F4bc addendum,
   // phase-15 15-4 + phase-23 P1 pair-aware apply). Priority, effort catalog
@@ -1323,6 +1324,8 @@ export async function runClaudeCli(dependencies: ClaudeCliDependencies = {}): Pr
     Omit<AgentHostOptions, "onTurnStart">
   >({
     onState,
+    nativeContinuations,
+    ...(nativeContinuations ? { nativeReplyBasis: interAgent!.replyBasis } : {}),
     deliveryPolicy,
     pendingReceiptRootTimeoutMs,
     phase2RootScheduling: () => earlyNegotiated() || yieldNegotiated(),
@@ -1622,12 +1625,14 @@ export async function runClaudeCli(dependencies: ClaudeCliDependencies = {}): Pr
             }),
             inputShape: REQUEST_SESSION_RESET_INPUT_SHAPE,
           },
-        ], id => host.toolOrigins.resolveBound(id)),
+        ], id => nativeContinuations ? host.resolveToolOrigin(id) : host.toolOrigins.resolveBound(id)),
       },
       ...(resumeSessionId !== undefined ? { resume: resumeSessionId } : {}),
     },
   }, (turnToken, kind) => {
-    if (kind === "sdk_notification") interAgent?.beginNotificationReplyInput(turnToken);
+    if (kind === "sdk_notification") {
+      if (!nativeContinuations) interAgent?.beginNotificationReplyInput(turnToken);
+    }
     else {
       interAgent?.beginReplyInput(turnToken, undefined, true);
       writeDeliveryLifecycle("turn_start", turnToken);

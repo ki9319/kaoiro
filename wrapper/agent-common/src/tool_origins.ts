@@ -89,7 +89,13 @@ export class ToolOrigins {
       callbacks.add(resolve);
     });
   }
-  resolveBound(id: unknown): Promise<ReplyOrigin | undefined> {
+  reject(id: string): void {
+    if (!id || this.#observed.size >= 8192) return;
+    this.#observed.set(id, { token: "", signal: AbortSignal.abort() });
+    for (const resolve of this.#pending.get(id) ?? []) resolve();
+    this.#pending.delete(id);
+  }
+  resolveBound(id: unknown, timeoutMs = 5_000): Promise<ReplyOrigin | undefined> {
     if (typeof id !== "string" || !id || this.#full) return Promise.resolve(undefined);
     const found = this.#observed.get(id);
     if (found) return Promise.resolve(found);
@@ -106,7 +112,7 @@ export class ToolOrigins {
         resolve(origin);
       };
       callbacks.add(finish);
-      timer = setTimeout(() => finish(), 5_000);
+      timer = setTimeout(() => finish(), timeoutMs);
     });
   }
 }
