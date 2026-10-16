@@ -41,6 +41,7 @@ export class ContinuationProofs {
       for (const [position, block] of blocks.entries()) {
         const run = this.registry.source(block.taskId);
         if (!run || run.uncertain || !run.source || run.source === "Agent") return { reason: "native_source_unknown" };
+        if (block.agentMetadata) return { reason: "native_completion_source_mismatch" };
         if (block.workflowMetadata && run.source !== "Workflow") return { reason: "native_completion_source_mismatch" };
         const cap = this.registry.byTask(block.taskId);
         sources.push({ taskId: run.taskId, runId: run.runId });
