@@ -28,7 +28,6 @@ preimplementation evidence, not final product acceptance.
 
 ## Selected mechanism and exact protection
 
-
 Use a wrapper-issued launch capability **AND** a B transcript opener/occurrence
 proof **AND** a live root owner. The capability selects the accepted launch by an eligible peer-report marker or
 Agent completion native call/task/run tuple and retains its frozen default reply basis. B joins it to this root's
@@ -489,7 +488,9 @@ root. An ordinary later root cannot repair the same unresolved origin. Use the
 existing visible host fail-stop, preserve terminal diagnostics and barrier,
 and do not force SDK close/abort to make ownership fit. Validation is
 observational; file changes after a read are not an atomic network transaction.
-Measure large-transcript prefix cost before setting a performance criterion.
+Measure large-transcript prefix cost before setting a performance criterion;
+the 50 MB class record is
+[2026-10-16-transcript-reader-cost](../evidence/issue-426/2026-10-16-transcript-reader-cost.md).
 
 ## Fold reservations and immutable owners (S3 / E5)
 
@@ -770,7 +771,6 @@ owner/lease callbacks, early eligibility, shutdown/reset and unread integration.
 It preserves frozen launch snapshots and one owner per root. Do not merge the
 frozen server-queue branch as a prerequisite.
 
-
 ## Agent completion and peer hand-back
 
 Agent reports have two proof variants with one shared capability/accepted-call/
@@ -841,7 +841,6 @@ fold reservation, duplicate slots, mixed maps, reactivation and actual-send
 validator mutations for an old source and Agent. Auto-only evidence does not
 establish whole-class acceptance. Final native acceptance and independent
 implementation review remain pending.
-
 
 Peer opener acceptance also measures a hand-back arriving while a root is busy,
 then opening its own root after that root finishes. Record whether formatting
