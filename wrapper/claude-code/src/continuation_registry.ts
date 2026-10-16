@@ -10,6 +10,9 @@ const canonical = (value: unknown): string => {
   return `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${canonical((value as Input)[k])}`).join(",")}}`;
 };
 const hash = (value: unknown): string => createHash("sha256").update(canonical(value)).digest("hex");
+const backgroundStart = (frame: Input): boolean => frame.task_type === "local_workflow"
+  ? frame.is_backgrounded !== false && frame.parent_task_id === undefined
+  : frame.is_backgrounded === true || frame.task_type === "monitor_ws";
 const record = (value: unknown): Input | undefined => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Input : undefined;
 
 export interface LaunchCapability {
@@ -183,19 +186,20 @@ export class ContinuationRegistry {
       const retiredRuns = new Set([...run.retiredRuns, run.runId]);
       if (retiredRuns.size > 256) { run.uncertain = true; return; }
       run = { taskId, runId, callId, source: call?.source, taskType: String(frame.task_type ?? ""),
-        background: frame.is_backgrounded === true || frame.task_type === "monitor_ws" || frame.task_type === "local_workflow", retiredRuns, uncertain: frame.subtype !== "task_started" || !call,
+        background: backgroundStart(frame), retiredRuns, uncertain: frame.subtype !== "task_started" || !call,
         explicitStop: false, stops: new Set() };
       this.#runs.set(taskId, run);
     } else if (!run) {
       if (this.#runs.size >= 8192) { this.warn("native continuation task history capacity reached"); return; }
       run = { taskId, runId, callId, source: call?.source, taskType: typeof frame.task_type === "string" ? frame.task_type : undefined,
-        background: frame.is_backgrounded === true || frame.task_type === "local_workflow" || frame.task_type === "monitor_ws", retiredRuns: new Set(),
+        background: backgroundStart(frame), retiredRuns: new Set(),
         uncertain: frame.subtype !== "task_started" || !call, explicitStop: false, stops: new Set() };
       this.#runs.set(taskId, run);
     } else if (callId && run.callId && run.callId !== callId) {
       run.uncertain = true;
     }
-    if (frame.subtype === "task_updated" && record(frame.patch)?.is_backgrounded === true) run.background = true;
+    const backgrounded = record(frame.patch)?.is_backgrounded;
+    if (frame.subtype === "task_updated" && run.taskType === "local_bash" && typeof backgrounded === "boolean") run.background = backgrounded;
     if (frame.subtype === "task_started" && call) {
       if (call.start && hash(call.start) !== hash(frame)) { call.rejected = true; if (call.capability) call.capability.state = "closed"; }
       else { call.start = structuredClone(frame); this.#arm(call); }

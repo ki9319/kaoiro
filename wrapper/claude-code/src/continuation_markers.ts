@@ -22,6 +22,7 @@ export interface NotificationBlock {
   summary: string;
   event?: string | undefined;
   result?: string | undefined;
+  workflowMetadata: boolean;
 }
 
 /** Parse structure before comparing scalars; escaped tag-looking text stays inert. */
@@ -35,17 +36,20 @@ export function parseContinuationBlocks(text: string): NotificationBlock[] | und
     const order: string[] = [];
     let body = match[1]!.trim();
     while (body) {
-      const field = /^<(task-id|tool-use-id|output-file|status|summary|event|result)>([^<]*)<\/\1>/.exec(body);
+      // Workflow usage is structured native metadata, never another notification.
+      const field = /^<(task-id|tool-use-id|output-file|status|summary|event|recovery|result|diagnostics|failures)>([^<]*)<\/\1>/.exec(body) ??
+        /^<(usage)>(<agent_count>\d+<\/agent_count>(?:<agents_done>\d+<\/agents_done><agents_error>\d+<\/agents_error><agents_skipped>\d+<\/agents_skipped><agents_empty_result>\d+<\/agents_empty_result>)?<subagent_tokens>\d+<\/subagent_tokens><tool_uses>\d+<\/tool_uses><duration_ms>\d+<\/duration_ms>)<\/usage>/.exec(body);
       if (!field || fields.has(field[1]!)) return undefined;
-      fields.set(field[1]!, field[2]!); order.push(field[1]!);
+      fields.set(field[1]!, field[2] ?? ""); order.push(field[1]!);
       body = body.slice(field[0].length).trimStart();
     }
     const taskId = fields.get("task-id"), summary = fields.get("summary");
     if (!taskId || summary === undefined || order[0] !== "task-id") return undefined;
-    const canonical = ["task-id", "tool-use-id", "output-file", "status", "summary", "event", "result"];
+    const canonical = ["task-id", "tool-use-id", "output-file", "status", "summary", "event", "recovery", "result", "diagnostics", "failures", "usage"];
     if (order.some((name, i) => i > 0 && canonical.indexOf(name) <= canonical.indexOf(order[i - 1]!))) return undefined;
     blocks.push({ taskId, summary, toolUseId: fields.get("tool-use-id"), outputFile: fields.get("output-file"),
-      status: fields.get("status"), event: fields.get("event"), result: fields.get("result") });
+      status: fields.get("status"), event: fields.get("event"), result: fields.get("result"),
+      workflowMetadata: ["recovery", "diagnostics", "failures", "usage"].some(name => fields.has(name)) });
     remaining = remaining.slice(match[0].length).trimStart();
   }
   return blocks.length ? blocks : undefined;
