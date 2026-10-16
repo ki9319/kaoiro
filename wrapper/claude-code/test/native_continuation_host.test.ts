@@ -18,7 +18,8 @@ const inbound = (n: number): Envelope => ({ version: "0", agent_id: "peer", pers
 
 describe("native continuation host and actual send path", () => {
   it.each(["peer", "peer-warning", "peer-unwrapped", "peer-two-frames", "peer-damage-before-send", "event", "non-system-row", "stop-before-send", "damage-before-send", "unknown-source", "delayed-row", "bash", "bash-damage-before-send", "workflow", "timeout-bash", "child-launch", "missing-row",
-    "agent", "agent-no-output", "agent-mistyped-marker", "agent-wrong-run", "agent-missing-producer", "agent-optional-metadata", "agent-damage-before-send", "agent-fold", "agent-malformed-fold", "agent-fold-peer-own", "agent-fold-peer-quote", "agent-fold-bare"])("handles %s with its source-specific frozen basis", async variant => {
+    "agent", "agent-no-output", "agent-mistyped-marker", "agent-wrong-run", "agent-missing-producer", "agent-optional-metadata", "agent-damage-before-send", "agent-fold", "agent-malformed-fold", "agent-fold-peer-own", "agent-fold-peer-quote", "agent-fold-bare",
+    "agent-stop-measured-fail", "agent-stop-failure-hook", "agent-stop-unmeasured-result"])("handles %s with its source-specific frozen basis", async variant => {
     const dir = await mkdtemp(join(tmpdir(), "kogane-426-host-")); scratch.push(dir);
     const path = join(dir, "native.jsonl"); await writeFile(path, "");
     const outgoing: Envelope[] = [], warnings: string[] = [], starts: string[] = [];
@@ -28,7 +29,7 @@ describe("native continuation host and actual send path", () => {
     let bound: Awaited<ReturnType<AgentHost["resolveToolOrigin"]>>;
     let sendResult: { isError?: boolean } | undefined;
     const queryFn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => {
-      const fire = async (name: "UserPromptSubmit" | "PreToolUse" | "PostToolUse", payload: Record<string, unknown>, callId?: string) =>
+      const fire = async (name: "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "PostToolUseFailure", payload: Record<string, unknown>, callId?: string) =>
         args.options.hooks![name]!.at(-1)!.hooks[0]!({ hook_event_name: name, session_id: "s", transcript_path: path, cwd: dir, ...payload } as HookInput,
           callId, { signal: new AbortController().signal });
       const script = async function* () {
@@ -55,8 +56,18 @@ describe("native continuation host and actual send path", () => {
         if (variant === "timeout-bash") yield frame({ type: "system", subtype: "task_updated", session_id: "s", task_id: "task", run_id: "run", tool_use_id: "launch", patch: { is_backgrounded: true } });
         const report = variant === "agent-mistyped-marker" ? "done [kaoiro-continuation:mistyped]" : folding ?
           "done " + String(effective.prompt).match(/\[kaoiro-continuation:[A-Za-z0-9_-]{43}\]/)![0] : "done & <data>";
+        const stopping = variant.startsWith("agent-stop");
+        if (stopping) await fire("PreToolUse", { prompt_id: "parent", tool_name: "TaskStop", tool_use_id: "stop", tool_input: { task_id: "task" } }, "stop");
         if (source !== "Monitor" && !peer) yield frame({ type: "system", subtype: "task_notification", session_id: "s", task_id: "task", run_id: "run", tool_use_id: "launch", status: "completed", output_file: "/tmp/output", summary: source === "Agent" ? report : "done",
           ...(source === "Agent" ? { usage: { total_tokens: 1, tool_uses: 0, duration_ms: 1 } } : {}) });
+        if (stopping) {
+          const stopped = { prompt_id: "parent", tool_name: "TaskStop", tool_use_id: "stop", tool_input: { task_id: "task" } };
+          // The first is the pin 2.1.293 TaskStop result for a task that was not running; the second is its other, unmeasured note.
+          const message = variant === "agent-stop-unmeasured-result" ? "Task task had already ended (completed) but its loop had not exited; re-signalled it."
+            : "No background command with ID task is running on some-host for this session: it has already finished or been stopped, or it was never this session's.";
+          if (variant === "agent-stop-failure-hook") await fire("PostToolUseFailure", { ...stopped, error: "Task task is not running (status: completed)", is_interrupt: false }, "stop");
+          else await fire("PostToolUse", { ...stopped, tool_response: { message, task_id: "task", task_type: "local_bash" } }, "stop");
+        }
         const peerReport = recordedPeer.row.origin.body.replace("A".repeat(43), String(effective.prompt).match(/\[kaoiro-continuation:([A-Za-z0-9_-]{43})\]/)?.[1] ?? "missing");
         const peerData = peerFixture(peerReport);
         if (variant === "peer-warning") peerData.row.message.content = peerData.row.message.content.replace("That", "that");
@@ -111,10 +122,10 @@ describe("native continuation host and actual send path", () => {
       onPromptAdmitted: token => tool.confirmReplyInput(token), onTurnEnd: ({ turnToken }) => { if (turnToken) tool.endReplyInput(turnToken); } });
     try { await host.run("launch"); } finally { host.close(); }
     const refusedPeer = ["peer-warning", "peer-unwrapped", "peer-two-frames"].includes(variant);
-    const refused = refusedPeer || variant === "unknown-source" || variant === "non-system-row" || variant.endsWith("damage-before-send") || variant === "child-launch" || variant === "missing-row" || variant === "agent-wrong-run" || variant === "agent-missing-producer" || variant === "agent-fold" || variant === "agent-fold-peer-own";
+    const refused = refusedPeer || variant === "unknown-source" || variant === "non-system-row" || variant.endsWith("damage-before-send") || variant === "child-launch" || variant === "missing-row" || variant === "agent-wrong-run" || variant === "agent-missing-producer" || variant === "agent-fold" || variant === "agent-fold-peer-own" || variant === "agent-stop-unmeasured-result";
     expect(outgoing).toHaveLength(refused ? 0 : 1);
     expect(sendResult?.isError).toBe(refused ? true : undefined);
     if (!refused) expect((outgoing[0]!.payload as { in_reply_to: number }).in_reply_to).toBe(["bash", "workflow", "timeout-bash"].includes(variant) ? 3 : 1);
-    expect(starts).toHaveLength(refusedPeer || ["unknown-source", "non-system-row", "child-launch", "missing-row", "agent-wrong-run", "agent-missing-producer", "agent-fold", "agent-fold-peer-own"].includes(variant) ? 1 : 2);
+    expect(starts).toHaveLength(refusedPeer || ["unknown-source", "non-system-row", "child-launch", "missing-row", "agent-wrong-run", "agent-missing-producer", "agent-fold", "agent-fold-peer-own", "agent-stop-unmeasured-result"].includes(variant) ? 1 : 2);
   }, 10000);
 });

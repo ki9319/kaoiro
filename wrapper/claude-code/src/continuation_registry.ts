@@ -209,10 +209,11 @@ export class ContinuationRegistry {
         now <= w.deadline && w.pairs.get(taskId) === runId);
       if (!run.terminal) run.terminal = structuredClone(frame);
       else if (hash(run.terminal) !== hash(frame)) run.uncertain = true;
-      if (run.stops.size || interrupted) run.explicitStop = true;
+      // A pending TaskStop only explains a stopped/killed frame; a natural completed/failed frame stays a drain.
+      if (interrupted || (run.stops.size && ["stopped", "killed"].includes(String(frame.status)))) run.explicitStop = true;
       for (const cap of this.#tokens.values()) if (cap.taskId === taskId && cap.runId === runId) {
         if (run.explicitStop) cap.state = "closed";
-        else if (cap.state === "armed") cap.state = "draining";
+        else if (cap.state === "armed" && !run.stops.size) cap.state = "draining";
       }
     }
     this.#collectClosed();
@@ -231,6 +232,12 @@ export class ContinuationRegistry {
     if (!run || run.runId !== attempt.runId) return;
     run.stops.delete(callId);
     if (succeeded) this.stopTask(attempt.taskId);
+    else this.#reconcileFailedStop(run);
+  }
+  /** The terminal arrived while a stop was pending; once the last stop fails the natural completion drains. */
+  #reconcileFailedStop(run: SourceRun): void {
+    if (run.stops.size || run.explicitStop || !["completed", "failed"].includes(String(run.terminal?.status))) return;
+    for (const cap of this.#tokens.values()) if (cap.taskId === run.taskId && cap.runId === run.runId && cap.state === "armed") cap.state = "draining";
   }
   stopTask(taskId: string): void {
     const run = this.#runs.get(taskId);
