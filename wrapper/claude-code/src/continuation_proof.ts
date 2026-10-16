@@ -1,5 +1,5 @@
 import type { DetachedReplyBasis, ReplyBasis } from "@kaoiro/agent-common";
-import { escapeNativeScalar, parseContinuationBlocks, reportToken, MARKER_PREFIX } from "./continuation_markers.js";
+import { escapeNativeScalar, parseContinuationBlocks, reportToken, MARKER_PREFIX, type NotificationBlock } from "./continuation_markers.js";
 import { ContinuationRegistry, type LaunchCapability } from "./continuation_registry.js";
 import type { NativeAnchor } from "./native_transcript.js";
 
@@ -16,6 +16,42 @@ type Claim = { cap?: LaunchCapability | undefined; key: string; completion: bool
 export class ContinuationProofs {
   readonly #completions = new Set<string>();
   constructor(readonly registry: ContinuationRegistry, readonly basis: ReplyBasis) {}
+
+  #agentCompletion(block: NotificationBlock): LaunchCapability | undefined {
+    const run = this.registry.source(block.taskId);
+    const terminal = run?.terminal;
+    if (!run || run.source !== "Agent" || run.taskType !== "local_agent" || run.uncertain ||
+        !run.background || run.explicitStop || run.stops.size || !terminal ||
+        typeof terminal.tool_use_id !== "string" || terminal.tool_use_id !== block.toolUseId ||
+        terminal.tool_use_id !== run.callId || terminal.task_id !== block.taskId || typeof terminal.run_id !== "string" ||
+        terminal.session_id !== this.registry.sessionId || block.status !== terminal.status ||
+        typeof terminal.output_file !== "string" || !terminal.output_file ||
+        (block.outputFile !== undefined && block.outputFile !== terminal.output_file) ||
+        typeof terminal.summary !== "string" || block.result !== escapeNativeScalar(terminal.summary) ||
+        block.event !== undefined || block.workflowMetadata) return undefined;
+    const cap = this.registry.byExecution(terminal.tool_use_id, block.taskId, terminal.run_id);
+    if (!cap || cap.source !== "Agent" || cap.consumed || cap.quarantined) return undefined;
+    const usage = terminal.usage as Record<string, unknown> | undefined;
+    if (block.usage !== undefined && usage) {
+      for (const [tag, key] of [["subagent_tokens", "total_tokens"], ["tool_uses", "tool_uses"], ["duration_ms", "duration_ms"]]) {
+        const value = new RegExp(`<${tag}>(\\d+)</${tag}>`).exec(block.usage)?.[1];
+        if (usage[key!] !== undefined && value !== String(usage[key!])) return undefined;
+      }
+    }
+    for (const [value, key, escaped] of [[block.note, "note", true], [block.worktreePath, "worktreePath", false],
+      [block.worktreeBranch, "worktreeBranch", true]] as const) {
+      if (value !== undefined && terminal[key] !== undefined &&
+          value !== (escaped ? escapeNativeScalar(String(terminal[key])) : String(terminal[key]))) return undefined;
+    }
+    return cap;
+  }
+
+  reserveCompletionFold(prompt: string, occurrence: string): void {
+    for (const block of parseContinuationBlocks(prompt) ?? []) {
+      const cap = this.#agentCompletion(block);
+      if (cap) this.registry.quarantine(cap.token, occurrence);
+    }
+  }
 
   prove(anchor: NativeAnchor, prompt: string, openerBasis: DetachedReplyBasis): ProofResult {
     const row = anchor.row;
@@ -40,22 +76,28 @@ export class ContinuationProofs {
       if (!blocks) return { reason: "native_notification_malformed" };
       for (const [position, block] of blocks.entries()) {
         const run = this.registry.source(block.taskId);
-        if (!run || run.uncertain || !run.source || run.source === "Agent") return { reason: "native_source_unknown" };
-        if (block.agentMetadata) return { reason: "native_completion_source_mismatch" };
+        if (!run || run.uncertain || !run.source) return { reason: "native_source_unknown" };
+        if (block.agentMetadata && run.source !== "Agent") return { reason: "native_completion_source_mismatch" };
         if (block.workflowMetadata && run.source !== "Workflow") return { reason: "native_completion_source_mismatch" };
-        const cap = this.registry.byTask(block.taskId);
+        const cap = run.source === "Agent" ? this.#agentCompletion(block) : this.registry.byTask(block.taskId);
         sources.push({ taskId: run.taskId, runId: run.runId });
         const terminal = run.terminal;
         const completed = block.status !== undefined;
         const completionKey = JSON.stringify([block.taskId, run.runId, run.callId]);
-        if (completed) {
+        if (completed && run.source !== "Agent") {
           if (!terminal || !run.background || run.explicitStop || run.stops.size ||
               !run.callId || block.toolUseId !== run.callId || terminal.tool_use_id !== run.callId ||
               block.status !== terminal.status || typeof terminal.output_file !== "string" || !terminal.output_file ||
               block.outputFile !== terminal.output_file ||
               block.summary !== escapeNativeScalar(String(terminal.summary)) || this.#completions.has(completionKey)) return { reason: "native_completion_unproved" };
         }
-        if (run.source === "Monitor") {
+        if (run.source === "Agent") {
+          if (!cap || !completed) return { reason: "native_agent_completion_unproved" };
+          if (origin.producer !== "session-task" || origin.runId !== cap.runId ||
+              (origin.taskId !== undefined && origin.taskId !== cap.taskId) ||
+              (origin.toolUseId !== undefined && origin.toolUseId !== cap.callId)) return { reason: "native_agent_origin_mismatch" };
+          maps.push(cap.basis);
+        } else if (run.source === "Monitor") {
           if (!cap || !this.registry.eligible(cap) || cap.source !== "Monitor") return { reason: "native_monitor_unproved" };
           const description = escapeNativeScalar(String(cap.effective.description));
           if (!completed && (block.toolUseId !== undefined || block.outputFile !== undefined || block.result !== undefined ||

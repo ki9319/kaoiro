@@ -30,13 +30,21 @@ function rig() {
       run_id: run.runId, tool_use_id: id, status: "completed", output_file: "/tmp/output", summary });
     return `<task-notification><task-id>${id}</task-id><tool-use-id>${id}</tool-use-id><output-file>/tmp/output</output-file><status>completed</status><summary>${escapeNativeScalar(summary)}</summary></task-notification>`;
   };
-  const prove = (prompt: string, map = snapshot, origin: Record<string, unknown> = { kind: "task-notification", producer: "session-task" }) => {
-    const anchor: NativeAnchor = { uuid: "occurrence", promptId: "p", digest: "owned-test", row: {
+  const prove = (prompt: string, map = snapshot, origin: Record<string, unknown> = { kind: "task-notification", producer: "session-task" }, uuid = "occurrence") => {
+    const anchor: NativeAnchor = { uuid, promptId: "p", digest: "owned-test", row: {
       promptSource: "system", turnOrigin: origin.kind === "peer" ? "peer" : "task_notification", origin,
       message: { role: "user", content: prompt } } };
     return proofs.prove(anchor, prompt, map);
   };
-  return { basis, registry, proofs, snapshot, launch, event, completion, prove };
+  const agentCompletion = (id: string, report: string, output = true) => {
+    completion(id, report);
+    return `<task-notification><task-id>${id}</task-id><tool-use-id>${id}</tool-use-id>` +
+      (output ? "<output-file>/tmp/output</output-file>" : "") + '<status>completed</status><summary>Agent "child" finished</summary>' +
+      `<note>Agent may resume</note><result>${escapeNativeScalar(report)}</result>` +
+      '<usage><subagent_tokens>1</subagent_tokens><tool_uses>0</tool_uses><duration_ms>1</duration_ms></usage></task-notification>';
+  };
+  const agentOrigin = (id: string) => ({ kind: "task-notification", producer: "session-task", runId: "run-" + id });
+  return { basis, registry, proofs, snapshot, launch, event, completion, prove, agentCompletion, agentOrigin };
 }
 
 describe("atomic native continuation proof", () => {
@@ -143,5 +151,113 @@ describe("atomic native continuation proof", () => {
     r.registry.quarantine(cap!.token, "fold");
     if ("proof" in accepted) expect(accepted.proof.commit()).toBe(false);
     expect(r.prove(report, r.snapshot, origin)).toHaveProperty("reason");
+  });
+  it.each(["missing", "mistyped", "old", "other-launch", "duplicate", "old+new", "escaped"])("Agent completion ignores result markers: %s", variant => {
+    const r = rig(); const { cap } = r.launch("a", "Agent"); const other = r.launch("b", "Agent").cap!;
+    const report = variant === "missing" ? "report" : variant === "mistyped" ? "report [kaoiro-continuation:bad]" :
+      variant === "old" ? marker("old".repeat(14) + "x") : variant === "other-launch" ? marker(other.token) :
+      variant === "duplicate" ? marker(cap!.token).repeat(2) : variant === "old+new" ? marker(other.token) + marker(cap!.token) :
+      '& <task-notification> &lt;tag&gt; ' + marker(other.token);
+    const prompt = r.agentCompletion("a", report, false);
+    const result = r.prove(prompt, r.snapshot, r.agentOrigin("a"));
+    expect("proof" in result).toBe(true);
+    if ("proof" in result) expect(result.proof.commit()).toBe(true);
+    expect(cap!.consumed).toBeDefined(); expect(other.consumed).toBeUndefined(); expect(other.quarantined).toBeUndefined();
+  });
+  it.each(["missing", "wrong", "duplicate", "old+new"])("peer hand-back still refuses %s report markers", variant => {
+    const r = rig(); const { cap } = r.launch("a", "Agent");
+    const body = variant === "missing" ? "report" : variant === "wrong" ? marker("x".repeat(43)) :
+      variant === "duplicate" ? marker(cap!.token).repeat(2) : marker("x".repeat(43)) + marker(cap!.token);
+    expect(r.prove(body, r.snapshot, { kind: "peer", from: "a", senderTaskId: "a", handback: true, body })).toHaveProperty("reason");
+  });
+  it.each(["missing-run", "wrong-run", "missing-producer", "wrong-task", "wrong-call"])("Agent requires its own opener lineage: %s", variant => {
+    const r = rig(); r.launch("a", "Agent"); const prompt = r.agentCompletion("a", "report");
+    const origin: Record<string, unknown> = r.agentOrigin("a");
+    if (variant === "missing-run") delete origin.runId;
+    if (variant === "wrong-run") origin.runId = "old";
+    if (variant === "missing-producer") delete origin.producer;
+    if (variant === "wrong-task") origin.taskId = "other";
+    if (variant === "wrong-call") origin.toolUseId = "other";
+    expect(r.prove(prompt, r.snapshot, origin)).toHaveProperty("reason", "native_agent_origin_mismatch");
+  });
+  it.each(["run_id", "task_id", "tool_use_id", "session_id", "status", "summary", "output_file"])("Agent requires the same native completion %s", field => {
+    const r = rig(); r.launch("a", "Agent"); const prompt = r.agentCompletion("a", "report");
+    r.registry.source("a")!.terminal![field] = "wrong";
+    expect(r.prove(prompt, r.snapshot, r.agentOrigin("a"))).toHaveProperty("reason");
+  });
+  it("Agent block call cannot differ from the completion's accepted call", () => {
+    const r = rig(); r.launch("a", "Agent");
+    const prompt = r.agentCompletion("a", "report").replace("<tool-use-id>a</tool-use-id>", "<tool-use-id>other</tool-use-id>");
+    expect(r.prove(prompt, r.snapshot, r.agentOrigin("a"))).toHaveProperty("reason");
+  });
+  it.each(["callId", "taskId", "runId", "sessionId"])("Agent capability cannot borrow another accepted %s", field => {
+    const r = rig(); const { cap } = r.launch("a", "Agent"); const prompt = r.agentCompletion("a", "report");
+    Object.assign(cap!, { [field]: "wrong" });
+    expect(r.prove(prompt, r.snapshot, r.agentOrigin("a"))).toHaveProperty("reason");
+  });
+  it.each(["usage", "worktree", "note", "report", "output"])("Agent refuses contradictory native metadata or report: %s", field => {
+    const r = rig(); r.launch("a", "Agent"); let prompt = r.agentCompletion("a", "report");
+    const terminal = r.registry.source("a")!.terminal!;
+    if (field === "usage") terminal.usage = { total_tokens: 2, tool_uses: 0, duration_ms: 1 };
+    if (field === "worktree") {
+      terminal.worktreeBranch = "other";
+      prompt = prompt.replace("</task-notification>", '<worktree><worktreePath>/workspace/a</worktreePath><worktreeBranch>topic</worktreeBranch></worktree></task-notification>');
+    }
+    if (field === "note") terminal.note = "wrong";
+    if (field === "report") prompt = prompt.replace("<result>report", "<result>wrong");
+    if (field === "output") prompt = prompt.replace("/tmp/output", "/tmp/wrong");
+    expect(r.prove(prompt, r.snapshot, r.agentOrigin("a"))).toHaveProperty("reason");
+  });
+  it.each([true, false])("peer and completion atomically share one slot, peer first=%s", peerFirst => {
+    const r = rig(); const { cap } = r.launch("a", "Agent");
+    const report = `report ${marker(cap!.token)}`, prompt = r.agentCompletion("a", report);
+    const peerOrigin = { kind: "peer", from: "a", senderTaskId: "a", handback: true, body: report };
+    const peer = r.prove(report, r.snapshot, peerOrigin, "peer-occurrence");
+    const completion = r.prove(prompt, r.snapshot, r.agentOrigin("a"), "completion-occurrence");
+    expect("proof" in peer && "proof" in completion).toBe(true);
+    if ("proof" in peer && "proof" in completion) {
+      const first = peerFirst ? peer : completion, second = peerFirst ? completion : peer;
+      expect(first.proof.commit()).toBe(true); expect(first.proof.commit()).toBe(true); expect(second.proof.commit()).toBe(false);
+    }
+    expect(r.prove(report, r.snapshot, peerOrigin, "new-peer")).toHaveProperty("reason");
+    expect(r.prove(prompt, r.snapshot, r.agentOrigin("a"), "new-completion")).toHaveProperty("reason");
+  });
+  it("completion folds quarantine only their tuple-selected launch, never result markers", () => {
+    const r = rig(); const a = r.launch("a", "Agent").cap!, b = r.launch("b", "Agent").cap!;
+    const prompt = r.agentCompletion("a", marker(b.token));
+    const prepared = r.prove(prompt, r.snapshot, r.agentOrigin("a")); expect("proof" in prepared).toBe(true);
+    r.proofs.reserveCompletionFold(prompt, "fold");
+    expect(a.quarantined).toBe("fold"); expect(b.quarantined).toBeUndefined();
+    if ("proof" in prepared) expect(prepared.proof.commit()).toBe(false);
+    expect(r.prove(prompt, r.snapshot, r.agentOrigin("a"))).toHaveProperty("reason");
+    const report = marker(a.token);
+    expect(r.prove(report, r.snapshot, { kind: "peer", from: "a", senderTaskId: "a", handback: true, body: report })).toHaveProperty("reason");
+  });
+  it("Agent batches reject duplicate slots and mixed maps without partial consumption", () => {
+    const r = rig(); const { cap } = r.launch("a", "Agent"); r.launch("b", "Bash");
+    const prompt = r.agentCompletion("a", "report"), bash = r.completion("b");
+    expect(r.prove(prompt + prompt, r.snapshot, r.agentOrigin("a"))).toHaveProperty("reason", "native_duplicate_claim");
+    r.basis.begin("newer", [{ type: "inter_agent_message", agent_id: "peer", payload: { conversation_id: "c", turn_number: 3 } } as unknown as Envelope]);
+    r.basis.retire("newer");
+    expect(r.prove(prompt + bash, r.basis.exportCompleted(), r.agentOrigin("a"))).toHaveProperty("reason", "batch-basis-conflict");
+    expect(cap!.consumed).toBeUndefined();
+    const valid = r.prove(prompt + bash, r.snapshot, r.agentOrigin("a")); expect("proof" in valid).toBe(true);
+    if ("proof" in valid) expect(valid.proof.commit()).toBe(true);
+  });
+  it("reactivation selects the SendMessage call even when run2 repeats run1's marker", () => {
+    const r = rig(); const old = r.launch("a", "Agent"); r.agentCompletion("a", "old report");
+    const effective = r.registry.prepare("resume", "SendMessage", { to: "a", message: "resume" }, "new-parent", r.snapshot)!;
+    r.registry.observeFrame({ ...old.start, run_id: "run-two", tool_use_id: "resume", prompt: effective.message });
+    r.registry.outcome("resume", effective, { success: true, resumedAgentId: "a" });
+    const cap = r.registry.byExecution("resume", "a", "run-two")!;
+    expect(cap).toBeDefined(); expect(cap.token).not.toBe(old.cap!.token);
+    const report = marker(old.cap!.token);
+    r.registry.observeFrame({ type: "system", subtype: "task_notification", session_id: "s", task_id: "a", run_id: "run-two",
+      tool_use_id: "resume", status: "completed", output_file: "/tmp/output", summary: report });
+    const prompt = `<task-notification><task-id>a</task-id><tool-use-id>resume</tool-use-id><status>completed</status><summary>Agent finished</summary><result>${report}</result></task-notification>`;
+    const result = r.prove(prompt, r.snapshot, { kind: "task-notification", producer: "session-task", runId: "run-two" });
+    expect("proof" in result).toBe(true);
+    if ("proof" in result) expect(result.proof.commit()).toBe(true);
+    expect(cap.consumed).toBeDefined(); expect(old.cap!.quarantined).toBeUndefined();
   });
 });

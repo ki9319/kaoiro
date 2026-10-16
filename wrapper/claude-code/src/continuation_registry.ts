@@ -267,6 +267,11 @@ export class ContinuationRegistry {
       run.runId === cap.runId && !run.uncertain && !run.explicitStop && run.stops.size === 0;
   }
   byToken(token: string): LaunchCapability | undefined { return this.#tokens.get(token); }
+  byExecution(callId: string, taskId: string, runId: string): LaunchCapability | undefined {
+    const cap = this.#calls.get(callId)?.capability;
+    return cap?.sessionId === this.sessionId && cap.callId === callId && cap.taskId === taskId &&
+      cap.runId === runId && this.eligible(cap) ? cap : undefined;
+  }
   byTask(taskId: string): LaunchCapability | undefined {
     const matching = [...this.#tokens.values()].filter(cap => cap.taskId === taskId && this.eligible(cap));
     return matching.length === 1 ? matching[0] : undefined;
