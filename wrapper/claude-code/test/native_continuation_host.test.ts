@@ -66,7 +66,7 @@ describe("native continuation host and actual send path", () => {
   it.each(["peer", "peer-warning", "peer-unwrapped", "peer-two-frames", "peer-damage-before-send", "event", "non-system-row", "stop-before-send", "damage-before-send", "unknown-source", "delayed-row", "bash", "bash-damage-before-send", "workflow", "timeout-bash", "child-launch", "missing-row",
     "agent", "agent-no-output", "agent-mistyped-marker", "agent-wrong-run", "agent-missing-producer", "agent-optional-metadata", "agent-damage-before-send", "agent-fold", "agent-malformed-fold", "agent-fold-peer-own", "agent-fold-peer-quote", "agent-fold-bare",
     "agent-stop-measured-fail", "agent-stop-failure-hook", "agent-stop-unmeasured-result", "agent-reset-in-validate", "agent-reset-and-damage-in-validate"])("handles %s with its source-specific frozen basis", async variant => {
-    const dir = await mkdtemp(join(tmpdir(), "kogane-426-host-")); scratch.push(dir);
+    const dir = await mkdtemp(join(tmpdir(), "kaoiro-426-host-")); scratch.push(dir);
     const path = join(dir, "native.jsonl"); await writeFile(path, "");
     const outgoing: Envelope[] = [], warnings: string[] = [], starts: string[] = [], failStops: unknown[] = [];
     const tool = new InterAgentTool({ config, getState: () => "thinking", send: () => {}, replyBasisMode: () => "v1",
