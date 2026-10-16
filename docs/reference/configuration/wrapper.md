@@ -2,7 +2,7 @@
 title: Wrapper configuration
 description: Runner-relayed WrapperConfig fields and engine-local delivery controls.
 status: accepted
-last_updated: 2026-10-15
+last_updated: 2026-10-16
 related: [protocol]
 ---
 
@@ -160,6 +160,25 @@ Selecting `untrusted` or `on-request` also requires an operator dialog for
 turn and latest selection are `never` and permission state is unblocked;
 loosening a running strict turn takes effect on its next turn. Exec and
 app-server with the axis off use `never`.
+
+## Claude native continuation ownership
+
+`KAOIRO_CLAUDE_NATIVE_CONTINUATIONS=1` selects unified native continuation
+ownership for a new Claude wrapper lifetime. Only the exact value `1` enables
+it; absent or other values keep the legacy behavior. There is no live switch,
+runner configuration field, or additional server capability. The opt-in is
+independent of the phase-2 delivery controls below.
+
+The mode instruments root Agent launches, eligible inactive `SendMessage`
+reactivations, and Monitor descriptions with wrapper-issued launch markers. It
+requires native transcript evidence before granting a new send origin. Unknown
+or unproved sources remain unable to send; Bash and Workflow completion policy
+is retained. It does not enable native Monitor tools or change tool permission.
+
+The feature is default off. Landing it does not authorize production activation.
+Monitor acceptance uses an isolated cache that exposes Monitor; production
+availability remains unmeasured. See [Claude events](../engines/claude-events.md#opt-in-native-continuation-ownership)
+and [ADR-0063](../../adr/0063-layered-delivery-authority-and-continuations.md).
 
 ## Claude phase-2 delivery controls
 

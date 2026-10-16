@@ -594,3 +594,63 @@ without input text or reply tickets. An accepted receipt remains owned by
 the existing prompt-hook path across a later off transition, even when its
 SDK pull follows the policy ack. See the
 [operator-visible boundary](../inter-agent/delivery.md#live-delivery-policy-boundary).
+
+## Opt-in native continuation ownership
+
+With `KAOIRO_CLAUDE_NATIVE_CONTINUATIONS=1`, the unified reducer exclusively
+handles native continuations; the legacy background-notification matcher above
+cannot grant a parallel origin. The flag defaults off and is captured at startup.
+Acceptance and independent implementation review remain pending; the design and
+prerequisite measurements are [recorded separately](../../plans/issue-426-stage2-native-continuations.md).
+
+A launch capability binds the confirmed root, detached reply snapshot, tool call,
+actual accepted input, native task/run, and wrapper generation. Agent prompts and
+eligible inactive `SendMessage.message` values gain a final-report instruction;
+Monitor gains only a description suffix. Commands, WebSocket options, permissions
+and event payloads are unchanged. Known live/waking targets are not rewritten.
+Actual successful outcome and matching task start are both required before the
+capability can admit a report. A resume race that queues the instruction instead
+of starting a new execution cannot arm that preparation.
+
+Before the first root tool call, the host joins `UserPromptSubmit` to a complete
+root user row in the native regular-file transcript. Its session, prompt ID,
+occurrence UUID, origin, text and root position must agree. The pinned native hook
+omits `source`; its absence is not evidence of a system opener, and only the
+transcript can prove that origin. Hook and MCP resolution
+share one five-second deadline; a refused call is permanently tombstoned.
+The reader pins the file identity and complete committed byte prefix. Appends
+are allowed; replacement, deletion, truncation, malformed complete rows or prior
+byte changes invalidate the epoch. The actual send awaits this check again,
+then checks the live origin synchronously before dispatch.
+
+Monitor event and completion blocks are parsed structurally, before scalar
+comparison. Escaped tag-looking payload remains data. One prompt may contain
+1–16 complete independently proved blocks; invalid siblings and incompatible
+reply snapshots refuse the whole batch without partial consumption. Workflow
+metadata is allowed only for Workflow; ordinary Bash still requires its exact
+native output path and summary, and Workflow retains the root implicit-background
+rule. Unknown `local_bash` tasks cannot be inferred to be Bash instead of Monitor.
+
+Task/run IDs are opaque. A newer observed execution retires old claims even when
+no replacement token was issued. TaskStop suspends the exact captured run until
+its outcome; a definite failed stop releases only that suspension. Wrapper
+`stopTask` closes new claims immediately. Interrupt observes matching captured
+runs for at most five seconds, ending one second after acknowledgement; interrupt
+alone does not retire every background job. Natural terminal claims drain for
+ten idle seconds, paused while an owner is busy. These values are bounded
+observation policies, not proofs that later native frames cannot arrive.
+
+A claim already admitted to a root is distinct from the source's remaining
+claims: later source stop does not revoke that root's lease. Terminal, host
+fail-stop, close and generation replacement still revoke it. A folded report
+never rebinds a live owner; a valid Agent marker observed only as a fold is
+quarantined from creating a later root. Native fold attachment that cannot be
+proved remains denial-only.
+
+The registry holds at most 64 capabilities, 8,192 source calls and task histories,
+and 256 retired run IDs per task. It never evicts live authority to make room;
+capacity exhaustion refuses new claims with a diagnostic. Instrumented text is
+limited to 65,536 UTF-8 bytes. Same-host agents running as the same OS user are
+trusted; accidental evidence damage is detected, deliberate same-user tampering
+is outside this boundary. See the [ADR amendment](../../adr/0063-layered-delivery-authority-and-continuations.md)
+for bearer-copy, mixed-batch and unmeasured-native limitations.
