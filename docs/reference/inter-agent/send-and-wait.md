@@ -1,7 +1,7 @@
 ---
 title: Send and wait
 status: provisional
-last_updated: 2026-10-01
+last_updated: 2026-10-18
 description: Send and wait contracts and compatibility.
 ---
 
@@ -21,6 +21,21 @@ or supplying a basis without its matching ticket, is rejected locally with
 usable authorization, a different-basis or exhausted ticket, a frozen-basis
 mismatch, and unknown issuance history; see the [reply-basis guidance
 table](reply-basis.md#explicit-replies-and-tickets).
+
+### Sending a same-turn follow-up after an accepted ticket reply
+
+An eligible accepted v1 ticket reply to newer input can hand off a fresh
+`reply_authorization` with `reply_authorization_source: "accepted_reply"` in an
+additional JSON text content part. Copy both `in_reply_to` and `reply_ticket`
+from that new value for a distinct follow-up to the same peer/CID in the same
+SDK turn. Keep the accepted body sent. The original ticket is spent and the
+turn's omitted-field default remains frozen.
+
+An omitted-field follow-up may therefore still be stale. Empty recovery points
+to an already handed-off, usable matching authorization when one exists;
+otherwise the conservative later-input guidance applies. It does not mint or
+renew a ticket or establish unread input. See
+[accepted-reply follow-ups](reply-basis.md#accepted-reply-follow-ups).
 
 ### Receiver-side behavior (wrapper-B)
 
@@ -93,7 +108,9 @@ An ordinary peer envelope is returned as `reply`. A server-authored status
 envelope (`agent_id=server`, `turn_number=0`) is returned as `status_notice`;
 when it also carries an error, the result keeps `peer_error` alongside
 `status_notice`. A status notice has no peer reply authorization and does not
-need a response. In reply-basis v1, its delivery acknowledgement remains
+need a response. An eligible accepted ticket reply can separately return an
+`accepted_reply` authorization for a follow-up based on its previous ordinary
+input; this grants no authority to answer the notice. In reply-basis v1, its delivery acknowledgement remains
 deferred until the tool result is committed to the SDK; a rejected or rolled
 back result does not acknowledge it.
 

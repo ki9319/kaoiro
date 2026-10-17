@@ -49,3 +49,29 @@ transient rejection can renew authorization; unknown delivery cannot safely do s
 Engine binding, recovery ownership, and server comparison are one integrated
 landing, with layer-specific commits and checks. Issue #407 remains open for
 cross-thread cases and the required operational before/after comparison.
+
+## Amendment: explicit same-turn follow-ups (2026-10-18)
+
+[Issue #684](https://github.com/sakuraiyuta/kaoiro/issues/684) reported that a
+recovery reply was accepted but an omitted-field follow-up still used the old
+frozen default. Empty recovery then led the peer to wait despite already
+having received and answered the relevant input.
+
+Keep immutable defaults and atomic server comparison. Mutating a live turn's
+default could let calls waiting upstream borrow a later basis; server-side
+relaxation cannot identify the originating SDK input. Guidance alone cannot
+reuse a spent ticket.
+
+Instead, an eligible server-accepted v1 ticket reply to newer input returns a
+fresh single-use authorization for a distinct same-turn, same-peer/CID
+follow-up. It activates at result handoff. Another ordinary peer input's
+authorization takes precedence, and unknown outcomes never authorize renewal.
+Empty recovery can point to a matching usable authorization already handed off,
+without minting a ticket, extending a lifetime, or implying unread input.
+
+Accepted receipts survive unavailable optional authorization. Result preparation
+and serialization share the real Claude/Codex handoff boundary. No queue policy,
+native ownership, detached snapshot, or Antigravity/Grok legacy-mode change is
+included. See the [current contract](../reference/inter-agent/reply-basis.md#accepted-reply-follow-ups).
+This is a high-risk TL change through agent-common; production release follows
+[the canary procedure](../operations/high-risk-change-release.md).

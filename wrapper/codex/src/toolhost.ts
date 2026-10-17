@@ -179,9 +179,7 @@ export class ToolHost {
         });
         if (socket.destroyed) { discardToolResult(result); return; }
         if (callSignal.aborted && descriptor.name === "send_to_agent") { discardToolResult(result); reply({ error: "stale_tool_call" }); return; }
-        let serialized: string;
-        try { serialized = JSON.stringify({ id: request.id, result }) + "\n"; } catch (error) { discardToolResult(result); throw error; }
-        if (!handoffToolResult(result, () => { socket.write(serialized); })) reply({ error: "stale_tool_call" });
+        if (!handoffToolResult(result, () => { socket.write(JSON.stringify({ id: request.id, result }) + "\n"); })) reply({ error: "stale_tool_call" });
       } catch (err) {
         reply({ error: String(err) });
       }

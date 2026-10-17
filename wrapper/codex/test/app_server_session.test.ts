@@ -8,6 +8,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { AppServerSession } from "../src/app_server_session.js";
 import { ToolHost } from "../src/toolhost.js";
 import { BRIDGE_TOOL_TIMEOUT_SEC } from "../src/host.js";
+import type { Envelope } from "@kaoiro/agent-common";
 
 const sessions: AppServerSession[] = [];
 afterEach(async () => {
@@ -323,4 +324,46 @@ it("real session resolver and ToolHost reject absent or old native turn IDs befo
   expect(JSON.stringify(await call(meta("turn")))).toMatch(/stale_tool_call|unbound_tool_call/);
   expect(sink).toHaveBeenCalledTimes(1);
   ia.endReplyInput("T2");
+});
+
+it("real app-server resolver carries recovery and accepted follow-ups within one native turn", async () => {
+  const fixture = childFixture(), listen = vi.spyOn(ToolHost, "listen");
+  const controller = new AbortController(), wire: number[] = [];
+  const { InterAgentTool } = await import("@kaoiro/agent-common");
+  const config = { agent_id: "self", persona: { id: "p", name: "P", sprite_set: "p" }, display_name: "P", server_url: "ws://localhost" };
+  const input = (n: number) => ({ version: "0", agent_id: "peer", persona: config.persona, display_name: "P", ts: "2026-10-18T00:00:00Z",
+    type: "inter_agent_message", state: "thinking", payload: { to: "self", conversation_id: "cid", turn_number: n, kind: "response", body: `input ${n}` }, ext: {} }) as Envelope;
+  const ia = new InterAgentTool({ config, getState: () => "thinking", send: () => {}, replyBasisMode: () => "v1",
+    claimRecovery: () => wire.length === 1 ? { envelopes: [input(4)], commit: vi.fn(), rollback: vi.fn() } : undefined,
+    sendInterAgent: async envelope => {
+      wire.push(envelope.payload.in_reply_to as number);
+      return [1, 3].includes(wire.length) ? { kind: "rejected", reason: "stale_reply_basis", details: { expected_peer_turn: 4 } } : { kind: "accepted", stamp: null };
+    } });
+  ia.prepareReplyInput("T", [input(1)]); ia.beginReplyInput("T", controller.signal);
+  const session = await AppServerSession.create({ tools: ia.descriptors(), turnSignal: () => controller.signal,
+    transport: { spawnChild: () => fixture.child } }); sessions.push(session);
+  await session.startThread(); await session.startTurn({ threadId: "thread", hostTurnToken: "T", input: "test" });
+  const host = await listen.mock.results[0]!.value as ToolHost;
+  const call = async (fields: Record<string, unknown> = {}, turnId = "turn") => {
+    const socket = createConnection(host.socketPath); socket.setEncoding("utf8");
+    try {
+      await once(socket, "connect");
+      const response = once(socket, "data");
+      socket.write(JSON.stringify({ id: 1, method: "call_tool", name: "send_to_agent",
+        metadata: { "x-codex-turn-metadata": { thread_id: "thread", turn_id: turnId } },
+        input: { to: "peer", conversation_id: "cid", kind: "response", body: "reply", ...fields } }) + "\n");
+      return JSON.parse(String((await response)[0]));
+    } finally { socket.destroy(); }
+  };
+  const parts = (response: any): any[] => response.result.content.flatMap((part: { text: string }) => { try { return [JSON.parse(part.text)]; } catch { return []; } });
+  try {
+    const original = parts(await call())[0].reply_authorization;
+    const accepted = await call({ in_reply_to: 4, reply_ticket: original.reply_ticket });
+    const next = parts(accepted).find(part => part.reply_authorization_source === "accepted_reply").reply_authorization;
+    expect(parts(await call())[0].guidance).toContain("already handed off");
+    expect((await call({ in_reply_to: 4, reply_ticket: next.reply_ticket, body: "follow-up" })).result.isError).not.toBe(true);
+    expect(wire).toEqual([1, 4, 1, 4]);
+    expect(JSON.stringify(await call({}, "old-turn"))).toContain("unbound_tool_call");
+    expect(wire).toHaveLength(4);
+  } finally { controller.abort(); ia.endReplyInput("T"); }
 });

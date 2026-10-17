@@ -197,7 +197,7 @@ export type {
   WrapperConfig,
 } from "./types.js";
 
-export { ReplyBasis, REPLY_AUTHORIZATION_USAGE_GUIDANCE, ordinaryPeerInput, bindToolResultHandoff, handoffToolResult, discardToolResult } from "./reply_basis.js";
+export { ReplyBasis, REPLY_AUTHORIZATION_USAGE_GUIDANCE, FOLLOWUP_AUTHORIZATION_GUIDANCE, ordinaryPeerInput, bindToolResultHandoff, appendToolResultHandoff, handoffToolResult, discardToolResult } from "./reply_basis.js";
 export type { ReplyOrigin, ReplyAttempt, ReplyAuthorization, DetachedReplyBasis, ReplyProofValidator } from "./reply_basis.js";
 
 export { ToolOrigins } from "./tool_origins.js";

@@ -88,8 +88,7 @@ export function buildKaoiroMcpServer(
           ...(call.signal ? { signal: call.signal } : {}),
         });
         if (call.signal?.aborted) { discardToolResult(result); return { content: [{ type: "text" as const, text: "stale_tool_call" }], isError: true }; }
-        try { JSON.stringify(result); } catch (error) { discardToolResult(result); throw error; }
-        if (!handoffToolResult(result, () => {})) return { content: [{ type: "text" as const, text: "stale_tool_call" }], isError: true };
+        if (!handoffToolResult(result, () => { JSON.stringify(result); })) return { content: [{ type: "text" as const, text: "stale_tool_call" }], isError: true };
         return result;
       }),
       tool(list.name, list.description, {}, () => list.handler({})),

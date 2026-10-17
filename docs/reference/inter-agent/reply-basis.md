@@ -2,7 +2,7 @@
 title: Input-bound inter-agent replies
 description: Negotiated reply basis, single-use tickets, recovery handoff, and engine origin guards.
 status: provisional
-last_updated: 2026-10-16
+last_updated: 2026-10-18
 related: [messages, conversations, delivery, send-and-wait]
 ---
 
@@ -185,12 +185,45 @@ requirements. Do not repeat tickets in diagnostics.
 | Local `reply_basis_connection_changed` / `reply_basis_pending` | No push attempted (`send_not_attempted: true`); fresh authorization for an intentional retry after rejoin |
 | `peer_reconnecting_capacity` / `delivery_backlog` | Definite nonacceptance: return a fresh ticket for the same observed input, for an intentional retry |
 | `stale_reply_basis` | A non-empty recovery can authorize its returned input. Empty or oversized recovery has no ticket; a later input follows the route table below |
-| Accepted | Spent; a separately handed-off waiter, recovery, or Claude fold input may carry its own authorization |
+| Accepted | Spent; an eligible v1 ticket-authorized reply may return a fresh authorization for a distinct follow-up. A separately handed-off peer input has its own authorization and takes precedence. |
 | Unknown delivery / ack timeout | No renewed ticket; automatic retry could duplicate a delivery |
 | Closed or other permanent rejection | No renewal |
 
 The wrapper does not automatically resend a rejected body. Local errors include
 `send_not_attempted`, a distinct error code, and correction guidance.
+
+### Accepted-reply follow-ups
+
+An accepted v1 reply using a handed-off ticket for N newer than its frozen
+default F can return a fresh `reply_authorization` for a new follow-up in the
+same SDK turn, CID and peer. The default stays F. Copy `in_reply_to` and
+`reply_ticket` from the new authorization; the accepted body's ticket is spent.
+The fresh value is unpredictable until its result handoff, so a delayed call
+formed earlier cannot borrow N. Server basis comparison is unchanged.
+
+This metadata may appear in an additional JSON text content part, with
+`reply_authorization_source: "accepted_reply"` and this guidance:
+
+> Your previous send was accepted; for a new follow-up to the same peer and conversation in this turn, copy in_reply_to and reply_ticket from this reply_authorization, and do not resend the accepted body.
+
+It becomes usable only at the actual result handoff and gets the normal
+300,000 ms lifetime and single-use binding. Issuing it acknowledges no new
+peer input, credits no fold, and changes no native continuation snapshot or
+lease. Antigravity and Grok remain legacy; this does not activate v1 there.
+
+Unknown outcomes, rejections and fire-and-forget fallback acceptance issue no
+success follow-up ticket. A new ordinary waiter input's authorization takes
+precedence. In a result carrying a server `status_notice`, an accepted-reply
+authorization is solely for the previously answered ordinary input N; the
+notice itself never authorizes a peer reply.
+
+Newer usable authorization is preserved. Closure, retirement, forgetting,
+capacity or entropy failure cannot revive authority or hide acceptance: the
+result retains the accepted receipt and may report
+`followup_authorization_unavailable: true` with bounded `followup_guidance`.
+Optional metadata is finalized before serialization; a failed write discards
+its provisional ticket. An uncertain result handoff never resends the body.
+The existing 256-record per-turn limit includes spent and follow-up tickets.
 
 ## Inline recovery and ownership
 
@@ -202,10 +235,10 @@ SDK; an oversized recovery response does not predict that later route.
 |---|---|---|
 | Normal root input | No explicit ticket; the wrapper freezes the input turn as the default basis. | Omit both `in_reply_to` and `reply_ticket`. |
 | Claude fold | Yes, for each latest ordinary peer input represented in the fold. | In the same SDK turn, copy both fields from the fold's `reply_authorization`. |
-| Waiter | Yes for an ordinary peer envelope returned by the waiter; no for a server turn-zero `status_notice`. | Copy both fields for the peer envelope. Do not reply to a `status_notice`. |
+| Waiter | Yes for an ordinary peer envelope. A server turn-zero `status_notice` supplies no authorization of its own; an accepted reply can separately supply the follow-up authorization above. | Copy both fields for the ordinary input or the accepted-reply follow-up. Do not reply to the notice. |
 | Recovery | Yes when a non-empty recovery hands off ordinary peer input; no for an empty result. | Copy both fields from a non-empty recovery result. Empty recovery provides no ticket. |
 | Oversized queue | No ticket accompanies the oversized recovery result. The queued item may later arrive as a normal root input or as a Claude fold. | Wait for the handoff. For a root input omit both fields; for a fold copy both from its `reply_authorization`. |
-| Generic empty recovery | No ticket accompanies the empty result. | Do not retry the failed send with its stale basis. A later confirmed input in the same conversation follows the normal root or fold rule above. |
+| Generic empty recovery | No new ticket accompanies the empty result. | If an unused, unexpired authorization for the exact expected input was already handed off in this SDK turn, intentionally copy both fields from that result. Otherwise follow the later root/fold rule; the empty result does not prove pending input. |
 | Retained fold | An oversized retained-fold result has no current-turn ticket; an earlier fold's ticket belongs to its original SDK turn. | Do not assume the old body or ticket is usable. Wait for new confirmed input, then follow its root or fold rule above. |
 
 A stale rejection can return already-received, ordinary, undelivered envelopes
@@ -219,8 +252,14 @@ SDK turn and does not prove that its body is visible or that authorization is
 available. Neither case permits resending the rejected body.
 
 With an empty recovery, the wrapper has no matching input available for inline
-recovery now. It cannot infer delivery loss or whether a later confirmed input
-will arrive. The result omits `awaiting_delivery` and unrelated aggregate unread
+recovery now. If a usable authorization for this exact origin/CID/peer and
+`expected_peer_turn` has already been handed off, guidance points to that
+result's `in_reply_to` and `reply_ticket`. It issues no new ticket, does not
+renew its lifetime, and does not establish pending unread input. The caller
+must intentionally reconsider its send using the confirmed input.
+
+Without such a matching authorization, it cannot infer delivery loss or
+whether a later confirmed input will arrive. The result omits `awaiting_delivery` and unrelated aggregate unread
 counts. Do not retry the failed send with its stale basis on that conversation.
 If peer input is needed, wait for a later confirmed input; when it arrives as a
 normal root input, reply in this conversation with both `in_reply_to` and

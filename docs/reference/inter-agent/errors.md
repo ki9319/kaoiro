@@ -2,7 +2,7 @@
 title: Inter-agent error notices
 description: Error notices, their sources, stale-turn resynchronization, and server-synthesized reachability rules.
 status: provisional
-last_updated: 2026-10-09
+last_updated: 2026-10-18
 related: [protocol, inter-agent-messaging]
 ---
 
@@ -196,8 +196,14 @@ remains; delivery gaps outside the planned window are out of scope.
 `stale_reply_basis` means the body was not admitted. Local origin/ticket errors report `send_not_attempted: true`; correction does not send a peer message. See [Input-bound inter-agent replies](reply-basis.md) for the exact contract.
 
 When `stale_reply_basis` returns an empty `recovery`, no matching input is
-available for inline recovery now; this does not establish delivery loss or
-rule out later confirmed input. Do not retry the failed send with its stale
+available for inline recovery now. If an unused, unexpired authorization for
+this exact origin/CID/peer and expected turn was already handed off in this SDK
+turn, guidance tells the caller to copy `in_reply_to` and `reply_ticket` from
+that earlier result for an intentional send. This includes an
+[accepted-reply follow-up](reply-basis.md#accepted-reply-follow-ups).
+No new ticket is issued or lifetime renewed, and no pending unread input is
+inferred. Without a matching authorization, the empty result does not establish
+delivery loss or rule out later confirmed input. Do not retry the failed send with its stale
 basis on that conversation. Wait for a later confirmed input if peer input is
 needed, or omit `conversation_id` and restate the available context in a new
 conversation if it is enough to proceed. Oversized queued input and retained

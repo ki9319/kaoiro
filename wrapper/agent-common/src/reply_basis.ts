@@ -47,6 +47,7 @@ export const REPLY_TICKET_REQUIRED_GUIDANCE = `${COPY_BOTH_FIELDS} from the orig
 // A resumed Claude session keeps the tool description it recorded, which may
 // predate these two properties, so the result names them.
 export const REPLY_AUTHORIZATION_USAGE_GUIDANCE = `${COPY_BOTH_FIELDS} (in_reply_to and reply_ticket) from this reply_authorization into your next send_to_agent call to reply in this turn, even if the tool description you were shown does not list them.`;
+export const FOLLOWUP_AUTHORIZATION_GUIDANCE = "Your previous send was accepted; for a new follow-up to the same peer and conversation in this turn, copy in_reply_to and reply_ticket from this reply_authorization, and do not resend the accepted body.";
 export type ReplyTicketGuidance =
   | "copy_matching_authorization"
   | "wait_for_matching_authorization"
@@ -230,6 +231,24 @@ export class ReplyBasis {
     return "wait_for_matching_basis";
   }
 
+  hasMatchingAuthorization(origin: ReplyOrigin, cid: string, peer: string, basis: unknown): boolean {
+    return this.live(origin) === undefined && typeof basis === "number" && Number.isSafeInteger(basis) && basis > 0 &&
+      this.replyTicketGuidance(origin, cid, peer, basis) === "copy_matching_authorization";
+  }
+
+  needsFollowup(attempt: ReplyAttempt): boolean {
+    const snapshot = this.#snapshots.get(attempt.origin.token);
+    return !!attempt.ticket && !!snapshot && attempt.basis > (snapshot.basis.get(key(attempt.cid, attempt.peer)) ?? 0);
+  }
+
+  prepareFollowup(attempt: ReplyAttempt): ReturnType<ReplyBasis["prepare"]> {
+    const ticket = attempt.ticket;
+    if (this.live(attempt.origin) || !this.needsFollowup(attempt) || !ticket || ticket.state !== "spent" ||
+      ![...this.#tickets.values()].includes(ticket) || ticket.token !== attempt.origin.token ||
+      ticket.cid !== attempt.cid || ticket.peer !== attempt.peer || ticket.basis !== attempt.basis) return undefined;
+    return this.prepare(attempt.origin, attempt.cid, attempt.peer, attempt.basis, true);
+  }
+
   #recordIssued(ticket: Ticket): void {
     let history = this.#issuedHistory.get(ticket.token);
     if (!history) {
@@ -284,6 +303,7 @@ export class ReplyBasis {
 }
 
 interface Handoff {
+  prepare?: () => void;
   live: () => boolean;
   commit: () => void;
   rollback: () => void;
@@ -292,10 +312,20 @@ const handoffs = new WeakMap<ToolResult, Handoff>();
 export function bindToolResultHandoff(result: ToolResult, handoff: Handoff): ToolResult {
   handoffs.set(result, handoff); return result;
 }
+export function appendToolResultHandoff(result: ToolResult, handoff: Handoff): ToolResult {
+  const prior = handoffs.get(result);
+  return bindToolResultHandoff(result, {
+    prepare: () => { prior?.prepare?.(); handoff.prepare?.(); },
+    live: () => (prior?.live() ?? true) && handoff.live(),
+    commit: () => { handoff.commit(); prior?.commit(); },
+    rollback: () => { handoff.rollback(); prior?.rollback(); },
+  });
+}
 /** Called at each real adapter's write/return boundary, never at handler completion. */
 export function handoffToolResult(result: ToolResult, write: () => void): boolean {
   const pending = handoffs.get(result);
   handoffs.delete(result);
+  try { pending?.prepare?.(); } catch (error) { pending?.rollback(); throw error; }
   if (pending && !pending.live()) { pending.rollback(); return false; }
   try { write(); } catch (error) { pending?.rollback(); throw error; }
   pending?.commit();
