@@ -150,6 +150,7 @@ describe("accepted-reply follow-up authorization", () => {
       noFollowup(JSON.parse(serialized));
       expect(parts(result).some(part => part.followup_authorization_unavailable === true)).toBe(true);
       if (newer) expect(tool.replyBasis.capture(context.origin, "c", "peer", 6, newer.reply_ticket)).toMatchObject({ basis: 6 });
+      if (newer) expect(tool.replyBasis.ticketCountForTurn("T")).toBe(2);
     });
 
   it.each(["discard", "throw"] as const)("does not activate a follow-up on %s", async failure => {
@@ -191,7 +192,9 @@ describe("accepted-reply follow-up authorization", () => {
 
   it("needs no follow-up ticket when the accepted explicit basis equals the default", async () => {
     const tool = makeTool();
-    noFollowup(await tool.invoke({ ...args, ...authorize(tool, 1) }, context));
+    const result = await tool.invoke({ ...args, ...authorize(tool, 1) }, context);
+    noFollowup(result);
+    expect(parts(result).some(part => part.followup_authorization_unavailable === true)).toBe(false);
   });
 
   it.each(["capacity", "entropy"] as const)("preserves acceptance if preparation fails through %s", async failure => {
@@ -222,6 +225,14 @@ describe("accepted-reply follow-up authorization", () => {
     const result = await tool.invoke({ ...args, ...authorize(tool) }, context);
     noFollowup(result); handoffToolResult(result, () => {});
     expect(tool.replyBasis.capture(context.origin, "c", "peer", 6, newer.reply_ticket)).toMatchObject({ basis: 6 });
+  });
+
+  it("preserves acceptance when the owner retires before its acknowledgement arrives", async () => {
+    let tool!: InterAgentTool;
+    tool = makeTool({ sendInterAgent: async () => { tool.endReplyInput("T"); return accepted; } });
+    const result = await tool.invoke({ ...args, ...authorize(tool) }, context);
+    expect(result.isError).toBeUndefined(); expect(result.content[0]!.text).toContain("sent to peer");
+    noFollowup(result);
   });
 
   it.each(["reply", "peer-error"] as const)("preserves newer ordinary waiter %s instead of adding an old follow-up ticket", async kind => {
@@ -403,6 +414,14 @@ describe("follow-up eligibility and matching authorization", () => {
     const result = bindToolResultHandoff({ content: [] }, { live: () => true, commit: vi.fn(), rollback });
     appendToolResultHandoff(result, { prepare: () => { throw Error("preparation failed"); }, live: () => true, commit: vi.fn(), rollback: optionalRollback });
     expect(() => handoffToolResult(result, write)).toThrow("preparation failed");
+    expect(write).not.toHaveBeenCalled(); expect(rollback).toHaveBeenCalledOnce(); expect(optionalRollback).toHaveBeenCalledOnce();
+  });
+
+  it("retains the appended component's own liveness check", () => {
+    const rollback = vi.fn(), optionalRollback = vi.fn(), write = vi.fn();
+    const result = bindToolResultHandoff({ content: [] }, { live: () => true, commit: vi.fn(), rollback });
+    appendToolResultHandoff(result, { live: () => false, commit: vi.fn(), rollback: optionalRollback });
+    expect(handoffToolResult(result, write)).toBe(false);
     expect(write).not.toHaveBeenCalled(); expect(rollback).toHaveBeenCalledOnce(); expect(optionalRollback).toHaveBeenCalledOnce();
   });
 });

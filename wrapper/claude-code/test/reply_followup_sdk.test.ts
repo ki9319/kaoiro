@@ -20,13 +20,19 @@ async function connect(tool: InterAgentTool, resolve: (id: unknown) => Promise<{
   const responses: Array<Record<string, any>> = [];
   const transport: Transport = { start: async () => {}, close: async () => {}, send: async message => { responses.push(message as Record<string, any>); } };
   await sdk.instance.connect(transport);
-  return { sdk, call: async (id: number, fields: Record<string, unknown> = {}) => {
-    transport.onmessage!({ jsonrpc: "2.0", id, method: "tools/call", params: {
+  const startCall = (id: number, fields: Record<string, unknown> = {}) => transport.onmessage!({
+    jsonrpc: "2.0", id, method: "tools/call", params: {
       name: "send_to_agent", arguments: { ...args, ...fields }, _meta: { "claudecode/toolUseId": `tool-${id}` },
-    } });
-    await vi.waitFor(() => expect(responses.some(response => response.id === id)).toBe(true));
-    return responses.find(response => response.id === id)!.result;
-  } };
+    },
+  });
+  return { sdk, cancel: (id: number) => transport.onmessage!({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: id, reason: "test cancellation" } }),
+    startCall,
+    call: async (id: number, fields: Record<string, unknown> = {}) => {
+      startCall(id, fields);
+      await vi.waitFor(() => expect(responses.some(response => response.id === id)).toBe(true));
+      return responses.find(response => response.id === id)!.result;
+    },
+  };
 }
 
 it("hands off a fresh same-turn authorization through real SDK MCP registration", async () => {
@@ -52,6 +58,29 @@ it("hands off a fresh same-turn authorization through real SDK MCP registration"
     expect((await rpc.call(4, { body: "follow-up", in_reply_to: next.in_reply_to, reply_ticket: next.reply_ticket })).isError).not.toBe(true);
     expect(wire).toEqual([1, 4, 1, 4]);
   } finally { await rpc.sdk.instance.close(); tool.endReplyInput("T"); }
+});
+
+it("discards an actual accepted-reply ticket on SDK cancellation before return", async () => {
+  const tool = new InterAgentTool({ config, getState: () => "thinking", send: () => {}, replyBasisMode: () => "v1", sendInterAgent: async () => accepted });
+  tool.prepareReplyInput("T", [input(1)]); tool.beginReplyInput("T");
+  const lease = tool.replyBasis.prepare({ token: "T" }, "c", "peer", 4)!; lease.activate();
+  let release!: () => void, enter!: () => void, next!: ReplyAuthorization;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const descriptors = tool.descriptors(), send = descriptors.find(descriptor => descriptor.name === "send_to_agent")!, handler = send.handler;
+  send.handler = async (fields, context) => {
+    const result = await handler(fields, context);
+    next = jsonParts(result).find(part => part.reply_authorization_source === "accepted_reply").reply_authorization;
+    enter(); await held; return result;
+  };
+  vi.spyOn(tool, "descriptors").mockReturnValue(descriptors);
+  const rpc = await connect(tool, async () => ({ token: "T" }));
+  try {
+    rpc.startCall(1, { in_reply_to: 4, reply_ticket: lease.authorization.reply_ticket });
+    await entered; rpc.cancel(1); release();
+    await vi.waitFor(() => expect(tool.replyBasis.ticketCountForTurn("T")).toBe(1));
+    expect(tool.replyBasis.capture({ token: "T" }, "c", "peer", 4, next.reply_ticket)).toBe("invalid_reply_ticket");
+  } finally { release(); await rpc.sdk.instance.close(); tool.endReplyInput("T"); vi.restoreAllMocks(); }
 });
 
 it("a call awaiting its real SDK origin cannot borrow the accepted reply's input", async () => {
