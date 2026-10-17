@@ -2,7 +2,7 @@
 title: Grok Build ACP engine
 description: Resident ACP host, tools, permissions and unsupported operations.
 status: accepted
-last_updated: 2026-10-15
+last_updated: 2026-10-18
 ---
 
 # Grok Build ACP engine
@@ -120,6 +120,15 @@ is replayed from Grok's log (see
 unsupported. Weekly account allowance reporting is available through
 `rate_limits` (see [Account rate limits](#account-rate-limits)). Unsupported
 controls reject explicitly.
+
+Session reset is unsupported in both directions: the adapter advertises
+`supports_session_reset: false`, so operator, self and director-requested
+resets of a Grok agent are refused with `unsupported_session_reset`; and the
+adapter does not negotiate `work_control` on join, so neither
+`request_session_reset` nor `request_peer_session_reset`
+([ADR-0068](../../adr/0068-director-requested-peer-session-reset.md)) is
+registered for a Grok agent. Both are tracked by
+[issue #658](https://github.com/sakuraiyuta/kaoiro/issues/658).
 
 ## Cold resume and session discovery
 

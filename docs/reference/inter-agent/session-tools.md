@@ -2,7 +2,7 @@
 title: Inter-agent session tools
 description: Exact contract for agent-requested compaction, context threshold notices, and session reset.
 status: provisional
-last_updated: 2026-10-17
+last_updated: 2026-10-18
 related: [protocol, inter-agent-messaging]
 ---
 
@@ -171,7 +171,7 @@ the epoch from your own work results (`work_control_result` /
 | result | With `wait`, the tool returns `{ request_id, agent_id, mode, work_id, outcome: "completed" \| "failed" \| "timeout", reason?, to_session_id? }` within 70 s (the server's 60 s reset transaction plus margin). With `wait: false` it returns `{ request_id, agent_id, mode, work_id, outcome: "accepted" }` and a later `peer_session_reset_result` reaches the model as a root input, like a work notice. If the request itself gets no reply, the outcome is unknown; the tool says so and the caller must not resend. |
 | refusal | One of eight closed reasons: `reset_not_authorized` (any authority failure, undifferentiated), `work_control_unavailable`, `unknown_agent`, `unsupported_session_reset` (Grok targets today), `agent_in_conversation` (the target has an open conversation with a third agent; one with the caller is allowed), `agent_busy`, `session_reset_pending`, `runner_unavailable`. |
 | before calling | Have the target externalize its state (file or status line) and carry the context into your next request; the target's status line survives the reset, its session does not. A busy target is refused, never interrupted — use the cooperative yield first. |
-| engine | Requester side registered where `request_session_reset` is; Grok depends on `work_control` negotiation (see the engine reference). Target side is any engine advertising `supports_session_reset: true`. |
+| engine | Requester side registered on Claude Code, Codex and Antigravity, where `request_session_reset` is. Target side is any engine advertising `supports_session_reset: true`. Grok is neither requester (no `work_control` negotiation, tool not registered) nor target (`supports_session_reset: false`) today; both are tracked by [issue #658](https://github.com/sakuraiyuta/kaoiro/issues/658). |
 
 The Rules above belong to `request_session_reset`. For this tool: the request
 is sent immediately, `reason` travels only in the `peer_session_reset_request`

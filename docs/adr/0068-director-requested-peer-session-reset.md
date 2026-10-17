@@ -98,10 +98,13 @@ ingress rejects a wrapper-produced `session_reset_started`. The dashboard
 origin vocabulary gains `director`.
 
 D6. **Engines.** The runner path is unchanged (fresh relaunch for every
-engine). A target whose wrapper advertises `supports_session_reset: false`
-(Grok today) is refused with `unsupported_session_reset`; the requester side
-on Grok depends on `work_control` negotiation and is decided by measurement
-in the wrapper implementation.
+engine). Claude Code, Codex and Antigravity register the requester tool and
+can be targets. Grok is neither today: its wrapper advertises
+`supports_session_reset: false`, so it is refused as a target with
+`unsupported_session_reset`, and it does not negotiate `work_control` on
+join (measured on the built `runGrokCli` options and on the wire, 2026-10-18,
+wrapper review r1), so the tool is not registered for it. Both halves are
+tracked by [issue #658](https://github.com/sakuraiyuta/kaoiro/issues/658).
 
 D7. **ADR-0043 D2, by sentence.** (1) "no dedicated protocol / tool through
 which agent A requests a reset for agent B" is superseded for the lifetime of
@@ -109,6 +112,22 @@ an active work grant. (2) "no permanent director role" stands: authority
 exists per work and ends with it. (3) "the instructed agent calls its own
 tool and the operator approves each request" is superseded by D4 — the
 director calls this tool under the same approval class as its own reset.
+
+## Implementation result (2026-10-18)
+
+- Landing unit: server authorization and gates, the wire pair, the tool on
+  the three engines, the lifecycle attribution, and the dashboard's
+  **in-flight** display of the requesting director and `work_id` next to
+  "starting a new session". `session_reset_completed` / `_failed` clear
+  that display as before.
+- Deferred to a follow-up issue (opened at landing): an operator-only view
+  that reads the lifecycle timeline (`list_session_events` already returns
+  `details`; the dashboard has no consumer of that reply today — it does
+  render conversation and transcript session boundaries), including
+  deleted agents, `events_incomplete`, fetch failure, and an id fallback
+  when the work no longer exists; and resolving the work title for
+  display. D5's audit record is complete on the server; only its reading
+  surface is deferred.
 
 ## Alternatives considered
 
