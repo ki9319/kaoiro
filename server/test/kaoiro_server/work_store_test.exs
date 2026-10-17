@@ -2140,6 +2140,220 @@ defmodule KaoiroServer.WorkStoreTest do
     }
   end
 
+  describe "authorize_peer_reset/5 (issue #677)" do
+    setup do
+      name = :"work_store_peer_reset_#{System.unique_integer([:positive])}"
+      path = Path.join([System.tmp_dir!(), "kaoiro_test_dets", "#{name}.dets"])
+      File.rm(path)
+      {:ok, _} = WorkStore.start_link(name: name, path: path)
+
+      on_exit(fn ->
+        stop_quietly(name)
+        File.rm(path)
+      end)
+
+      %{name: name}
+    end
+
+    @operator %{"kind" => "user", "id" => "1"}
+
+    defp operator_work(name, director, assignee_id) do
+      assert {:ok, %{work: work}} =
+               WorkStore.apply(
+                 @operator,
+                 %{
+                   "op" => "assign",
+                   "operation_id" => operation_id(),
+                   "title" => "issue 677",
+                   "assignee" => assignee_id,
+                   "director" => director,
+                   "requires_verdict" => false
+                 },
+                 %{operator: true},
+                 name
+               )
+
+      work
+    end
+
+    defp principal(id), do: %{"kind" => "agent", "id" => id}
+
+    test "director of an active grant may reset its assignee", %{name: name} do
+      work = active_work(name, "pr-director", principal("pr-assignee"), "pr-cid")
+
+      assert {:ok, work.work_id, work.authority_epoch} ==
+               WorkStore.authorize_peer_reset(
+                 principal("pr-director"),
+                 "pr-assignee",
+                 work.work_id,
+                 work.authority_epoch,
+                 name
+               )
+    end
+
+    test "every other combination is refused with the single word", %{name: name} do
+      work = active_work(name, "pr-director", principal("pr-assignee"), "pr-cid")
+      other = active_work(name, "pr-other-director", principal("pr-assignee"), "pr-other-cid")
+      self_directed = operator_work(name, principal("pr-self"), "pr-self")
+      operator_directed = operator_work(name, @operator, "pr-op-assignee")
+
+      nominated_director = principal("pr-nominated-director")
+
+      assert {:ok, %{work: nominated}} =
+               WorkStore.apply(
+                 nominated_director,
+                 %{"op" => "assign", "operation_id" => operation_id(), "title" => "nominated"},
+                 %{
+                   recipient: "pr-nominated-assignee",
+                   conversation_id: "pr-nominated-cid",
+                   turn_number: 1,
+                   new_conversation?: true
+                 },
+                 name
+               )
+
+      refused = {:error, :reset_not_authorized}
+      director = principal("pr-director")
+
+      # unrelated requester
+      assert refused ==
+               WorkStore.authorize_peer_reset(
+                 principal("pr-stranger"),
+                 "pr-assignee",
+                 work.work_id,
+                 work.authority_epoch,
+                 name
+               )
+
+      # same work, same director, same epoch, target is not the assignee
+      assert refused ==
+               WorkStore.authorize_peer_reset(
+                 director,
+                 "pr-bystander",
+                 work.work_id,
+                 work.authority_epoch,
+                 name
+               )
+
+      # another work's director naming this work
+      assert refused ==
+               WorkStore.authorize_peer_reset(
+                 principal("pr-other-director"),
+                 "pr-assignee",
+                 work.work_id,
+                 work.authority_epoch,
+                 name
+               )
+
+      assert {:ok, _, _} =
+               WorkStore.authorize_peer_reset(
+                 principal("pr-other-director"),
+                 "pr-assignee",
+                 other.work_id,
+                 other.authority_epoch,
+                 name
+               )
+
+      # epoch drift in either direction
+      assert refused ==
+               WorkStore.authorize_peer_reset(
+                 director,
+                 "pr-assignee",
+                 work.work_id,
+                 work.authority_epoch + 1,
+                 name
+               )
+
+      assert refused ==
+               WorkStore.authorize_peer_reset(
+                 director,
+                 "pr-assignee",
+                 work.work_id,
+                 work.authority_epoch - 1,
+                 name
+               )
+
+      # director and assignee are the same agent: the self path owns that
+      assert refused ==
+               WorkStore.authorize_peer_reset(
+                 principal("pr-self"),
+                 "pr-self",
+                 self_directed.work_id,
+                 self_directed.authority_epoch,
+                 name
+               )
+
+      # operator-directed work: the principal kinds differ even with equal ids
+      assert refused ==
+               WorkStore.authorize_peer_reset(
+                 principal("1"),
+                 "pr-op-assignee",
+                 operator_directed.work_id,
+                 operator_directed.authority_epoch,
+                 name
+               )
+
+      # unknown work and the atom-key shape a caller must never pass
+      assert refused ==
+               WorkStore.authorize_peer_reset(director, "pr-assignee", "wrk_missing", 1, name)
+
+      assert refused ==
+               WorkStore.authorize_peer_reset(
+                 %{kind: "agent", id: "pr-director"},
+                 "pr-assignee",
+                 work.work_id,
+                 work.authority_epoch,
+                 name
+               )
+
+      # not yet accepted
+      assert refused ==
+               WorkStore.authorize_peer_reset(
+                 nominated_director,
+                 "pr-nominated-assignee",
+                 nominated.work_id,
+                 nominated.authority_epoch,
+                 name
+               )
+    end
+
+    test "only an active grant authorizes; each terminal state refuses", %{name: name} do
+      work = active_work(name, "pr-director", principal("pr-assignee"), "pr-cid")
+      director = principal("pr-director")
+
+      for state <- ~w(completed cancelled declined expired) do
+        # The reducer's transitions into each terminal state are covered by
+        # its own suite; this pins the `state == "active"` condition itself.
+        :sys.replace_state(name, fn store ->
+          put_in(store, [:works, work.work_id, :state], state)
+        end)
+
+        assert {:error, :reset_not_authorized} ==
+                 WorkStore.authorize_peer_reset(
+                   director,
+                   "pr-assignee",
+                   work.work_id,
+                   work.authority_epoch,
+                   name
+                 ),
+               state
+      end
+
+      :sys.replace_state(name, fn store ->
+        put_in(store, [:works, work.work_id, :state], "active")
+      end)
+
+      assert {:ok, _, _} =
+               WorkStore.authorize_peer_reset(
+                 director,
+                 "pr-assignee",
+                 work.work_id,
+                 work.authority_epoch,
+                 name
+               )
+    end
+  end
+
   defp operation_id do
     "op_#{System.system_time(:millisecond)}_#{Base.url_encode64(:crypto.strong_rand_bytes(16), padding: false)}"
   end

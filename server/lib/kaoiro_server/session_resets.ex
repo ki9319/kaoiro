@@ -149,9 +149,25 @@ defmodule KaoiroServer.SessionResets do
   def check_and_acquire(agent_id, mode, state, previous_session_id, origin, server)
       when mode in ["new", "clear"] and is_binary(agent_id) and
              origin in [:operator, :agent_self] do
+    check_and_acquire(agent_id, mode, state, previous_session_id, origin, %{}, server)
+  end
+
+  @doc """
+  Same gate with an explicit attribution. `:director` (issue #677) is the
+  only origin that carries one: `requested_by` is the requesting agent's
+  principal map and `work_id` the grant that authorized it. Both ride in
+  the lock so the completion / failure result can be pushed to the
+  requester's own topic, independent of any conversation. The pre-existing
+  origins pass an empty map; the guard keeps the shapes from mixing.
+  """
+  def check_and_acquire(agent_id, mode, state, previous_session_id, origin, attribution, server)
+      when mode in ["new", "clear"] and is_binary(agent_id) and
+             ((origin in [:operator, :agent_self] and attribution == %{}) or
+                (origin == :director and is_map_key(attribution, :requested_by) and
+                   is_map_key(attribution, :work_id))) do
     GenServer.call(
       server,
-      {:check_and_acquire, agent_id, mode, state, previous_session_id, origin}
+      {:check_and_acquire, agent_id, mode, state, previous_session_id, origin, attribution}
     )
   end
 
@@ -297,7 +313,7 @@ defmodule KaoiroServer.SessionResets do
 
   @impl true
   def handle_call(
-        {:check_and_acquire, agent_id, mode, state, prev_sid, origin},
+        {:check_and_acquire, agent_id, mode, state, prev_sid, origin, attribution},
         _from,
         s
       ) do
@@ -334,6 +350,10 @@ defmodule KaoiroServer.SessionResets do
         lock = %{
           mode: mode,
           origin: origin,
+          # Director-origin attribution (issue #677); nil for the other
+          # origins. Read back by notify_requester/3.
+          requested_by: Map.get(attribution, :requested_by),
+          work_id: Map.get(attribution, :work_id),
           request_id: request_id,
           previous_session_id: prev_sid,
           acquired_at: now,
@@ -683,7 +703,39 @@ defmodule KaoiroServer.SessionResets do
       "session_reset_completed",
       payload
     )
+
+    notify_requester(agent_id, lock, %{"ok" => true, "to_session_id" => to_session_id})
   end
+
+  # issue #677: a director-requested reset reports its terminal result to
+  # the REQUESTER's own wrapper topic, the same conversation-independent
+  # push `work_notice` uses. Best effort — a requester that disconnected
+  # in between simply misses it, exactly like `work_notice`. The dashboard
+  # broadcasts above and the target-side relay in broadcast_failed/4 are
+  # unchanged; this is an additional recipient, not a redirect.
+  defp notify_requester(
+         agent_id,
+         %{requested_by: %{"kind" => "agent", "id" => requester}} = lock,
+         result
+       )
+       when is_binary(requester) do
+    KaoiroServerWeb.Endpoint.broadcast(
+      "wrapper:#{requester}",
+      "peer_session_reset_result",
+      Map.merge(
+        %{
+          "version" => "0",
+          "request_id" => lock.request_id,
+          "agent_id" => agent_id,
+          "mode" => lock.mode,
+          "work_id" => lock.work_id
+        },
+        result
+      )
+    )
+  end
+
+  defp notify_requester(_agent_id, _lock, _result), do: :ok
 
   defp maybe_put_clear_watermark(payload, ts) when is_binary(ts),
     do: Map.put(payload, "clear_watermark", ts)
@@ -762,6 +814,8 @@ defmodule KaoiroServer.SessionResets do
       "session_reset_failed",
       %{"version" => "0", "request_id" => lock.request_id, "reason" => reason}
     )
+
+    notify_requester(agent_id, lock, %{"ok" => false, "reason" => reason})
   end
 
   defp notify_failure(callback, agent_id, request_id, reason) do

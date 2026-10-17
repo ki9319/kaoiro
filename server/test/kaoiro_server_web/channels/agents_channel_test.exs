@@ -7129,7 +7129,7 @@ defmodule KaoiroServerWeb.AgentsChannelTest do
                PlannedDisconnects.get(agent_id)
 
       # ADR-0055 phase-33 Stage B.
-      assert [%{kind: "session_reset_started", trigger: nil}] =
+      assert [%{kind: "session_reset_started", trigger: nil, details: %{"origin" => "operator"}}] =
                KaoiroServer.SessionLifecycleEvents.list_for_agent(agent_id)
     end
 

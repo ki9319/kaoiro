@@ -12,6 +12,7 @@ defmodule KaoiroServerWeb.WrapperChannelTest do
   alias KaoiroServer.ConversationStates
   alias KaoiroServer.DeliveryStates
   alias KaoiroServer.HostRegistry
+  alias KaoiroServer.PeerSessionResetReplyReasons
   alias KaoiroServer.PlannedDisconnects
   alias KaoiroServer.SessionLifecycleEvents
   alias KaoiroServer.SessionPointers
@@ -20,6 +21,7 @@ defmodule KaoiroServerWeb.WrapperChannelTest do
   alias KaoiroServer.TestTimeouts
   alias KaoiroServer.TokenDenylist
   alias KaoiroServer.TransportLimits
+  alias KaoiroServer.WorkStore
   alias KaoiroServer.WrapperBuildInfos
   alias KaoiroServerWeb.WrapperChannel
 
@@ -7632,6 +7634,351 @@ defmodule KaoiroServerWeb.WrapperChannelTest do
     end
   end
 
+  describe "peer_session_reset_request (issue #677 director-requested reset)" do
+    @peer_reset_host "peer-reset"
+
+    defp peer_reset_id(role),
+      do: "#{@peer_reset_host}.#{role}-#{System.unique_integer([:positive])}"
+
+    defp peer_reset_grant(director, assignee_id) do
+      operation_id =
+        "op_#{System.system_time(:millisecond)}_#{Base.url_encode64(:crypto.strong_rand_bytes(16), padding: false)}"
+
+      assert {:ok, %{work: work}} =
+               WorkStore.apply(
+                 %{"kind" => "user", "id" => "1"},
+                 %{
+                   "op" => "assign",
+                   "operation_id" => operation_id,
+                   "title" => "issue 677",
+                   "assignee" => assignee_id,
+                   "director" => director,
+                   "requires_verdict" => false
+                 },
+                 %{operator: true}
+               )
+
+      work
+    end
+
+    defp peer_reset_payload(target_id, work, overrides \\ %{}) do
+      Map.merge(
+        %{
+          "version" => "0",
+          "agent_id" => target_id,
+          "mode" => "new",
+          "work_id" => work.work_id,
+          "expected_authority_epoch" => work.authority_epoch
+        },
+        overrides
+      )
+    end
+
+    defp assert_peer_reset_error(ref, expected) do
+      assert_reply ref, :error, %{reason: reason}
+      assert reason == expected
+      assert reason in PeerSessionResetReplyReasons.values()
+    end
+
+    defp peer_reset_setup(opts \\ []) do
+      requester_id = peer_reset_id("director")
+      target_id = peer_reset_id("target")
+      requester = %{"kind" => "agent", "id" => requester_id}
+      join_params = Keyword.get(opts, :join_params, %{"work_control" => "v1"})
+      socket = join_wrapper(requester_id, "default", join_params)
+      _target = seed_reset_agent(target_id, Keyword.get(opts, :target, []))
+      work = peer_reset_grant(requester, target_id)
+
+      %{
+        socket: socket,
+        requester: requester,
+        requester_id: requester_id,
+        target_id: target_id,
+        work: work
+      }
+    end
+
+    defp refute_peer_reset_side_effects(target_id) do
+      refute_broadcast "session_reset_started", _
+      refute KaoiroServer.SessionResets.pending?(target_id)
+      assert SessionLifecycleEvents.list_for_agent(target_id) == []
+    end
+
+    test "an active grant's director resets its assignee through the operator gates" do
+      %{
+        socket: socket,
+        requester: requester,
+        requester_id: requester_id,
+        target_id: target_id,
+        work: work
+      } =
+        peer_reset_setup()
+
+      @endpoint.subscribe("agents:lobby")
+      @endpoint.subscribe("runner:#{@peer_reset_host}")
+      work_id = work.work_id
+
+      ref =
+        push(
+          socket,
+          "peer_session_reset_request",
+          peer_reset_payload(target_id, work, %{"reason" => "handoff written"})
+        )
+
+      assert_reply ref, :ok, %{request_id: request_id}
+
+      assert_broadcast "session_reset_started", %{
+        "agent_id" => ^target_id,
+        "mode" => "new",
+        "origin" => "director",
+        "requested_by" => ^requester,
+        "work_id" => ^work_id,
+        "reason" => "handoff written",
+        "previous_session_id" => "sess-prev",
+        "request_id" => ^request_id
+      }
+
+      assert_broadcast "reset_session",
+                       %{
+                         "version" => "0",
+                         "agent_id" => ^target_id,
+                         "mode" => "new",
+                         "request_id" => ^request_id,
+                         "previous_session_id" => "sess-prev"
+                       } = runner_payload
+
+      refute Map.has_key?(runner_payload, "reason")
+
+      assert %{origin: :director, requested_by: ^requester, work_id: ^work_id} =
+               :sys.get_state(KaoiroServer.SessionResets).pending[target_id]
+
+      assert %{transition_id: ^request_id, kind: :reset, phase: :announced} =
+               PlannedDisconnects.get(target_id)
+
+      assert [
+               %{
+                 kind: "session_reset_started",
+                 trigger: nil,
+                 details: %{
+                   "origin" => "director",
+                   "requested_by" => ^requester,
+                   "work_id" => ^work_id
+                 }
+               }
+             ] = SessionLifecycleEvents.list_for_agent(target_id)
+
+      # The terminal result reaches the requester's own topic, with no
+      # conversation between the two (none was opened in this test).
+      :ok = KaoiroServer.SessionResets.resolve(target_id, request_id, false, "spawn_failed", nil)
+
+      assert_push "peer_session_reset_result", %{
+        "version" => "0",
+        "request_id" => ^request_id,
+        "agent_id" => ^target_id,
+        "mode" => "new",
+        "work_id" => ^work_id,
+        "ok" => false,
+        "reason" => "spawn_failed"
+      }
+
+      assert requester_id == requester["id"]
+    end
+
+    test "a connection without work_control is refused before any authority check" do
+      %{socket: socket, target_id: target_id, work: work} = peer_reset_setup(join_params: %{})
+      @endpoint.subscribe("agents:lobby")
+
+      ref = push(socket, "peer_session_reset_request", peer_reset_payload(target_id, work))
+      assert_peer_reset_error(ref, "work_control_unavailable")
+      refute_peer_reset_side_effects(target_id)
+    end
+
+    test "authority failures collapse onto reset_not_authorized and leave the target untouched" do
+      %{socket: socket, requester: requester, target_id: target_id, work: work} =
+        peer_reset_setup()
+
+      @endpoint.subscribe("agents:lobby")
+      bystander_id = peer_reset_id("bystander")
+      _bystander = seed_reset_agent(bystander_id)
+      stranger = join_wrapper(peer_reset_id("stranger"), "default", %{"work_control" => "v1"})
+
+      # a peer with work_control but no grant on this target
+      ref = push(stranger, "peer_session_reset_request", peer_reset_payload(target_id, work))
+      assert_peer_reset_error(ref, "reset_not_authorized")
+
+      # the right director, the right grant, the wrong target
+      ref = push(socket, "peer_session_reset_request", peer_reset_payload(bystander_id, work))
+      assert_peer_reset_error(ref, "reset_not_authorized")
+
+      # a stale epoch
+      ref =
+        push(
+          socket,
+          "peer_session_reset_request",
+          peer_reset_payload(target_id, work, %{
+            "expected_authority_epoch" => work.authority_epoch + 1
+          })
+        )
+
+      assert_peer_reset_error(ref, "reset_not_authorized")
+
+      # no grant named at all
+      ref =
+        push(socket, "peer_session_reset_request", %{
+          "version" => "0",
+          "agent_id" => target_id,
+          "mode" => "new"
+        })
+
+      assert_peer_reset_error(ref, "reset_not_authorized")
+
+      # the director targets itself through a grant it also holds as assignee
+      self_grant = peer_reset_grant(requester, requester["id"])
+      ref = push(socket, "envelope", reset_envelope(requester["id"], "idle", %{}))
+      assert_reply ref, :ok
+      on_exit(fn -> AgentStates.delete(requester["id"]) end)
+
+      ref =
+        push(
+          socket,
+          "peer_session_reset_request",
+          peer_reset_payload(requester["id"], self_grant)
+        )
+
+      assert_peer_reset_error(ref, "reset_not_authorized")
+
+      refute_peer_reset_side_effects(target_id)
+      refute_peer_reset_side_effects(bystander_id)
+      refute KaoiroServer.SessionResets.pending?(requester["id"])
+    end
+
+    test "a target in an open conversation with a third agent is refused; one with the requester is not" do
+      %{socket: socket, requester_id: requester_id, target_id: target_id, work: work} =
+        peer_reset_setup()
+
+      @endpoint.subscribe("agents:lobby")
+      third_id = peer_reset_id("third")
+      third_cid = "peer-reset-third-#{System.unique_integer([:positive])}"
+      own_cid = "peer-reset-own-#{System.unique_integer([:positive])}"
+
+      ConversationStates.record_message(third_cid, third_id, target_id, "x", 1, false, true)
+      ConversationStates.record_message(own_cid, requester_id, target_id, "x", 1, false, true)
+
+      on_exit(fn ->
+        for cid <- [third_cid, own_cid], do: ConversationStates.close_by_operator(cid)
+      end)
+
+      ref = push(socket, "peer_session_reset_request", peer_reset_payload(target_id, work))
+      assert_peer_reset_error(ref, "agent_in_conversation")
+      refute_peer_reset_side_effects(target_id)
+
+      {:ok, _} = ConversationStates.close_by_operator(third_cid)
+
+      ref = push(socket, "peer_session_reset_request", peer_reset_payload(target_id, work))
+      assert_reply ref, :ok, %{request_id: _}
+
+      assert_broadcast "session_reset_started", %{
+        "agent_id" => ^target_id,
+        "origin" => "director"
+      }
+    end
+
+    test "the target's own gates keep their vocabulary" do
+      @endpoint.subscribe("agents:lobby")
+
+      %{socket: busy_socket, target_id: busy_id, work: busy_work} =
+        peer_reset_setup(target: [state: "thinking"])
+
+      ref =
+        push(busy_socket, "peer_session_reset_request", peer_reset_payload(busy_id, busy_work))
+
+      assert_peer_reset_error(ref, "agent_busy")
+      refute_peer_reset_side_effects(busy_id)
+
+      %{socket: cap_socket, target_id: cap_id, work: cap_work} =
+        peer_reset_setup(
+          target: [caps: %{"supports_session_reset" => false, "session_reset_modes" => []}]
+        )
+
+      ref = push(cap_socket, "peer_session_reset_request", peer_reset_payload(cap_id, cap_work))
+      assert_peer_reset_error(ref, "unsupported_session_reset")
+      refute_peer_reset_side_effects(cap_id)
+
+      %{socket: pending_socket, target_id: pending_id, work: pending_work} = peer_reset_setup()
+
+      first =
+        push(
+          pending_socket,
+          "peer_session_reset_request",
+          peer_reset_payload(pending_id, pending_work)
+        )
+
+      assert_reply first, :ok, %{request_id: _}
+
+      second =
+        push(
+          pending_socket,
+          "peer_session_reset_request",
+          peer_reset_payload(pending_id, pending_work, %{"mode" => "clear"})
+        )
+
+      assert_peer_reset_error(second, "session_reset_pending")
+
+      %{socket: ghost_socket, requester: ghost_requester} = peer_reset_setup()
+      ghost_id = peer_reset_id("ghost")
+      ghost_work = peer_reset_grant(ghost_requester, ghost_id)
+
+      ref =
+        push(ghost_socket, "peer_session_reset_request", peer_reset_payload(ghost_id, ghost_work))
+
+      assert_peer_reset_error(ref, "unknown_agent")
+
+      ref =
+        push(
+          ghost_socket,
+          "peer_session_reset_request",
+          peer_reset_payload("not an agent id!", ghost_work)
+        )
+
+      assert_peer_reset_error(ref, "unknown_agent")
+
+      ref =
+        push(
+          ghost_socket,
+          "peer_session_reset_request",
+          peer_reset_payload(ghost_id, ghost_work, %{"mode" => "reboot"})
+        )
+
+      assert_peer_reset_error(ref, "unsupported_session_reset")
+    end
+
+    test "wrapper-produced session_reset_started is dropped at ingress" do
+      agent_id = peer_reset_id("forger")
+      socket = join_wrapper(agent_id)
+
+      ref =
+        push(socket, "session_lifecycle", %{
+          "version" => "0",
+          "kind" => "session_reset_started",
+          "at" => "2026-10-17T00:00:00Z",
+          "details" => %{"origin" => "operator"}
+        })
+
+      assert_reply ref, :ok
+      assert SessionLifecycleEvents.list_for_agent(agent_id) == []
+
+      ref =
+        push(socket, "session_lifecycle", %{
+          "version" => "0",
+          "kind" => "compacting",
+          "at" => "2026-10-17T00:00:01Z"
+        })
+
+      assert_reply ref, :ok
+      assert [%{kind: "compacting"}] = SessionLifecycleEvents.list_for_agent(agent_id)
+    end
+  end
+
   describe "session_reset_request (ADR-0043 self-initiated reset)" do
     defp reset_envelope(agent_id, state, caps) do
       default_caps = %{
@@ -7700,8 +8047,14 @@ defmodule KaoiroServerWeb.WrapperChannelTest do
       assert %{transition_id: ^request_id, kind: :reset, phase: :announced} =
                PlannedDisconnects.get(agent_id)
 
-      # ADR-0055 phase-33 Stage B.
-      assert [%{kind: "session_reset_started", trigger: nil}] =
+      # ADR-0055 phase-33 Stage B; origin attribution since issue #677.
+      assert [
+               %{
+                 kind: "session_reset_started",
+                 trigger: nil,
+                 details: %{"origin" => "agent_self"}
+               }
+             ] =
                SessionLifecycleEvents.list_for_agent(agent_id)
     end
 

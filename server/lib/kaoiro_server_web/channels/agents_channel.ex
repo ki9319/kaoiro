@@ -1137,12 +1137,11 @@ defmodule KaoiroServerWeb.AgentsChannel do
         started_payload(agent_id, mode, request_id, prev_sid, "operator")
       )
 
-      # ADR-0055 phase-33 Stage B.
-      SessionLifecycleEvents.append(
+      # ADR-0055 phase-33 Stage B; origin attribution since issue #677.
+      SessionLifecycleEvents.record_session_reset_started(
         agent_id,
-        "session_reset_started",
-        nil,
-        DateTime.utc_now() |> DateTime.to_iso8601()
+        DateTime.utc_now() |> DateTime.to_iso8601(),
+        %{"origin" => "operator"}
       )
 
       KaoiroServerWeb.Endpoint.broadcast(

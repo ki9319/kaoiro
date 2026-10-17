@@ -30,6 +30,7 @@ defmodule KaoiroServerWeb.WrapperChannel do
   alias KaoiroServer.DeliveryStates
   alias KaoiroServer.DisconnectAttribution
   alias KaoiroServer.IngressOrder
+  alias KaoiroServer.PeerSessionResetReplyReasons
   alias KaoiroServer.PersonaAssets
   alias KaoiroServer.PlannedDisconnects
   alias KaoiroServer.SessionLifecycleEvents
@@ -119,6 +120,7 @@ defmodule KaoiroServerWeb.WrapperChannel do
     "history_replay_complete" => :versioned,
     "replay_ia" => :versioned,
     "session_reset_request" => :versioned,
+    "peer_session_reset_request" => :versioned,
     "session_lifecycle" => :versioned,
     "delivery_policy_applied" => :versioned,
     "envelope" => :envelope_frame
@@ -1112,6 +1114,20 @@ defmodule KaoiroServerWeb.WrapperChannel do
     {:reply, :ok, socket}
   end
 
+  # issue #677: `session_reset_started` is server-authored and, since the
+  # director path, carries attribution details the generic clause below
+  # would silently strip while still storing the kind. Reject the kind at
+  # ingress like `permission_requested` above. The other server-only kinds
+  # keep their pre-existing generic treatment (tracked separately).
+  defp handle_wrapper_in("session_lifecycle", %{"kind" => "session_reset_started"}, socket) do
+    Logger.warning(
+      "session_lifecycle: wrapper-produced session_reset_started rejected " <>
+        "(server-only audit kind), agent_id=#{socket.assigns.agent_id}"
+    )
+
+    {:reply, :ok, socket}
+  end
+
   # issue #305 S1: cross-check a wrapper-reported permission_applied/
   # failed's revision against PermissionSettings' own allocation ledger
   # BEFORE it ever enters the audit trail — the SAME "a revision the
@@ -1369,12 +1385,11 @@ defmodule KaoiroServerWeb.WrapperChannel do
         started_reset_payload(agent_id, mode, request_id, prev_sid, reason)
       )
 
-      # ADR-0055 phase-33 Stage B.
-      SessionLifecycleEvents.append(
+      # ADR-0055 phase-33 Stage B; origin attribution since issue #677.
+      SessionLifecycleEvents.record_session_reset_started(
         agent_id,
-        "session_reset_started",
-        nil,
-        DateTime.utc_now() |> DateTime.to_iso8601()
+        DateTime.utc_now() |> DateTime.to_iso8601(),
+        %{"origin" => "agent_self"}
       )
 
       KaoiroServerWeb.Endpoint.broadcast(
@@ -1397,6 +1412,79 @@ defmodule KaoiroServerWeb.WrapperChannel do
     else
       {:error, reason} ->
         {:reply, {:error, %{reason: reset_request_reason(reason)}}, socket}
+    end
+  end
+
+  # issue #677: a director resets the session of the peer it currently
+  # directs. Authority is the server-owned work grant alone (ADR-0063 D3):
+  # requester = director, target = assignee, active, epoch match. After
+  # that the target passes the SAME gates as an operator reset, plus one:
+  # a target still in an open conversation with a third agent is refused,
+  # because that peer would otherwise lose its counterpart mid-thread.
+  # The lock is taken through the per-agent `AgentAcceptance` choke point
+  # like both existing origins (issue #305), with `:director` attribution
+  # so the terminal result can be pushed back to the requester's topic.
+  defp handle_wrapper_in("peer_session_reset_request", payload, socket) do
+    requester = work_principal(socket)
+
+    with :ok <- require_work_control(socket),
+         {:ok, target} <- fetch_peer_reset_target(payload, requester),
+         {:ok, mode} <- fetch_reset_mode(payload),
+         {:ok, reason} <- fetch_reset_reason(payload),
+         {:ok, work_id, epoch} <- fetch_peer_reset_grant(payload),
+         {:ok, ^work_id, ^epoch} <-
+           WorkStore.authorize_peer_reset(requester, target, work_id, epoch),
+         {:ok, envelope} <- fetch_peer_reset_envelope(target),
+         :ok <- require_reset_capability(envelope, mode),
+         :ok <- require_no_third_party_conversation(target, requester["id"]),
+         {:ok, state} <- fetch_kaoiro_state(envelope),
+         {:ok, request_id, prev_sid} <-
+           AgentAcceptance.run(target, :peer_session_reset, fn ->
+             SessionResets.check_and_acquire(
+               target,
+               mode,
+               state,
+               Map.get(envelope, "session_id"),
+               :director,
+               %{requested_by: requester, work_id: work_id},
+               SessionResets
+             )
+           end),
+         :ok <- begin_planned_reset(target, request_id) do
+      KaoiroServerWeb.Endpoint.broadcast(
+        "agents:lobby",
+        "session_reset_started",
+        started_reset_payload(target, mode, request_id, prev_sid, reason)
+        |> Map.merge(%{
+          "origin" => "director",
+          "requested_by" => requester,
+          "work_id" => work_id
+        })
+      )
+
+      SessionLifecycleEvents.record_session_reset_started(
+        target,
+        DateTime.utc_now() |> DateTime.to_iso8601(),
+        %{"origin" => "director", "requested_by" => requester, "work_id" => work_id}
+      )
+
+      KaoiroServerWeb.Endpoint.broadcast(
+        "runner:#{AgentId.host_id_from(target)}",
+        "reset_session",
+        %{
+          "version" => "0",
+          "agent_id" => target,
+          "mode" => mode,
+          "request_id" => request_id
+        }
+        |> maybe_put_previous_session_id(prev_sid)
+        |> maybe_put_resume_snapshot(target)
+      )
+
+      {:reply, {:ok, %{request_id: request_id}}, socket}
+    else
+      {:error, reason} ->
+        {:reply, {:error, %{reason: PeerSessionResetReplyReasons.normalize(reason)}}, socket}
     end
   end
 
@@ -2834,6 +2922,41 @@ defmodule KaoiroServerWeb.WrapperChannel do
     case AgentStates.snapshot()[agent_id] do
       envelope when is_map(envelope) -> {:ok, envelope}
       _ -> {:error, :unsupported_session_reset}
+    end
+  end
+
+  # issue #677 helpers. Shape failures collapse onto the closed peer reply
+  # vocabulary: a target that is not an agent id is `unknown_agent`, a
+  # request that names no grant is `reset_not_authorized` (no grant means
+  # no authority, and the reply must not distinguish the two cases).
+  defp fetch_peer_reset_target(%{"agent_id" => target}, _requester)
+       when is_binary(target) do
+    if AgentId.valid?(target), do: {:ok, target}, else: {:error, :unknown_agent}
+  end
+
+  defp fetch_peer_reset_target(_payload, _requester), do: {:error, :unknown_agent}
+
+  defp fetch_peer_reset_grant(%{"work_id" => work_id, "expected_authority_epoch" => epoch})
+       when is_binary(work_id) and work_id != "" and is_integer(epoch) and epoch >= 0,
+       do: {:ok, work_id, epoch}
+
+  defp fetch_peer_reset_grant(_payload), do: {:error, :reset_not_authorized}
+
+  defp fetch_peer_reset_envelope(agent_id) do
+    case AgentStates.snapshot()[agent_id] do
+      envelope when is_map(envelope) -> {:ok, envelope}
+      _ -> {:error, :unknown_agent}
+    end
+  end
+
+  # Open conversations only (`peer_index` filters closed tombstones). The
+  # requester's own open conversation with the target is allowed: its
+  # PlannedDisconnects notices still reach the requester, and the result
+  # arrives on the requester's topic regardless.
+  defp require_no_third_party_conversation(target, requester_id) do
+    case ConversationStates.peer_index() |> Map.get(target, []) |> List.delete(requester_id) do
+      [] -> :ok
+      _others -> {:error, :agent_in_conversation}
     end
   end
 

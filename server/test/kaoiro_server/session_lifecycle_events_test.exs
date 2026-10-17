@@ -177,6 +177,116 @@ defmodule KaoiroServer.SessionLifecycleEventsTest do
     end
   end
 
+  describe "record_session_reset_started/4 (issue #677)" do
+    @director_details %{
+      "origin" => "director",
+      "requested_by" => %{"kind" => "agent", "id" => "host.director"},
+      "work_id" => "wrk_677"
+    }
+
+    test "stores the sanitized attribution for every server origin", %{name: name} do
+      for {agent_id, details} <- [
+            {"a.reset.operator", %{"origin" => "operator"}},
+            {"a.reset.self", %{"origin" => "agent_self"}},
+            {"a.reset.director", @director_details}
+          ] do
+        assert :ok =
+                 SessionLifecycleEvents.record_session_reset_started(
+                   agent_id,
+                   "2026-10-17T00:00:00Z",
+                   Map.put(details, "extra", "dropped"),
+                   name
+                 )
+
+        assert [%{kind: "session_reset_started", trigger: nil, details: ^details}] =
+                 SessionLifecycleEvents.list_for_agent(agent_id, name)
+      end
+    end
+
+    test "drops an invalid attribution or timestamp without storing the kind", %{name: name} do
+      assert :ok =
+               SessionLifecycleEvents.record_session_reset_started(
+                 "a.reset.invalid",
+                 "2026-10-17T00:00:00Z",
+                 %{"origin" => "director", "work_id" => "wrk_677"},
+                 name
+               )
+
+      assert :ok =
+               SessionLifecycleEvents.record_session_reset_started(
+                 "a.reset.invalid",
+                 "not a timestamp",
+                 @director_details,
+                 name
+               )
+
+      assert SessionLifecycleEvents.list_for_agent("a.reset.invalid", name) == []
+    end
+
+    test "append/5 still cannot store details for this kind", %{name: name} do
+      refute SessionLifecycleEvents.valid_event?(
+               "session_reset_started",
+               nil,
+               "2026-10-17T00:00:00Z",
+               @director_details
+             )
+    end
+
+    test "restart retains director details and a legacy row without details", %{
+      name: name,
+      path: path
+    } do
+      :ok =
+        SessionLifecycleEvents.append(
+          "a.reset.restart",
+          "session_reset_started",
+          nil,
+          "2026-10-17T00:00:01Z",
+          name
+        )
+
+      :ok =
+        SessionLifecycleEvents.record_session_reset_started(
+          "a.reset.restart",
+          "2026-10-17T00:00:02Z",
+          @director_details,
+          name
+        )
+
+      before = SessionLifecycleEvents.list_for_agent("a.reset.restart", name)
+      assert [%{details: @director_details}, %{details: nil}] = before
+
+      GenServer.stop(Process.whereis(name))
+      {:ok, _pid} = SessionLifecycleEvents.start_link(name: name, path: path, cap: 3)
+
+      assert SessionLifecycleEvents.list_for_agent("a.reset.restart", name) == before
+    end
+
+    test "a stored row whose attribution is not closed is dropped on restart", %{
+      name: name,
+      path: path
+    } do
+      :ok =
+        SessionLifecycleEvents.record_session_reset_started(
+          "a.reset.tampered",
+          "2026-10-17T00:00:02Z",
+          @director_details,
+          name
+        )
+
+      [row] = SessionLifecycleEvents.list_for_agent("a.reset.tampered", name)
+      GenServer.stop(Process.whereis(name))
+
+      tampered = %{row | details: Map.put(row.details, "prompt", "leaked")}
+      {:ok, ^name} = :dets.open_file(name, file: String.to_charlist(path))
+      :ok = :dets.insert(name, {"a.reset.tampered", [tampered]})
+      :ok = :dets.close(name)
+
+      {:ok, _pid} = SessionLifecycleEvents.start_link(name: name, path: path, cap: 3)
+      assert SessionLifecycleEvents.list_for_agent("a.reset.tampered", name) == []
+    end
+  end
+
   describe "record_permission_event/5 (issue #305, typed permission audit)" do
     defp valid_observation do
       %{

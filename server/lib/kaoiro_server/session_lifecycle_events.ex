@@ -35,6 +35,7 @@ defmodule KaoiroServer.SessionLifecycleEvents do
   require Logger
 
   alias KaoiroServer.DisconnectAttribution
+  alias KaoiroServer.SessionResetAttribution
 
   @wrapper_kinds ~w(
     compacting compact_boundary compact_failed resume_reserved resume_fired
@@ -157,6 +158,25 @@ defmodule KaoiroServer.SessionLifecycleEvents do
       cast_append(server, agent_id, "disconnected", nil, at, details)
     else
       log_rejected(agent_id, "disconnected", nil, at)
+    end
+
+    :ok
+  end
+
+  @doc """
+  Records one server-authored `session_reset_started` event with its closed
+  attribution (`SessionResetAttribution`, issue #677). Only the re-extracted
+  map is stored, never the caller's input, so the three server call sites
+  (operator, agent_self, director) share one shape and an extra key cannot
+  reach the timeline. Same never-raises/never-blocks contract as `append/5`.
+  """
+  def record_session_reset_started(agent_id, at, details, server \\ __MODULE__)
+      when is_binary(agent_id) do
+    with true <- valid_event?("session_reset_started", nil, at),
+         {:ok, sanitized} <- SessionResetAttribution.sanitize(details) do
+      cast_append(server, agent_id, "session_reset_started", nil, at, sanitized)
+    else
+      _ -> log_rejected(agent_id, "session_reset_started", nil, at)
     end
 
     :ok
@@ -606,6 +626,19 @@ defmodule KaoiroServer.SessionLifecycleEvents do
     do:
       valid_event?("disconnected", nil, at) and
         (is_nil(details) or DisconnectAttribution.valid?(details))
+
+  # Must precede the generic clause below: that clause hands stored details
+  # to `valid_event?/4`, which rejects details on every non-permission kind.
+  # A row written before issue #677 has nil details and stays valid.
+  defp valid_stored_event?(%{
+         kind: "session_reset_started",
+         trigger: nil,
+         at: at,
+         details: details
+       }),
+       do:
+         valid_event?("session_reset_started", nil, at) and
+           (is_nil(details) or SessionResetAttribution.valid?(details))
 
   defp valid_stored_event?(%{kind: kind, trigger: trigger, at: at} = event),
     do: valid_event?(kind, trigger, at, Map.get(event, :details))

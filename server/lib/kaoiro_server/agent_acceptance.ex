@@ -92,7 +92,11 @@ defmodule KaoiroServer.AgentAcceptance do
   defp via(agent_id), do: {:via, Registry, {@registry, agent_id}}
 
   @type command ::
-          :set_permission | :set_delivery_policy | :session_reset | :session_reset_request
+          :set_permission
+          | :set_delivery_policy
+          | :session_reset
+          | :session_reset_request
+          | :peer_session_reset
 
   @doc """
   Runs `fun` (a 0-arity function) to completion on `agent_id`'s own worker
@@ -108,7 +112,8 @@ defmodule KaoiroServer.AgentAcceptance do
                :set_permission,
                :set_delivery_policy,
                :session_reset,
-               :session_reset_request
+               :session_reset_request,
+               :peer_session_reset
              ] and
              is_function(fun, 0) do
     pid = ensure_worker(agent_id)
@@ -127,6 +132,9 @@ defmodule KaoiroServer.AgentAcceptance do
   defp availability_reason(:set_permission), do: :persistence_failed
   defp availability_reason(:session_reset), do: :timeout
   defp availability_reason(:session_reset_request), do: :agent_busy
+  # issue #677: same transient meaning as the agent-self request — the
+  # requester retries later; the lock itself was never acquired.
+  defp availability_reason(:peer_session_reset), do: :agent_busy
 
   defp ensure_worker(agent_id) do
     case Registry.lookup(@registry, agent_id) do

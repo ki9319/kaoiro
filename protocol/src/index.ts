@@ -641,10 +641,17 @@ export type SessionLifecycleEvent =
         | "conversation_reset"
         | "reconnecting"
         | "reconnected"
-        | "session_reset_started"
         | "session_reset_completed";
       at: string;
       trigger?: null;
+    }
+  | {
+      kind: "session_reset_started";
+      at: string;
+      trigger?: null;
+      /** Server-authored attribution (issue #677); absent on rows written
+       *  before it existed. Wrapper ingress cannot author this kind. */
+      details?: SessionResetAttribution;
     }
   | {
       kind: "disconnected";
@@ -887,8 +894,65 @@ export interface HistoryResetPayload {
  *  requests as well as instruction/model switches attempted while a
  *  reset is in flight. */
 /** Who initiated a session reset (protocol.md, ADR-0043 D1). Added with the
- *  agent-initiated path; `operator` covers every pre-existing reset. */
-export type SessionResetOrigin = "operator" | "agent_self";
+ *  agent-initiated path; `operator` covers every pre-existing reset.
+ *  `director` (issue #677) is a peer holding the active work grant that
+ *  names the target as assignee. */
+export type SessionResetOrigin = "operator" | "agent_self" | "director";
+
+/** Closed `details` of a `session_reset_started` lifecycle row (issue #677).
+ *  `requested_by` / `work_id` are present exactly when origin is
+ *  `director`; the server re-extracts these keys and stores nothing else. */
+export type SessionResetAttribution =
+  | { origin: "operator" | "agent_self" }
+  | { origin: "director"; requested_by: { kind: "agent"; id: string }; work_id: string };
+
+/** wrapper -> server (issue #677). A director asks the server to reset the
+ *  session of the peer it directs. Authority is the server-owned work
+ *  grant: the sender must be `director` of `work_id`, `agent_id` its
+ *  assignee, the grant active at `expected_authority_epoch`, and the two
+ *  ids distinct. The target then passes the operator reset's own gates
+ *  plus `agent_in_conversation` (an open conversation with a third agent).
+ *  Reply ok: `{ request_id }`; error: `{ reason: PeerSessionResetErrorReason }`. */
+export interface PeerSessionResetRequest {
+  version: "0";
+  agent_id: string;
+  mode: SessionResetMode;
+  work_id: string;
+  expected_authority_epoch: number;
+  reason?: string;
+}
+
+/** Closed reply vocabulary of `peer_session_reset_request`. One word for
+ *  every authority failure so the reply never discloses which condition
+ *  (grant, director, assignee, epoch) failed. Server source of truth:
+ *  `KaoiroServer.PeerSessionResetReplyReasons`. */
+export type PeerSessionResetErrorReason =
+  | "reset_not_authorized"
+  | "work_control_unavailable"
+  | "unknown_agent"
+  | "unsupported_session_reset"
+  | "agent_in_conversation"
+  | "agent_busy"
+  | "session_reset_pending"
+  | "runner_unavailable";
+
+/** server -> wrapper, pushed to the REQUESTER's topic (issue #677) when a
+ *  director-origin reset reaches its terminal state, independent of any
+ *  conversation between requester and target. Best effort like
+ *  `work_notice`: a requester that disconnected in between misses it. */
+export interface PeerSessionResetResult {
+  version: "0";
+  request_id: string;
+  agent_id: string;
+  mode: SessionResetMode;
+  work_id: string;
+  ok: boolean;
+  /** Present when `ok` is false: the same closed vocabulary as
+   *  `session_reset_failed`. */
+  reason?: SessionResetErrorReason;
+  /** Present when `ok` is true; null for Codex lazy thread assignment. */
+  to_session_id?: string | null;
+}
 
 export type SessionResetErrorReason =
   | "agent_busy"
@@ -1917,10 +1981,14 @@ export interface SessionResetStarted {
    *  gated (ADR-0021), so viewers never see either this or `reason`. */
   origin: SessionResetOrigin;
   previous_session_id?: string;
-  /** Present only on `agent_self`, and only when the agent supplied one:
-   *  the sentence it gave the operator in the approval dialog. Never echoed
-   *  back into any engine input. */
+  /** Present only on `agent_self` and `director`, and only when the agent
+   *  supplied one: the sentence it gave in the approval dialog. Never
+   *  echoed back into any engine input. */
   reason?: string;
+  /** Present only on `director` (issue #677): the requesting agent and the
+   *  work grant that authorized the request. */
+  requested_by?: { kind: "agent"; id: string };
+  work_id?: string;
 }
 
 /** server -> clients (ADR-0036 F7, phase-17 17-1). Fired once the runner

@@ -62,6 +62,17 @@ defmodule KaoiroServer.WorkStore do
     )
   end
 
+  @doc """
+  Decides whether `requester` may reset `target`'s session (issue #677):
+  the grant `work_id` must be active, directed by `requester`, assigned to
+  `target`, at `epoch`, and `requester` must not be `target` (a self reset
+  has its own path). Same single-word refusal as `decide_yield/5` so the
+  reply never discloses which condition failed.
+  """
+  def authorize_peer_reset(requester, target, work_id, epoch, server \\ __MODULE__) do
+    GenServer.call(server, {:authorize_peer_reset, requester, target, work_id, epoch})
+  end
+
   def claim(principal, request, server \\ __MODULE__) do
     GenServer.call(server, {:claim, principal, request})
   end
@@ -364,6 +375,22 @@ defmodule KaoiroServer.WorkStore do
           {:error, reason} -> {:reply, {:error, reason}, state}
         end
     end
+  end
+
+  def handle_call({:authorize_peer_reset, requester, target, work_id, epoch}, _from, state) do
+    work = state.works[work_id]
+
+    authorized? =
+      work != nil and work.state == "active" and
+        work.director == requester and work.assignee["id"] == target and
+        requester["id"] != target and work.authority_epoch == epoch
+
+    reply =
+      if authorized?,
+        do: {:ok, work.work_id, work.authority_epoch},
+        else: {:error, :reset_not_authorized}
+
+    {:reply, reply, state}
   end
 
   def handle_call({:claim, principal, request}, _from, state) do

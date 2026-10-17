@@ -122,6 +122,197 @@ defmodule KaoiroServer.SessionResetsTest do
     end
   end
 
+  describe "check_and_acquire/7 director origin (issue #677)" do
+    @requester %{"kind" => "agent", "id" => "host.director"}
+    @attribution %{requested_by: @requester, work_id: "wrk_677"}
+
+    test "director lock carries requested_by and work_id; other origins carry nil", %{
+      resets: sr
+    } do
+      assert {:ok, _rid, "sess-T"} =
+               SessionResets.check_and_acquire(
+                 "a.dir.target",
+                 "new",
+                 "idle",
+                 "sess-T",
+                 :director,
+                 @attribution,
+                 sr
+               )
+
+      assert %{origin: :director, requested_by: @requester, work_id: "wrk_677"} =
+               :sys.get_state(sr).pending["a.dir.target"]
+
+      assert {:ok, _rid, nil} =
+               SessionResets.check_and_acquire("a.dir.op", "new", "idle", nil, sr)
+
+      assert %{origin: :operator, requested_by: nil, work_id: nil} =
+               :sys.get_state(sr).pending["a.dir.op"]
+    end
+
+    test "the guard keeps attribution and origin from mixing", %{resets: sr} do
+      assert_raise FunctionClauseError, fn ->
+        SessionResets.check_and_acquire("a.dir.bad", "new", "idle", nil, :director, %{}, sr)
+      end
+
+      assert_raise FunctionClauseError, fn ->
+        SessionResets.check_and_acquire(
+          "a.dir.bad",
+          "new",
+          "idle",
+          nil,
+          :operator,
+          @attribution,
+          sr
+        )
+      end
+
+      # `apply/3` keeps the compiler's type checker from flagging a call it
+      # can prove never matches (same device as the AgentAcceptance test).
+      assert_raise FunctionClauseError, fn ->
+        apply(SessionResets, :check_and_acquire, [
+          "a.dir.bad",
+          "new",
+          "idle",
+          nil,
+          :runner,
+          @attribution,
+          sr
+        ])
+      end
+
+      refute SessionResets.pending?("a.dir.bad", sr)
+    end
+
+    test "director origin is gated by state, cooldown and pending like the others", %{
+      resets: sr
+    } do
+      assert {:error, :agent_busy} =
+               SessionResets.check_and_acquire(
+                 "a.dir.busy",
+                 "new",
+                 "thinking",
+                 nil,
+                 :director,
+                 @attribution,
+                 sr
+               )
+
+      assert {:ok, _, _} =
+               SessionResets.check_and_acquire(
+                 "a.dir.pending",
+                 "new",
+                 "idle",
+                 nil,
+                 :director,
+                 @attribution,
+                 sr
+               )
+
+      assert {:error, :session_reset_pending} =
+               SessionResets.check_and_acquire(
+                 "a.dir.pending",
+                 "new",
+                 "idle",
+                 nil,
+                 :director,
+                 @attribution,
+                 sr
+               )
+    end
+
+    test "completion pushes peer_session_reset_result to the requester's topic", %{
+      resets: sr,
+      pointers: sp
+    } do
+      agent_id = "a.dir.complete"
+      SessionPointers.record(agent_id, "sess-old", "/w", :codex, sp)
+      KaoiroServerWeb.Endpoint.subscribe("wrapper:host.director")
+
+      assert {:ok, request_id, _} =
+               SessionResets.check_and_acquire(
+                 agent_id,
+                 "new",
+                 "idle",
+                 "sess-old",
+                 :director,
+                 @attribution,
+                 sr
+               )
+
+      :ok = SessionResets.resolve(agent_id, request_id, true, nil, "sess-new", nil, sr)
+      _ = :sys.get_state(sr)
+      :legacy_absent = SessionResets.confirm_connection(agent_id, nil, sr)
+
+      assert_receive %Phoenix.Socket.Broadcast{
+        topic: "wrapper:host.director",
+        event: "peer_session_reset_result",
+        payload: %{
+          "version" => "0",
+          "request_id" => ^request_id,
+          "agent_id" => ^agent_id,
+          "mode" => "new",
+          "work_id" => "wrk_677",
+          "ok" => true,
+          "to_session_id" => "sess-new"
+        }
+      }
+    end
+
+    test "failure and timeout push ok=false to the requester; operator locks push nothing" do
+      sr = :"sr_dir_fail_#{System.unique_integer([:positive])}"
+      {:ok, pid} = SessionResets.start_link(name: sr, timeout_ms: 20)
+      on_exit(fn -> stop_quietly(pid) end)
+      KaoiroServerWeb.Endpoint.subscribe("wrapper:host.director")
+
+      assert {:ok, failed_id, _} =
+               SessionResets.check_and_acquire(
+                 "a.dir.fail",
+                 "clear",
+                 "idle",
+                 nil,
+                 :director,
+                 @attribution,
+                 sr
+               )
+
+      :ok = SessionResets.resolve("a.dir.fail", failed_id, false, "spawn_failed", nil, nil, sr)
+
+      assert_receive %Phoenix.Socket.Broadcast{
+        topic: "wrapper:host.director",
+        event: "peer_session_reset_result",
+        payload: %{"request_id" => ^failed_id, "ok" => false, "reason" => "spawn_failed"}
+      }
+
+      assert {:ok, timeout_id, _} =
+               SessionResets.check_and_acquire(
+                 "a.dir.timeout",
+                 "new",
+                 "idle",
+                 nil,
+                 :director,
+                 @attribution,
+                 sr
+               )
+
+      assert_receive %Phoenix.Socket.Broadcast{
+        topic: "wrapper:host.director",
+        event: "peer_session_reset_result",
+        payload: %{"request_id" => ^timeout_id, "ok" => false, "reason" => "timeout"}
+      }
+
+      assert {:ok, op_id, _} =
+               SessionResets.check_and_acquire("a.dir.op-fail", "new", "idle", nil, sr)
+
+      :ok = SessionResets.resolve("a.dir.op-fail", op_id, false, "spawn_failed", nil, nil, sr)
+
+      refute_receive %Phoenix.Socket.Broadcast{
+        event: "peer_session_reset_result",
+        payload: %{"request_id" => ^op_id}
+      }
+    end
+  end
+
   describe "guard_instruction/1" do
     test "lock 無し時は :ok を返し last_dispatch を stamp する", %{resets: sr} do
       assert :ok = SessionResets.guard_instruction("a.g1", sr)

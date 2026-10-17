@@ -97,6 +97,11 @@ defmodule KaoiroServer.AgentAcceptanceTest do
     assert AgentAcceptance.run(agent_id, :session_reset_request, fn -> exit(:boom) end) ==
              {:error, :agent_busy}
 
+    # issue #677: the director-origin lock shares the self request's
+    # transient word; the requester retries, nothing was acquired.
+    assert AgentAcceptance.run(agent_id, :peer_session_reset, fn -> exit(:boom) end) ==
+             {:error, :agent_busy}
+
     assert AgentAcceptance.run(agent_id, :set_permission, fn -> :still_working end) ==
              :still_working
   end
