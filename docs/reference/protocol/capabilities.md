@@ -1,7 +1,7 @@
 ---
 title: Session capabilities contract
 status: accepted
-last_updated: 2026-09-30
+last_updated: 2026-10-17
 description: The ext.session_capabilities shape, stamp timing, and per-engine advertised values.
 ---
 
@@ -24,7 +24,7 @@ cannot represent.
 - `supports_effort_switch: boolean` — whether mid-session `set_effort` is accepted. UI shows/hides model and effort selectors from each boolean, never from engine name (ADR-0034 F3).
 - `supports_permission_switch?: boolean` — accepts the engine-neutral `set_permission` control and implements its synchronization/observation contract below. Absent or false means unsupported. Codex advertises true when the contract is implemented end to end; Antigravity advertises true once permission-sync negotiation succeeds and the runner has relayed all three switch-axis ceilings ([ADR-0057](../../adr/0057-antigravity-adapter.md) F4c Stage B0, issue #359); Claude does not implement runtime `set_permission`. This is independent of Claude's six-mode selector.
 - `supports_permission_mode_switch?: boolean` — accepts the existing six-value `set_permission_mode` command. Claude advertises true from its first state_change, including an idle spawn/restore with no configured or observed permission_mode, and retains it after SDK metadata arrives. Codex and Antigravity Stage A do not advertise true. This describes command availability, not the effective mode or fixed permission constraints. The absent-capability compatibility rule below is the explicit exception to the general unstamped-capability rule.
-- `supports_session_reset: boolean` / `session_reset_modes?: ("new" | "clear")[]` — whether the operator can run `session_reset` and which modes are available. This is separate from exposing the agent's `request_session_reset` tool, which both engines now register behind per-call operator approval — Claude through canUseTool, Codex through the wrapper-side gate inside the bridge tool call (ADR-0043, 2026-09-14 amendment).
+- `supports_session_reset: boolean` / `session_reset_modes?: ("new" | "clear")[]` — whether the operator can run `session_reset` and which modes are available. This is separate from exposing the agent's `request_session_reset` tool, which both engines now register behind per-call operator approval — Claude through canUseTool, Codex through the wrapper-side gate inside the bridge tool call (ADR-0043, 2026-09-14 amendment). The same advertisement gates an agent as the **target** of a director's `request_peer_session_reset` ([ADR-0068](../../adr/0068-director-requested-peer-session-reset.md)): `false` answers `unsupported_session_reset` to the director as it does to the operator.
 - `supports_context_usage: boolean` — whether this session provides an authoritative context-window snapshot in `ext.context` (phase 21, [ADR-0040](../../adr/0040-context-usage-capability.md)). UI has three states:
   - **absent** — unstamped capability from an old wrapper during rolling upgrade; hide the context row rather than treating it as unsupported.
   - **explicit `false`** — adapter cannot provide a context snapshot (Codex exec and Antigravity); show “unsupported”.

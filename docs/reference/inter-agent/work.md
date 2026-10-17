@@ -1,7 +1,7 @@
 ---
 title: Work authority and operations
 status: provisional
-last_updated: 2026-09-28
+last_updated: 2026-10-17
 description: Durable work grants, operation receipts, and transfer obligations.
 ---
 
@@ -63,6 +63,15 @@ does not delete a work while it still holds a live receipt.
 assignment and no pending transfer. `land` additionally checks the supplied
 revision and subject hash, no holds, and an effective accepted verdict when
 `requires_verdict` is true. The final grant changes only through `complete`.
+
+An active grant also authorizes one operation outside `work_control`: the
+director may request the assignee's session reset through
+`request_peer_session_reset` ([ADR-0068](../../adr/0068-director-requested-peer-session-reset.md)),
+naming `work_id` and `expected_authority_epoch` taken from its own work
+results. The reset does not advance the revision and is not an op; a
+`transfer` or override invalidates the director's request through the
+epoch, and the server answers any authority failure with
+`reset_not_authorized`.
 
 See [delivery](delivery.md) for `delivery_intent` and yield claims, and
 [channel contracts](../protocol/channels.md) for request and reply shapes.

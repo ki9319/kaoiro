@@ -92,6 +92,7 @@ kaoiro documentation. The pre-taxonomy folders (specs / plans / open-questions) 
 | [0065](adr/0065-footer-changes-on-resumed-sessions.md) | Footer changes do not reach resumed sessions, by design | accepted |
 | [0066](adr/0066-tag-derived-lockstep-build-identity.md) | Derive lockstep build identity from immutable landing tags | accepted |
 | [0067](adr/0067-grok-resident-acp-host.md) | Grok Build as a resident ACP engine | accepted |
+| [0068](adr/0068-director-requested-peer-session-reset.md) | Director-requested session reset of an assigned peer | accepted |
 <!-- adr-index:end -->
 
 Regenerate with the `my-docs-restructure` skill's `scripts/build-adr-index.sh docs` (the script lives in the skill, not in this repository). Do not edit inside the markers manually.

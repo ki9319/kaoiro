@@ -17,6 +17,11 @@ Accepted (2026-07-28, grounded in the decision record of [#158 comment-538436522
 and the Phase B real-machine acceptance of [#158 comment-5384365348](https://github.com/sakuraiyuta/kaoiro/issues/158#issuecomment-5384365348)). Implementation is
 carried out in [Phase C of phase-28-agent-initiated-session-ops](../plans/phase-28-agent-initiated-session-ops.md#phase-c--agent-initiated-newclear-detailed-2026-07-28-クロエ-ruling).
 
+Partially superseded (2026-10-17): D2's first and third sentences are
+replaced by [ADR-0068](0068-director-requested-peer-session-reset.md) D7 for
+the lifetime of an active work grant; its second sentence (no permanent
+director role) stands.
+
 ## Context
 
 [ADR-0036](0036-session-lifecycle-commands.md) defines `/new` and `/clear` as
@@ -65,6 +70,12 @@ requests a reset for agent B. Do not create a permanent director role. It is
 sufficient to retain the existing separation of responsibilities: the operator
 appoints a director when needed, the instructed agent calls **its own** tool, and
 the operator approves each request.
+
+*2026-10-17:* the first and third sentences are superseded by
+[ADR-0068](0068-director-requested-peer-session-reset.md) D7 — the director
+named by a server-owned active work grant may request the assignee's reset
+through `request_peer_session_reset`, under the same approval class as this
+ADR's tool. The second sentence stands.
 
 ### D3 — Supplement F6 with deferred execution of self-initiated reset
 

@@ -1,7 +1,7 @@
 ---
 title: Security enforcement boundaries
 status: accepted
-last_updated: 2026-09-30
+last_updated: 2026-10-17
 ---
 
 # Security enforcement boundaries
@@ -115,8 +115,17 @@ boundary ([ADR-0036](../../adr/0036-session-lifecycle-commands.md)).
   `operatorApprovalGated` handler inside the bridge tool call on Codex
   ([ADR-0043](../../adr/0043-agent-initiated-session-reset.md), 2026-09-14
   amendment). Both routes end in the same broker and the same operator-only
-  `permission_decision` relay. There is no dedicated path originated by
-  another agent.
+  `permission_decision` relay. The one path originated by another agent is
+  the director-requested reset ([ADR-0068](../../adr/0068-director-requested-peer-session-reset.md)):
+  `WrapperChannel.handle_in("peer_session_reset_request", ...)` is accepted
+  only on a `work_control` connection, authorized solely from the
+  server-owned work record (active grant, requester = director, target =
+  assignee, requester ≠ target, authority epoch match; every failure is the
+  single word `reset_not_authorized`), and then runs the same capability /
+  state / cooldown / pending-lock gates as the operator path through the same
+  per-agent `AgentAcceptance` choke point, plus `agent_in_conversation`. The
+  requester's own tool approval follows the same class as
+  `request_session_reset`.
 - **Capability advertisement**: The wrapper adapter stamps
   `ext.session_capabilities.supports_session_reset` - `session_reset_modes`
   directly after spawn. An unstamped / false / true+empty modes value fails
