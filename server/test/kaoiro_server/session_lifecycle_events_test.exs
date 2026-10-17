@@ -1027,7 +1027,7 @@ defmodule KaoiroServer.SessionLifecycleEventsTest do
 
   describe "fetch_for_agent/3 and work_title storage isolation (issue #682)" do
     test "returns {:ok, []} for an unknown agent on a running store", %{name: name} do
-      assert {:ok, []} == SessionLifecycleEvents.fetch_for_agent("host-a.empty", name)
+      assert {:ok, []} == SessionLifecycleEvents.fetch_for_agent("host-a.empty", name, 5_000)
     end
 
     test "returns {:ok, events} for a recorded agent on a running store", %{name: name} do
@@ -1042,7 +1042,7 @@ defmodule KaoiroServer.SessionLifecycleEventsTest do
 
       assert {:ok,
               [%{kind: "compacting", trigger: nil, at: "2026-10-18T00:00:01Z", details: nil}]} ==
-               SessionLifecycleEvents.fetch_for_agent("host-a.recorded", name)
+               SessionLifecycleEvents.fetch_for_agent("host-a.recorded", name, 5_000)
     end
 
     test "returns {:error, :session_lifecycle_unavailable} when the store is not running while list_for_agent returns []" do
@@ -1050,7 +1050,7 @@ defmodule KaoiroServer.SessionLifecycleEventsTest do
 
       ExUnit.CaptureLog.capture_log(fn ->
         assert {:error, :session_lifecycle_unavailable} ==
-                 SessionLifecycleEvents.fetch_for_agent("host-a.dead", dead_name)
+                 SessionLifecycleEvents.fetch_for_agent("host-a.dead", dead_name, 5_000)
 
         assert [] == SessionLifecycleEvents.list_for_agent("host-a.dead", dead_name)
       end)
@@ -1095,7 +1095,7 @@ defmodule KaoiroServer.SessionLifecycleEventsTest do
         )
 
       assert {:ok, [%{kind: "session_reset_started", details: stored}]} =
-               SessionLifecycleEvents.fetch_for_agent("host-a.target", name)
+               SessionLifecycleEvents.fetch_for_agent("host-a.target", name, 5_000)
 
       refute Map.has_key?(stored, "work_title")
       assert stored["work_id"] == "wrk_682"
