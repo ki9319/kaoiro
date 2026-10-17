@@ -182,12 +182,37 @@ defmodule KaoiroServer.SessionLifecycleEvents do
     :ok
   end
 
+  # Bounded `GenServer.call` (default 5s timeout) that turns a dead or
+  # timed-out store into `{:error, :session_lifecycle_unavailable}` instead of
+  # an `exit` propagating to the caller — a plain `rescue` cannot catch this:
+  # `GenServer.call` signals failure via `exit/1`, not a raised exception
+  # (ふじ Stage B round 1 must-fix B2; `append/5` casts instead so diagnostic
+  # writes never block).
+  @doc """
+  Fetches `agent_id`'s events, newest first, returning `{:ok, events}` when
+  the store answers or `{:error, :session_lifecycle_unavailable}` when the
+  store is unreachable or times out (issue #682).
+  """
+  @spec fetch_for_agent(String.t(), GenServer.server(), timeout()) ::
+          {:ok, [map()]} | {:error, :session_lifecycle_unavailable}
+  def fetch_for_agent(agent_id, server \\ __MODULE__, timeout \\ 5_000)
+      when is_binary(agent_id) do
+    {:ok, GenServer.call(server, {:list_for_agent, agent_id}, timeout)}
+  catch
+    :exit, reason ->
+      Logger.warning("SessionLifecycleEvents store unavailable (#{inspect(reason)})")
+      {:error, :session_lifecycle_unavailable}
+  end
+
   @doc """
   Returns `agent_id`'s events, newest first, or `[]` if none recorded —
   including when the store is unreachable/times out (must-fix B2).
   """
   def list_for_agent(agent_id, server \\ __MODULE__) when is_binary(agent_id) do
-    safe_call(server, {:list_for_agent, agent_id}, [])
+    case fetch_for_agent(agent_id, server) do
+      {:ok, events} -> events
+      {:error, :session_lifecycle_unavailable} -> []
+    end
   end
 
   @doc """
@@ -571,21 +596,6 @@ defmodule KaoiroServer.SessionLifecycleEvents do
 
   defp store_alive?(server) when is_pid(server), do: Process.alive?(server)
   defp store_alive?(server), do: Process.whereis(server) != nil
-
-  # Bounded `GenServer.call` (default 5s timeout) that turns a dead store
-  # into a logged no-op instead of an `exit` propagating to the caller — a
-  # plain `rescue` cannot catch this: `GenServer.call` signals failure via
-  # `exit/1`, not a raised exception (ふじ Stage B round 1 must-fix B2).
-  # `list_for_agent/2`'s only remaining caller; `append/5` casts instead
-  # (round 2 must-fix B2-残り, above) since a read tolerates staying
-  # bounded where a diagnostic write must never block its caller at all.
-  defp safe_call(server, msg, fallback) do
-    GenServer.call(server, msg)
-  catch
-    :exit, reason ->
-      Logger.warning("SessionLifecycleEvents store unavailable (#{inspect(reason)})")
-      fallback
-  end
 
   # Truncates and re-validates every stored record against the CURRENT cap
   # and CURRENT vocabulary, and durably rewrites any record that shrank

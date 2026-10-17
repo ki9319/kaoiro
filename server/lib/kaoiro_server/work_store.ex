@@ -9,6 +9,8 @@ defmodule KaoiroServer.WorkStore do
 
   use GenServer
 
+  require Logger
+
   alias KaoiroServer.WorkReducer
 
   @doc "Starts the store. The opts-only :test_after_apply_sync seam pins crash recovery at the durable commit boundary."
@@ -71,6 +73,36 @@ defmodule KaoiroServer.WorkStore do
   """
   def authorize_peer_reset(requester, target, work_id, epoch, server \\ __MODULE__) do
     GenServer.call(server, {:authorize_peer_reset, requester, target, work_id, epoch})
+  end
+
+  @doc """
+  Resolves `%{work_id => title}` for the requested `work_ids` that are still
+  retained in the store (issue #682). Pure read over the requested IDs only
+  (`O(k + inspected receipts)`) without invoking `sweep_works/1` or touching
+  DETS; returns `%{}` if the store is unreachable or times out so operator
+  session-lifecycle queries can fall back to `work_id`.
+  """
+  @spec titles_for_ids([String.t()], GenServer.server(), timeout()) :: %{
+          optional(String.t()) => String.t()
+        }
+  def titles_for_ids(work_ids, server \\ __MODULE__, timeout \\ 1_000)
+  def titles_for_ids([], _server, _timeout), do: %{}
+
+  def titles_for_ids(work_ids, server, timeout) when is_list(work_ids) do
+    uniq_ids =
+      work_ids
+      |> Enum.filter(&(is_binary(&1) and &1 != ""))
+      |> Enum.uniq()
+
+    if uniq_ids == [] do
+      %{}
+    else
+      GenServer.call(server, {:titles_for_ids, uniq_ids}, timeout)
+    end
+  catch
+    :exit, reason ->
+      Logger.warning("WorkStore unavailable while resolving work titles (#{inspect(reason)})")
+      %{}
   end
 
   def claim(principal, request, server \\ __MODULE__) do
@@ -391,6 +423,28 @@ defmodule KaoiroServer.WorkStore do
         else: {:error, :reset_not_authorized}
 
     {:reply, reply, state}
+  end
+
+  def handle_call({:titles_for_ids, work_ids}, _from, state) do
+    now = System.system_time(:millisecond)
+    cfg = config()
+
+    titles =
+      Enum.reduce(work_ids, %{}, fn work_id, acc ->
+        case Map.get(state.works, work_id) do
+          %{title: title} = work when is_binary(title) and title != "" ->
+            if work_retained_for_read?(work, now, cfg) do
+              Map.put(acc, work_id, title)
+            else
+              acc
+            end
+
+          _ ->
+            acc
+        end
+      end)
+
+    {:reply, titles, state}
   end
 
   def handle_call({:claim, principal, request}, _from, state) do
@@ -816,10 +870,7 @@ defmodule KaoiroServer.WorkStore do
         age = now - timestamp_ms(work.updated_at)
 
         live_receipts =
-          Enum.filter(work.receipts, fn receipt ->
-            issued_at = operation_id_timestamp(receipt.operation_id) || receipt.issued_at_ms
-            now <= issued_at + config[:operation_validity_ms]
-          end)
+          Enum.filter(work.receipts, &live_receipt?(&1, now, config[:operation_validity_ms]))
 
         work =
           if live_receipts == work.receipts, do: work, else: %{work | receipts: live_receipts}
@@ -854,6 +905,20 @@ defmodule KaoiroServer.WorkStore do
     if changed?, do: :ok = :dets.sync(state.table)
     receipts = if changed?, do: receipt_index(works), else: state.receipts
     %{state | works: works, receipts: receipts}
+  end
+
+  defp work_retained_for_read?(work, now, config) do
+    if work.state in ~w(completed cancelled declined expired) and
+         now - timestamp_ms(work.updated_at) >= config[:work_terminal_retention_ms] do
+      Enum.any?(work.receipts, &live_receipt?(&1, now, config[:operation_validity_ms]))
+    else
+      true
+    end
+  end
+
+  defp live_receipt?(receipt, now, operation_validity_ms) do
+    issued_at = operation_id_timestamp(receipt.operation_id) || receipt.issued_at_ms
+    now <= issued_at + operation_validity_ms
   end
 
   defp timestamp_ms(at) do

@@ -259,7 +259,8 @@ defmodule KaoiroServerWeb.AgentsChannel do
                    operation_id_expired unknown_operation work_capacity
                    transfer_pending verdict_not_effective
                    invalid_status_line_retention status_line_unavailable
-                   status_line_history_too_large)a
+                   status_line_history_too_large
+                   session_lifecycle_unavailable)a
 
   # session_id charset — mirrors runner/src/sessions.ts SESSION_ID_PATTERN
   # (Claude Code's UUID-shaped JSONL filenames). Validated at this boundary so
@@ -1407,14 +1408,18 @@ defmodule KaoiroServerWeb.AgentsChannel do
   # `events: []`, matching `list_for_agent/2`'s own graceful semantics.
   def handle_in("list_session_events", payload, socket) do
     with :ok <- require_operator(socket, payload, "list_session_events"),
-         {:ok, agent_id} <- fetch_lifecycle_query_agent_id(payload) do
+         {:ok, agent_id} <- fetch_lifecycle_query_agent_id(payload),
+         {:ok, stored_events} <- fetch_session_lifecycle_events(agent_id) do
+      work_titles = resolve_session_event_work_titles(stored_events)
+
       events =
-        for event <- SessionLifecycleEvents.list_for_agent(agent_id) do
+        for event <- stored_events do
           %{
             "kind" => event.kind,
             "trigger" => event.trigger,
             "at" => event.at,
-            "details" => Map.get(event, :details)
+            "details" =>
+              enrich_session_event_details(event.kind, Map.get(event, :details), work_titles)
           }
         end
 
@@ -2090,6 +2095,55 @@ defmodule KaoiroServerWeb.AgentsChannel do
       "conversations_incomplete"
     )
   end
+
+  defp fetch_session_lifecycle_events(agent_id) do
+    server =
+      Application.get_env(
+        :kaoiro_server,
+        :session_lifecycle_events_server,
+        SessionLifecycleEvents
+      )
+
+    timeout =
+      Application.get_env(:kaoiro_server, :session_lifecycle_events_timeout, 5_000)
+
+    SessionLifecycleEvents.fetch_for_agent(agent_id, server, timeout)
+  end
+
+  defp resolve_session_event_work_titles(events) do
+    work_ids =
+      for %{kind: "session_reset_started"} = event <- events,
+          %{"origin" => "director", "work_id" => work_id} <- [Map.get(event, :details)],
+          is_binary(work_id) and work_id != "",
+          uniq: true do
+        work_id
+      end
+
+    if work_ids == [] do
+      %{}
+    else
+      server = Application.get_env(:kaoiro_server, :work_store_server, WorkStore)
+      timeout = Application.get_env(:kaoiro_server, :work_store_titles_timeout, 1_000)
+      WorkStore.titles_for_ids(work_ids, server, timeout)
+    end
+  end
+
+  defp enrich_session_event_details(
+         "session_reset_started",
+         %{"origin" => "director", "work_id" => work_id} = details,
+         work_titles
+       )
+       when is_map(work_titles) do
+    case Map.get(work_titles, work_id) do
+      title when is_binary(title) and title != "" ->
+        Map.put(details, "work_title", title)
+
+      _ ->
+        details
+    end
+  end
+
+  defp enrich_session_event_details(_kind, details, _work_titles), do: details
 
   defp session_events_payload(events) do
     bounded_reply_list_payload("events", events, "events_incomplete")

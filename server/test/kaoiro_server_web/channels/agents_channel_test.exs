@@ -8343,6 +8343,375 @@ defmodule KaoiroServerWeb.AgentsChannelTest do
         "events" => [%{"kind" => "conversation_reset", "trigger" => nil, "at" => _}]
       }
     end
+
+    test "returns session_lifecycle_unavailable instead of an empty list when SessionLifecycleEvents store is unreachable or times out (issue #682)" do
+      socket = join_as(:operator)
+      assert_push "snapshot", %{"agents" => _}
+
+      # Healthy empty store returns %{"events" => []} (events_incomplete omitted)
+      empty_ref = push(socket, "list_session_events", %{"agent_id" => "host-a.empty-ok"})
+      assert_reply empty_ref, :ok, empty_payload
+      assert empty_payload == %{"events" => []}
+      refute Map.has_key?(empty_payload, "events_incomplete")
+
+      # Unreachable store (:noproc)
+      dead_store = :"session_lifecycle_dead_#{System.unique_integer([:positive])}"
+      Application.put_env(:kaoiro_server, :session_lifecycle_events_server, dead_store)
+
+      on_exit(fn ->
+        Application.delete_env(:kaoiro_server, :session_lifecycle_events_server)
+        Application.delete_env(:kaoiro_server, :session_lifecycle_events_timeout)
+      end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        dead_ref = push(socket, "list_session_events", %{"agent_id" => "host-a.target"})
+        assert_reply dead_ref, :error, %{reason: "session_lifecycle_unavailable"}
+      end)
+
+      # Timed-out store (:timeout)
+      slow_store = :"session_lifecycle_slow_#{System.unique_integer([:positive])}"
+      slow_path = Path.join([System.tmp_dir!(), "kaoiro_test_dets", "#{slow_store}.dets"])
+      File.rm(slow_path)
+
+      {:ok, slow_pid} =
+        SessionLifecycleEvents.start_link(name: slow_store, path: slow_path, cap: 5)
+
+      on_exit(fn ->
+        if Process.alive?(slow_pid), do: :sys.resume(slow_pid)
+        stop_quietly(slow_store)
+        File.rm(slow_path)
+      end)
+
+      :sys.suspend(slow_pid)
+      Application.put_env(:kaoiro_server, :session_lifecycle_events_server, slow_store)
+      Application.put_env(:kaoiro_server, :session_lifecycle_events_timeout, 30)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        slow_ref = push(socket, "list_session_events", %{"agent_id" => "host-a.target"})
+        assert_reply slow_ref, :error, %{reason: "session_lifecycle_unavailable"}
+      end)
+
+      :sys.resume(slow_pid)
+    end
+
+    test "projects all session_reset_started attribution shapes and enriches director work_title at read time with fallback (issue #682)" do
+      suffix = System.unique_integer([:positive])
+      agent_id = "host-a.target-#{suffix}"
+      director_id = "host-a.director-#{suffix}"
+
+      {:ok, %{work: active_work}} =
+        WorkStore.apply(
+          %{"kind" => "user", "id" => "operator"},
+          %{
+            "op" => "assign",
+            "operation_id" => work_operation_id(),
+            "title" => "Active director work",
+            "assignee" => agent_id,
+            "director" => %{"kind" => "agent", "id" => director_id},
+            "requires_verdict" => false
+          },
+          %{operator: true}
+        )
+
+      {:ok, %{work: expired_work}} =
+        WorkStore.apply(
+          %{"kind" => "user", "id" => "operator"},
+          %{
+            "op" => "assign",
+            "operation_id" => work_operation_id(),
+            "title" => "Expired terminal work",
+            "assignee" => agent_id,
+            "director" => %{"kind" => "agent", "id" => director_id},
+            "requires_verdict" => false
+          },
+          %{operator: true}
+        )
+
+      cfg = Application.get_env(:kaoiro_server, :work_store, [])
+      retention_ms = Keyword.get(cfg, :work_terminal_retention_ms, 86_400_000)
+      validity_ms = Keyword.get(cfg, :operation_validity_ms, 600_000)
+
+      expired_updated_at =
+        DateTime.utc_now()
+        |> DateTime.add(-(retention_ms + 5_000), :millisecond)
+        |> DateTime.to_iso8601()
+
+      stale_issued_at = System.system_time(:millisecond) - validity_ms - 5_000
+
+      :sys.replace_state(WorkStore, fn store ->
+        update_in(store, [:works, expired_work.work_id], fn w ->
+          stale_receipts =
+            Enum.map(w.receipts, fn r ->
+              %{r | operation_id: "op_#{stale_issued_at}_stale", issued_at_ms: stale_issued_at}
+            end)
+
+          %{w | state: "completed", updated_at: expired_updated_at, receipts: stale_receipts}
+        end)
+      end)
+
+      # 1. Legacy nil details (recorded via append/5)
+      :ok =
+        SessionLifecycleEvents.append(
+          agent_id,
+          "session_reset_started",
+          nil,
+          "2026-10-18T00:00:01Z"
+        )
+
+      # 2. operator origin
+      :ok =
+        SessionLifecycleEvents.record_session_reset_started(
+          agent_id,
+          "2026-10-18T00:00:02Z",
+          %{"origin" => "operator"}
+        )
+
+      # 3. agent_self origin
+      :ok =
+        SessionLifecycleEvents.record_session_reset_started(
+          agent_id,
+          "2026-10-18T00:00:03Z",
+          %{"origin" => "agent_self"}
+        )
+
+      # 4. director origin with unknown work_id
+      :ok =
+        SessionLifecycleEvents.record_session_reset_started(
+          agent_id,
+          "2026-10-18T00:00:04Z",
+          %{
+            "origin" => "director",
+            "requested_by" => %{"kind" => "agent", "id" => director_id},
+            "work_id" => "wrk_missing"
+          }
+        )
+
+      # 5. director origin with expired terminal work
+      :ok =
+        SessionLifecycleEvents.record_session_reset_started(
+          agent_id,
+          "2026-10-18T00:00:05Z",
+          %{
+            "origin" => "director",
+            "requested_by" => %{"kind" => "agent", "id" => director_id},
+            "work_id" => expired_work.work_id
+          }
+        )
+
+      # 6. director origin with active work
+      :ok =
+        SessionLifecycleEvents.record_session_reset_started(
+          agent_id,
+          "2026-10-18T00:00:06Z",
+          %{
+            "origin" => "director",
+            "requested_by" => %{"kind" => "agent", "id" => director_id},
+            "work_id" => active_work.work_id
+          }
+        )
+
+      sync_lifecycle_store()
+
+      socket = join_as(:operator)
+      assert_push "snapshot", %{"agents" => _}
+
+      ref = push(socket, "list_session_events", %{"agent_id" => agent_id})
+      assert_reply ref, :ok, %{"events" => events} = reply
+      refute Map.has_key?(reply, "events_incomplete")
+
+      assert [
+               %{
+                 "kind" => "session_reset_started",
+                 "trigger" => nil,
+                 "at" => "2026-10-18T00:00:06Z",
+                 "details" => active_details
+               },
+               %{
+                 "kind" => "session_reset_started",
+                 "trigger" => nil,
+                 "at" => "2026-10-18T00:00:05Z",
+                 "details" => expired_details
+               },
+               %{
+                 "kind" => "session_reset_started",
+                 "trigger" => nil,
+                 "at" => "2026-10-18T00:00:04Z",
+                 "details" => missing_details
+               },
+               %{
+                 "kind" => "session_reset_started",
+                 "trigger" => nil,
+                 "at" => "2026-10-18T00:00:03Z",
+                 "details" => %{"origin" => "agent_self"}
+               },
+               %{
+                 "kind" => "session_reset_started",
+                 "trigger" => nil,
+                 "at" => "2026-10-18T00:00:02Z",
+                 "details" => %{"origin" => "operator"}
+               },
+               %{
+                 "kind" => "session_reset_started",
+                 "trigger" => nil,
+                 "at" => "2026-10-18T00:00:01Z",
+                 "details" => nil
+               }
+             ] = events
+
+      assert active_details == %{
+               "origin" => "director",
+               "requested_by" => %{"kind" => "agent", "id" => director_id},
+               "work_id" => active_work.work_id,
+               "work_title" => "Active director work"
+             }
+
+      assert expired_details == %{
+               "origin" => "director",
+               "requested_by" => %{"kind" => "agent", "id" => director_id},
+               "work_id" => expired_work.work_id
+             }
+
+      refute Map.has_key?(expired_details, "work_title")
+
+      assert missing_details == %{
+               "origin" => "director",
+               "requested_by" => %{"kind" => "agent", "id" => director_id},
+               "work_id" => "wrk_missing"
+             }
+
+      refute Map.has_key?(missing_details, "work_title")
+
+      # Persisted record in SessionLifecycleEvents never stores work_title
+      [stored_newest | _] = SessionLifecycleEvents.list_for_agent(agent_id)
+      refute Map.has_key?(stored_newest.details, "work_title")
+
+      # When WorkStore is unavailable, the request still succeeds and falls back to work_id
+      dead_work_store = :"work_store_dead_#{suffix}"
+      Application.put_env(:kaoiro_server, :work_store_server, dead_work_store)
+      on_exit(fn -> Application.delete_env(:kaoiro_server, :work_store_server) end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        ref_fallback = push(socket, "list_session_events", %{"agent_id" => agent_id})
+        assert_reply ref_fallback, :ok, %{"events" => [fallback_newest | _]}
+        assert fallback_newest["details"]["work_id"] == active_work.work_id
+        refute Map.has_key?(fallback_newest["details"], "work_title")
+      end)
+
+      Application.delete_env(:kaoiro_server, :work_store_server)
+
+      # After delete_agent, session_reset_started attribution and work_title remain queryable
+      put_disconnected(agent_id)
+      del_ref = push(socket, "delete_agent", %{"agent_id" => agent_id})
+      assert_reply del_ref, :ok, %{}, @purge_reply_timeout
+
+      after_del_ref = push(socket, "list_session_events", %{"agent_id" => agent_id})
+      assert_reply after_del_ref, :ok, %{"events" => [after_del_newest | _]}
+      assert after_del_newest["details"]["work_title"] == "Active director work"
+    end
+
+    test "returns 200 enriched entries (>64 KiB) without truncation under TransportLimits (8,000,000 bytes) and truncates newest-first with events_incomplete: true when exceeding budget (issue #682 M4)" do
+      suffix = System.unique_integer([:positive])
+      agent_id = "host-a.frame-#{suffix}"
+      director_id = "host-a.director-#{suffix}"
+      max_title = String.duplicate("t", 256)
+
+      {:ok, %{work: work}} =
+        WorkStore.apply(
+          %{"kind" => "user", "id" => "operator"},
+          %{
+            "op" => "assign",
+            "operation_id" => work_operation_id(),
+            "title" => max_title,
+            "assignee" => agent_id,
+            "director" => %{"kind" => "agent", "id" => director_id},
+            "requires_verdict" => false
+          },
+          %{operator: true}
+        )
+
+      store_name = :"session_lifecycle_frame_#{suffix}"
+      store_path = Path.join([System.tmp_dir!(), "kaoiro_test_dets", "#{store_name}.dets"])
+      File.rm(store_path)
+
+      {:ok, _pid} =
+        SessionLifecycleEvents.start_link(name: store_name, path: store_path, cap: 25_000)
+
+      Application.put_env(:kaoiro_server, :session_lifecycle_events_server, store_name)
+
+      on_exit(fn ->
+        Application.delete_env(:kaoiro_server, :session_lifecycle_events_server)
+        stop_quietly(store_name)
+        File.rm(store_path)
+      end)
+
+      director_details = %{
+        "origin" => "director",
+        "requested_by" => %{"kind" => "agent", "id" => director_id},
+        "work_id" => work.work_id
+      }
+
+      events_200 =
+        for i <- 200..1//-1 do
+          %{
+            kind: "session_reset_started",
+            trigger: nil,
+            at:
+              DateTime.from_unix!(1_700_000_000 + i)
+              |> DateTime.to_iso8601(),
+            details: director_details
+          }
+        end
+
+      :sys.replace_state(store_name, fn state ->
+        %{state | events: Map.put(state.events, agent_id, events_200)}
+      end)
+
+      socket = join_as(:operator)
+      assert_push "snapshot", %{"agents" => _}
+
+      # 1. 200 rows with 256-byte work_title (~91 KiB > 64 KiB) fits within 8 MB budget without truncation
+      ref_200 = push(socket, "list_session_events", %{"agent_id" => agent_id})
+      assert_reply ref_200, :ok, %{"events" => reply_200} = payload_200
+      assert length(reply_200) == 200
+      refute Map.has_key?(payload_200, "events_incomplete")
+      assert hd(reply_200)["details"]["work_title"] == max_title
+      assert_production_reply_frame_fits(payload_200)
+
+      # 2. Oversized timeline exceeding the ~8 MB reply budget is truncated newest-first with events_incomplete: true
+      events_20k =
+        for i <- 20_000..1//-1 do
+          %{
+            kind: "session_reset_started",
+            trigger: nil,
+            at:
+              DateTime.from_unix!(1_700_000_000 + i)
+              |> DateTime.to_iso8601(),
+            details: director_details
+          }
+        end
+
+      :sys.replace_state(store_name, fn state ->
+        %{state | events: Map.put(state.events, agent_id, events_20k)}
+      end)
+
+      ref_over = push(socket, "list_session_events", %{"agent_id" => agent_id})
+
+      assert_reply ref_over,
+                   :ok,
+                   %{
+                     "events" => projected,
+                     "events_incomplete" => true
+                   } = payload_over
+
+      assert length(projected) < 20_000
+      assert length(projected) > 10_000
+      assert hd(projected)["at"] == hd(events_20k).at
+
+      assert Enum.map(projected, & &1["at"]) ==
+               Enum.take(Enum.map(events_20k, & &1.at), length(projected))
+
+      assert_production_reply_frame_fits(payload_over)
+    end
   end
 
   # ふじ独立レビュー round 2: 上の exact-key-set test は

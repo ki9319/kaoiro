@@ -2354,6 +2354,99 @@ defmodule KaoiroServer.WorkStoreTest do
     end
   end
 
+  describe "titles_for_ids/3 (issue #682)" do
+    setup do
+      name = :"work_store_titles_#{System.unique_integer([:positive])}"
+      path = Path.join([System.tmp_dir!(), "kaoiro_test_dets", "#{name}.dets"])
+      File.rm(path)
+      {:ok, _} = WorkStore.start_link(name: name, path: path)
+
+      on_exit(fn ->
+        stop_quietly(name)
+        File.rm(path)
+      end)
+
+      %{name: name}
+    end
+
+    test "resolves active work titles, ignores unknown or empty ids, and does not mutate store state",
+         %{name: name} do
+      work = active_work(name, "host-a.director", principal("host-a.assignee"), "titles-cid-1")
+      before_state = :sys.get_state(name)
+
+      assert %{} == WorkStore.titles_for_ids([], name)
+      assert %{} == WorkStore.titles_for_ids(["", "wrk_unknown"], name)
+
+      assert %{work.work_id => "titles-cid-1"} ==
+               WorkStore.titles_for_ids([work.work_id, "wrk_unknown", work.work_id], name)
+
+      assert :sys.get_state(name) == before_state
+    end
+
+    test "omits a terminal work past work_terminal_retention_ms unless it still holds a live receipt",
+         %{name: name} do
+      work = active_work(name, "host-a.director", principal("host-a.assignee"), "titles-cid-2")
+      cfg = Application.get_env(:kaoiro_server, :work_store, [])
+      retention_ms = Keyword.get(cfg, :work_terminal_retention_ms, 86_400_000)
+      validity_ms = Keyword.get(cfg, :operation_validity_ms, 600_000)
+
+      expired_updated_at =
+        DateTime.utc_now()
+        |> DateTime.add(-(retention_ms + 5_000), :millisecond)
+        |> DateTime.to_iso8601()
+
+      stale_issued_at = System.system_time(:millisecond) - validity_ms - 5_000
+
+      # Terminal work within retention window: still returned
+      :sys.replace_state(name, fn store ->
+        put_in(store, [:works, work.work_id, :state], "completed")
+      end)
+
+      assert %{work.work_id => "titles-cid-2"} == WorkStore.titles_for_ids([work.work_id], name)
+
+      # Terminal work past retention window, but with a live receipt: still returned
+      :sys.replace_state(name, fn store ->
+        update_in(store, [:works, work.work_id], fn w ->
+          %{w | state: "completed", updated_at: expired_updated_at}
+        end)
+      end)
+
+      assert %{work.work_id => "titles-cid-2"} == WorkStore.titles_for_ids([work.work_id], name)
+
+      # Terminal work past retention window with only expired receipts: omitted
+      :sys.replace_state(name, fn store ->
+        update_in(store, [:works, work.work_id], fn w ->
+          stale_receipts =
+            Enum.map(w.receipts, fn r ->
+              %{r | operation_id: "op_#{stale_issued_at}_stale", issued_at_ms: stale_issued_at}
+            end)
+
+          %{w | state: "completed", updated_at: expired_updated_at, receipts: stale_receipts}
+        end)
+      end)
+
+      assert %{} == WorkStore.titles_for_ids([work.work_id], name)
+    end
+
+    test "returns %{} without raising when the store is not running or times out", %{name: name} do
+      dead_name = :"work_store_dead_titles_#{System.unique_integer([:positive])}"
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert %{} == WorkStore.titles_for_ids(["wrk_1"], dead_name)
+      end)
+
+      pid = Process.whereis(name)
+      :sys.suspend(pid)
+      on_exit(fn -> if Process.alive?(pid), do: :sys.resume(pid) end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert %{} == WorkStore.titles_for_ids(["wrk_1"], name, 30)
+      end)
+
+      :sys.resume(pid)
+    end
+  end
+
   defp operation_id do
     "op_#{System.system_time(:millisecond)}_#{Base.url_encode64(:crypto.strong_rand_bytes(16), padding: false)}"
   end

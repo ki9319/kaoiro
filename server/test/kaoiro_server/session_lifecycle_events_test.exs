@@ -1024,4 +1024,81 @@ defmodule KaoiroServer.SessionLifecycleEventsTest do
 
     assert stored == no_turn
   end
+
+  describe "fetch_for_agent/3 and work_title storage isolation (issue #682)" do
+    test "returns {:ok, []} for an unknown agent on a running store", %{name: name} do
+      assert {:ok, []} == SessionLifecycleEvents.fetch_for_agent("host-a.empty", name)
+    end
+
+    test "returns {:ok, events} for a recorded agent on a running store", %{name: name} do
+      :ok =
+        SessionLifecycleEvents.append(
+          "host-a.recorded",
+          "compacting",
+          nil,
+          "2026-10-18T00:00:01Z",
+          name
+        )
+
+      assert {:ok,
+              [%{kind: "compacting", trigger: nil, at: "2026-10-18T00:00:01Z", details: nil}]} ==
+               SessionLifecycleEvents.fetch_for_agent("host-a.recorded", name)
+    end
+
+    test "returns {:error, :session_lifecycle_unavailable} when the store is not running while list_for_agent returns []" do
+      dead_name = :"session_lifecycle_events_dead_fetch_#{System.unique_integer([:positive])}"
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, :session_lifecycle_unavailable} ==
+                 SessionLifecycleEvents.fetch_for_agent("host-a.dead", dead_name)
+
+        assert [] == SessionLifecycleEvents.list_for_agent("host-a.dead", dead_name)
+      end)
+    end
+
+    test "returns {:error, :session_lifecycle_unavailable} when a suspended store times out", %{
+      name: name
+    } do
+      pid = Process.whereis(name)
+      :sys.suspend(pid)
+      on_exit(fn -> if Process.alive?(pid), do: :sys.resume(pid) end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, :session_lifecycle_unavailable} ==
+                 SessionLifecycleEvents.fetch_for_agent("host-a.timeout", name, 30)
+      end)
+
+      :sys.resume(pid)
+      assert {:ok, []} == SessionLifecycleEvents.fetch_for_agent("host-a.timeout", name, 1_000)
+    end
+
+    test "SessionResetAttribution strips work_title on sanitize/1 and rejects it on valid?/1", %{
+      name: name
+    } do
+      with_work_title = %{
+        "origin" => "director",
+        "requested_by" => %{"kind" => "agent", "id" => "host-a.director"},
+        "work_id" => "wrk_682",
+        "work_title" => "Transient read-only title"
+      }
+
+      assert {:ok, sanitized} = KaoiroServer.SessionResetAttribution.sanitize(with_work_title)
+      refute Map.has_key?(sanitized, "work_title")
+      refute KaoiroServer.SessionResetAttribution.valid?(with_work_title)
+
+      :ok =
+        SessionLifecycleEvents.record_session_reset_started(
+          "host-a.target",
+          "2026-10-18T00:00:02Z",
+          with_work_title,
+          name
+        )
+
+      assert {:ok, [%{kind: "session_reset_started", details: stored}]} =
+               SessionLifecycleEvents.fetch_for_agent("host-a.target", name)
+
+      refute Map.has_key?(stored, "work_title")
+      assert stored["work_id"] == "wrk_682"
+    end
+  end
 end
