@@ -2,7 +2,7 @@
 title: High-risk change release
 description: How to tell whether a change can stop the agents that would fix it, what to prepare first, the production-shape start gate for the runner, the canary stage, and recovery when every agent has stopped.
 status: accepted
-last_updated: 2026-10-10
+last_updated: 2026-10-17
 related: [deployment]
 ---
 
@@ -13,9 +13,11 @@ related: [deployment]
 [answers Q1–Q5](https://github.com/sakuraiyuta/kaoiro/issues/240#issuecomment-6064701974)).
 The start gate in section 3 was measured on 2026-10-09
 ([evidence](../evidence/deployment/high-risk-change-start-gate.md)).
-**The canary stage in section 4 has not been exercised on a real update yet.**
-The first high-risk update records its result in the tracker and replaces this
-sentence with the date and outcome.
+The canary stage in section 4 was exercised on 2026-10-17 with release
+v2026.10.17.1 (TL, Claude Code): the runner restart left no old wrapper and
+no spawn, the canary turn completed normally within the time limit, and the
+rest of the fleet was restored
+([record](https://github.com/sakuraiyuta/kaoiro/issues/426)).
 
 This page answers one question: *can the change I am about to ship, or review,
 stop the agents that would repair it, and if so what do I prepare and in what
