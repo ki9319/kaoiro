@@ -4,7 +4,7 @@ description: A director holding an active work grant may request the session res
 status: accepted
 date: 2026-10-17
 opened: 2026-10-17
-supersedes: []
+supersedes: [43]
 superseded_by: null
 related_specs: [protocol-inter-agent]
 related_adrs: [36, 43, 55, 63]
@@ -23,7 +23,8 @@ implementation review. Design review: two rounds, must 2 cumulative, 0 at
 round 2.
 
 Partially supersedes [ADR-0043](0043-agent-initiated-session-reset.md) D2
-(see D7). [ADR-0036](0036-session-lifecycle-commands.md) F2 / F6 / F7 and
+(see D7); the frontmatter lists 43 for that reason, while ADR-0043 itself
+stays `accepted` because its other decisions are untouched. [ADR-0036](0036-session-lifecycle-commands.md) F2 / F6 / F7 and
 [ADR-0063](0063-layered-delivery-authority-and-continuations.md) D3 / D9 are
 unchanged.
 

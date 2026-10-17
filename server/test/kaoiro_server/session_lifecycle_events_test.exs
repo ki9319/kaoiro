@@ -223,7 +223,7 @@ defmodule KaoiroServer.SessionLifecycleEventsTest do
       assert SessionLifecycleEvents.list_for_agent("a.reset.invalid", name) == []
     end
 
-    test "append/5 still cannot store details for this kind", %{name: name} do
+    test "append/5 still cannot store details for this kind" do
       refute SessionLifecycleEvents.valid_event?(
                "session_reset_started",
                nil,
