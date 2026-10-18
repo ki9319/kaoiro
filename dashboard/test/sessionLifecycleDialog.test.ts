@@ -85,6 +85,11 @@ describe("session lifecycle dialog", () => {
     expect(document.querySelector("[role=alert]")?.textContent).toContain(reason);
     expect(empty()).toBeNull();
   });
+  it("uses a generic message for a non-Error rejection", async () => {
+    await open(async () => { throw "untyped failure"; }); await settled();
+    expect(document.querySelector("[role=alert]")?.textContent).toBe("履歴を取得できません (error)");
+    expect(empty()).toBeNull();
+  });
   it.each([null, { events: null }, { events: [], events_incomplete: null }])("shows actual parser skeleton failure %j as an alert", async reply => {
     await open(raw(reply)); await settled();
     expect(document.querySelector("[role=alert]")?.textContent).toContain("invalid_reply");

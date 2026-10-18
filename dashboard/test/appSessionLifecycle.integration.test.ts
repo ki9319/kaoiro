@@ -133,7 +133,9 @@ describe("real App session lifecycle wiring", () => {
     expect(section.querySelector<HTMLButtonElement>("button")!.disabled).toBe(true);
     const input = section.querySelector<HTMLInputElement>("input")!;
     input.value = "   "; input.dispatchEvent(new Event("input", { bubbles: true })); await flush();
-    section.querySelector("form")!.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true })); await flush();
+    const submit = new SubmitEvent("submit", { bubbles: true, cancelable: true });
+    section.querySelector("form")!.dispatchEvent(submit); await flush();
+    expect(submit.defaultPrevented).toBe(true);
     expect(ws.queries()).toHaveLength(0);
     input.value = "  host-a.deleted  "; input.dispatchEvent(new Event("input", { bubbles: true })); await flush();
     section.querySelector<HTMLButtonElement>("button")!.click(); await flush();

@@ -3,6 +3,13 @@ import fixture from "../../protocol/fixtures/session-lifecycle-query.json" with 
 import type { SessionLifecycleEventKind } from "../../protocol/src/index";
 import { parseSessionLifecycleReply, SESSION_LIFECYCLE_KINDS } from "../src/lib/protocol";
 
+const EXPECTED_KINDS = [
+  "compacting", "compact_boundary", "compact_failed", "resume_reserved",
+  "resume_fired", "threshold_notice", "conversation_reset", "permission_requested",
+  "permission_applied", "permission_failed", "disconnected", "reconnecting",
+  "reconnected", "session_reset_started", "session_reset_completed",
+] as const satisfies readonly SessionLifecycleEventKind[];
+expectTypeOf<typeof EXPECTED_KINDS[number]>().toEqualTypeOf<SessionLifecycleEventKind>();
 const at = "2026-01-01T00:00:00Z";
 const normal = (kind = "compacting", fields: Record<string, unknown> = {}) => ({ kind, at, ...fields });
 const parse = (value: unknown) => parseSessionLifecycleReply({ events: [value] }).events[0];
@@ -35,7 +42,11 @@ describe("session lifecycle display parser", () => {
     expect(rows[0]).not.toHaveProperty("details");
   });
 
-  it.each(SESSION_LIFECYCLE_KINDS)("displays known kind %s without duplicating storage validation", kind => {
+  it("keeps the display vocabulary equal to the shared lifecycle contract", () => {
+    expect(SESSION_LIFECYCLE_KINDS).toEqual(EXPECTED_KINDS);
+  });
+
+  it.each(EXPECTED_KINDS)("displays known kind %s without duplicating storage validation", kind => {
     // Non-display details deliberately remain outside this parser's contract.
     const details = ["session_reset_started", "disconnected"].includes(kind) ? null : { revision: 0, previous: null, extra: "ignored" };
     expect(parse(normal(kind, { details }))).toEqual({ status: "ok", kind, at, trigger: null, resetAttribution: null, disconnect: null });
@@ -105,7 +116,7 @@ describe("session lifecycle display parser", () => {
     expect(parse({ ...row, details: { ...row.details, extra: 1 } })).toEqual({ status: "ok", kind: "disconnected", at: row.at, trigger: null, resetAttribution: null, disconnect: row.details });
     expect(parse({ ...row, details: { ...row.details, extra: 1 } })).not.toHaveProperty("details");
   });
-  it.each(["details", [], { origin: "runner", reason: "crash" }, { origin: ["operator"], reason: "stop" }, { origin: "operator", reason: ["stop"] }, { origin: "future", reason: "stop" }])("retains invalid disconnection %j", details => {
+  it.each(["details", [], { origin: "runner", reason: "crash" }, { origin: "agent_self", reason: "socket_lost" }, { origin: "unplanned", reason: "stop" }, { origin: ["operator"], reason: "stop" }, { origin: "operator", reason: ["stop"] }, { origin: "future", reason: "stop" }])("retains invalid disconnection %j", details => {
     expect(parse(normal("disconnected", { details }))).toMatchObject({ status: "malformed" });
   });
 });
