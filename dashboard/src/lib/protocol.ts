@@ -4561,11 +4561,8 @@ function pushAsync(
   });
 }
 
-/** Like {@link pushAsync}, but resolves with the server's ok payload
- *  instead of discarding it. Only `set_permission` reads a reply body
- *  (issue #305: the ack's revision keeps a slow render from overwriting a
- *  newer control state), so the void-resolving helper every other caller
- *  uses is left as it is rather than widened for one call site. */
+/** Resolves with the server's ok payload for requests that read a reply body.
+ *  Callers that need only an acknowledgement use {@link pushAsync}. */
 function pushAsyncReply(
   channel: Channel,
   event: string,
