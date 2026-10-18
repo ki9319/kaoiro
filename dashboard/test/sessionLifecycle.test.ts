@@ -57,7 +57,7 @@ describe("session lifecycle display parser", () => {
     expect(result).toMatchObject({ status: "ok", disconnect: null });
   });
 
-  it.each([null, false, 0, "reply", []])("rejects nonobject skeleton %j", raw => {
+  it.each([undefined, null, false, 0, "reply", []])("rejects nonobject skeleton %j", raw => {
     expect(() => parseSessionLifecycleReply(raw)).toThrow("invalid_reply");
   });
   it.each([undefined, null, {}, "events", 3])("rejects non-array events %j", events => {
@@ -71,7 +71,7 @@ describe("session lifecycle display parser", () => {
     expect(parseSessionLifecycleReply(raw)).toEqual({ events: [], incomplete: marker === true });
   });
 
-  it.each([null, [], false, 7, "row"])("retains nonobject row %j", value => {
+  it.each([undefined, null, [], false, 7, "row"])("retains nonobject row %j", value => {
     expect(parse(value)).toEqual({ status: "malformed", rawKind: null, rawAt: null });
   });
   it.each([
@@ -108,7 +108,7 @@ describe("session lifecycle display parser", () => {
   });
   it.each([
     "details", [], 1, { ...director, origin: "future" },
-    { ...director, requested_by: null }, { ...director, requested_by: [] },
+    { ...director, requested_by: undefined }, { ...director, requested_by: null }, { ...director, requested_by: [] },
     { ...director, requested_by: { kind: "user", id: "host-a.director" } },
     { ...director, requested_by: { kind: "agent", id: "" } },
     { ...director, requested_by: { kind: "agent", id: { length: 1 } } },
