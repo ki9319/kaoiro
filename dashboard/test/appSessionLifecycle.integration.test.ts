@@ -191,8 +191,10 @@ describe("real App session lifecycle wiring", () => {
     ws.push(event, { ...reset, agent_id: TARGET }); await flush(); expect(ws.queries()).toHaveLength(2);
     // A notification may precede recording, so query issuance is the contract.
     ws.reply(ws.queries()[1]!, fixture.empty); await flush();
-    await refresh(); expect(ws.queries()).toHaveLength(3);
-    await closeHistory(); ws.push(event, { ...reset, agent_id: TARGET }); await flush(); expect(ws.queries()).toHaveLength(3);
+    ws.push(event, { ...reset, request_id: "reset-second", agent_id: TARGET }); await flush(); expect(ws.queries()).toHaveLength(3);
+    ws.reply(ws.queries()[2]!, fixture.empty); await flush();
+    await refresh(); expect(ws.queries()).toHaveLength(4);
+    await closeHistory(); ws.push(event, { ...reset, agent_id: TARGET }); await flush(); expect(ws.queries()).toHaveLength(4);
   });
   it("retains the latest target and same-target refresh on reversed success/error replies", async () => {
     const ws = await boot(); const oldTarget = await openHistory(ws);

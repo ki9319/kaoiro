@@ -52,6 +52,11 @@ describe("session lifecycle display parser", () => {
     expect(parse(normal(kind, { details }))).toEqual({ status: "ok", kind, at, trigger: null, resetAttribution: null, disconnect: null });
   });
 
+  it.each(EXPECTED_KINDS.filter(kind => kind !== "disconnected"))("ignores disconnect-looking details on %s", kind => {
+    const result = parse(normal(kind, { details: { origin: "operator", reason: "stop" } }));
+    expect(result).toMatchObject({ status: "ok", disconnect: null });
+  });
+
   it.each([null, false, 0, "reply", []])("rejects nonobject skeleton %j", raw => {
     expect(() => parseSessionLifecycleReply(raw)).toThrow("invalid_reply");
   });
