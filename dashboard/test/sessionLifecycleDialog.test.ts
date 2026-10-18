@@ -38,6 +38,7 @@ describe("session lifecycle dialog", () => {
     expect(document.querySelector("h2")?.textContent).toBe("Target のセッション履歴");
     expect(document.querySelector(".target-id")?.textContent).toBe("host-a.target");
     expect(rows()).toHaveLength(5);
+    expect(rows()[0]!.querySelector(".kind")?.textContent).toBe("session_reset_started");
     expect(text()).toContain("要求元: operator");
     expect(text()).toContain("要求元: agent_self");
     expect(text()).toContain("要求元: director");
@@ -105,6 +106,7 @@ describe("session lifecycle dialog", () => {
   it("keeps mixed row order and comma timestamps while displaying triggers and disconnect pairs", async () => {
     await open(raw({ events: [...fixture.comma.events, null, ...fixture.extra.events, { kind: "compact_boundary", at: "2026-01-01T00:00:00Z", trigger: "sdk_auto" }] })); await settled();
     expect(rows()).toHaveLength(4);
+    expect([...document.querySelectorAll(".normal .kind")].map(node => node.textContent)).toEqual(["compacting", "disconnected", "compact_boundary"]);
     expect(rows()[0]!.textContent).toContain("2026-01-01T00:00:00,123Z");
     expect(rows()[0]!.querySelector(".trigger")).toBeNull();
     expect(rows()[1]!.classList.contains("malformed")).toBe(true);
