@@ -120,9 +120,12 @@ describe("real App session lifecycle wiring", () => {
   });
   it("passes persistent directory names into the history dialog", async () => {
     const ws = await boot();
-    ws.push("directory", { entries: { "host-a.director": { display_name: "Archived Director", last_seen: null, persona: { id: "director" } } } }); await flush();
+    ws.push("directory", { entries: { "host-a.director": { display_name: "Archived Director", last_seen: null, persona: { id: "director" } }, "host-a.archived": { display_name: "Archived", last_seen: null, persona: { id: "archived" } } } }); await flush();
     const request = await openHistory(ws); ws.reply(request, fixture.target); await flush();
     expect(history()!.querySelector(".requester")?.textContent).toBe("要求者: Archived Director (host-a.director)");
+    await closeHistory(); await settings();
+    const options = [...document.querySelectorAll<HTMLOptionElement>("#lifecycle-agent-ids option")].map(option => option.value);
+    expect(options).toEqual(["host-a.archived", "host-a.director", OTHER, TARGET]);
   });
   it("looks up a deleted ID through settings without keeping two dialogs open", async () => {
     const ws = await boot(); await settings();

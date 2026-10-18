@@ -18,11 +18,11 @@ const text = () => document.body.textContent ?? "";
 const empty = () => document.querySelector(".session-lifecycle-dialog .empty");
 const rows = () => [...document.querySelectorAll(".lifecycle-row")];
 const refresh = () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "更新")!.click();
-async function open(fetchEvents: (id: string) => Promise<SessionLifecycleEventList>, directory: Record<string, DirectoryEntry> = {}) {
+async function open(fetchEvents: (id: string) => Promise<SessionLifecycleEventList>, directory: Record<string, DirectoryEntry> = {}, onClose: () => void = () => {}) {
   const state = reactiveObject({ agentId: "host-a.target", refreshKey: 0 });
   mounted = mount(SessionLifecycleDialog, { target: document.body, props: {
     get agentId() { return state.agentId; }, get refreshKey() { return state.refreshKey; },
-    label: "Target", fetchEvents, agents: {}, directory, onClose: () => {},
+    label: "Target", fetchEvents, agents: {}, directory, onClose,
   } });
   await tick();
   return state;
@@ -33,6 +33,8 @@ const raw = (reply: unknown) => async () => parseSessionLifecycleReply(reply);
 describe("session lifecycle dialog", () => {
   it("renders actual reset origins, requester and work fallback", async () => {
     await open(raw(fixture.target)); await settled();
+    expect(document.querySelector("dialog")?.getAttribute("aria-label")).toBe("Target のセッション履歴");
+    expect(rows()[0]!.querySelector("time")?.getAttribute("datetime")).toBe(fixture.target.events[0]!.at);
     expect(document.querySelector("h2")?.textContent).toBe("Target のセッション履歴");
     expect(document.querySelector(".target-id")?.textContent).toBe("host-a.target");
     expect(rows()).toHaveLength(5);
@@ -46,6 +48,18 @@ describe("session lifecycle dialog", () => {
     expect(rows()[1]!.querySelector(".work")?.textContent).toBe("work: wrk_missing");
     expect(rows()[0]!.querySelector("time")?.textContent).not.toBe("");
     expect(rows()[4]!.textContent).not.toContain("要求元:");
+  });
+  it.each(["button", "cancel", "backdrop"])("closes a pending history through %s", async action => {
+    const close = vi.fn();
+    let resolve!: (reply: SessionLifecycleEventList) => void;
+    await open(() => new Promise(done => { resolve = done; }), {}, close);
+    const modal = document.querySelector("dialog")!;
+    if (action === "button") modal.querySelector<HTMLButtonElement>("button[aria-label=閉じる]")!.click();
+    else modal.dispatchEvent(new Event(action === "cancel" ? "cancel" : "click", { bubbles: true, cancelable: true }));
+    expect(close).toHaveBeenCalledTimes(1);
+    await unmount(mounted!); mounted = null;
+    resolve(parseSessionLifecycleReply(fixture.target)); await tick();
+    expect(document.querySelector(".session-lifecycle-dialog")).toBeNull();
   });
   it("resolves requester names from the persistent directory", async () => {
     await open(raw(fixture.target), { "host-a.director": { display_name: "Archived Director", last_seen: null, persona: { id: "director", name: "Director", sprite_set: "director" } } }); await settled();
