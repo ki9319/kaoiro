@@ -97,6 +97,17 @@ deferred until dogfooding.
 
 #### `request_session_reset` (phase-28 C2)
 
+Operators can inspect recorded resets through **Session history** in the agent
+detail pane. Settings also accepts an agent ID, including a deleted agent whose
+history is still retained. A director reset names its requester and includes the
+work title while the server can resolve it; the work ID remains visible and is
+the fallback after the work disappears. Legacy resets have no recorded origin.
+The view distinguishes partial responses, unreadable rows, empty history and
+fetch failures. Reset-started/completed notifications trigger a best-effort
+re-fetch: the server can send the notification before recording its row, so a
+manual refresh may be needed to see that latest row. Other lifecycle kinds use
+manual refresh. See [channel queries](../protocol/channels.md#operator-session-history).
+
 Tool for an agent to request rebuilding its own session
 ([ADR-0043](../../adr/0043-agent-initiated-session-reset.md)). Its effect is
 reserved until the owning turn ends. Claude uses canUseTool and its permission

@@ -120,14 +120,15 @@ director calls this tool under the same approval class as its own reset.
   **in-flight** display of the requesting director and `work_id` next to
   "starting a new session". `session_reset_completed` / `_failed` clear
   that display as before.
-- Deferred to a follow-up issue (opened at landing): an operator-only view
-  that reads the lifecycle timeline (`list_session_events` already returns
-  `details`; the dashboard has no consumer of that reply today — it does
-  render conversation and transcript session boundaries), including
-  deleted agents, `events_incomplete`, fetch failure, and an id fallback
-  when the work no longer exists; and resolving the work title for
-  display. D5's audit record is complete on the server; only its reading
-  surface is deferred.
+- [Issue #682](https://github.com/sakuraiyuta/kaoiro/issues/682) adds the
+  operator-only session history dialog, reachable from agent detail or an ID
+  lookup in Settings, including deleted agents with retained history. The
+  query resolves work titles at read time and keeps the work ID as fallback.
+  Empty history, partial replies, unreadable rows and fetch failure remain
+  distinct. Reset-started/completed notifications trigger best-effort re-fetch;
+  recording may follow notification, so the latest row can require manual
+  refresh. Other lifecycle kinds use manual refresh. D5's stored attribution
+  and the existing transcript session boundaries are unchanged.
 
 ## Alternatives considered
 

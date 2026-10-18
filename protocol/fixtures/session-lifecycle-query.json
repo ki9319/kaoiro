@@ -1,0 +1,194 @@
+{
+  "extra": {
+    "events": [
+      {
+        "at": "2026-01-01T00:00:00Z",
+        "details": {
+          "extra": 1,
+          "origin": "operator",
+          "reason": "stop"
+        },
+        "kind": "disconnected",
+        "trigger": null
+      }
+    ]
+  },
+  "legacy": {
+    "events": [
+      {
+        "at": "2026-01-01T00:00:00Z",
+        "details": {
+          "actor": {
+            "id": "example-user",
+            "kind": "user"
+          },
+          "previous": null,
+          "requested": {
+            "network_access": false,
+            "sandbox": "workspace-write"
+          },
+          "revision": 0
+        },
+        "kind": "permission_requested",
+        "trigger": null
+      }
+    ]
+  },
+  "empty": {
+    "events": []
+  },
+  "comma": {
+    "events": [
+      {
+        "at": "2026-01-01T00:00:00,123Z",
+        "details": null,
+        "kind": "compacting",
+        "trigger": null
+      }
+    ]
+  },
+  "target": {
+    "events": [
+      {
+        "at": "2026-01-01T00:00:05Z",
+        "details": {
+          "origin": "director",
+          "requested_by": {
+            "id": "host-a.director",
+            "kind": "agent"
+          },
+          "work_id": "wrk_active",
+          "work_title": "Example work"
+        },
+        "kind": "session_reset_started",
+        "trigger": null
+      },
+      {
+        "at": "2026-01-01T00:00:04Z",
+        "details": {
+          "origin": "director",
+          "requested_by": {
+            "id": "host-a.director",
+            "kind": "agent"
+          },
+          "work_id": "wrk_missing"
+        },
+        "kind": "session_reset_started",
+        "trigger": null
+      },
+      {
+        "at": "2026-01-01T00:00:03Z",
+        "details": {
+          "origin": "agent_self"
+        },
+        "kind": "session_reset_started",
+        "trigger": null
+      },
+      {
+        "at": "2026-01-01T00:00:02Z",
+        "details": {
+          "origin": "operator"
+        },
+        "kind": "session_reset_started",
+        "trigger": null
+      },
+      {
+        "at": "2026-01-01T00:00:01Z",
+        "details": null,
+        "kind": "session_reset_started",
+        "trigger": null
+      }
+    ]
+  },
+  "viewer": {
+    "reason": "forbidden"
+  },
+  "compact_null": {
+    "events": [
+      {
+        "at": "2026-01-01T00:00:00Z",
+        "details": null,
+        "kind": "compact_boundary",
+        "trigger": null
+      }
+    ]
+  },
+  "disconnect_pairs": {
+    "events": [
+      {
+        "kind": "disconnected",
+        "at": "2026-01-01T00:00:00Z",
+        "trigger": null,
+        "details": {
+          "origin": "operator",
+          "reason": "stop"
+        }
+      },
+      {
+        "kind": "disconnected",
+        "at": "2026-01-01T00:00:00Z",
+        "trigger": null,
+        "details": {
+          "origin": "runner",
+          "reason": "stop"
+        }
+      },
+      {
+        "kind": "disconnected",
+        "at": "2026-01-01T00:00:00Z",
+        "trigger": null,
+        "details": {
+          "origin": "agent_self",
+          "reason": "stop"
+        }
+      },
+      {
+        "kind": "disconnected",
+        "at": "2026-01-01T00:00:00Z",
+        "trigger": null,
+        "details": {
+          "origin": "agent_self",
+          "reason": "quota_exhausted"
+        }
+      },
+      {
+        "kind": "disconnected",
+        "at": "2026-01-01T00:00:00Z",
+        "trigger": null,
+        "details": {
+          "origin": "agent_self",
+          "reason": "crash"
+        }
+      },
+      {
+        "kind": "disconnected",
+        "at": "2026-01-01T00:00:00Z",
+        "trigger": null,
+        "details": {
+          "origin": "unplanned",
+          "reason": "socket_lost"
+        }
+      }
+    ]
+  },
+  "permission": {
+    "events": [
+      {
+        "at": "2026-01-01T00:00:00Z",
+        "details": {
+          "actor": {
+            "id": "example-user",
+            "kind": "user"
+          },
+          "requested": {
+            "network_access": false,
+            "sandbox": "workspace-write"
+          },
+          "revision": 0
+        },
+        "kind": "permission_requested",
+        "trigger": null
+      }
+    ]
+  }
+}

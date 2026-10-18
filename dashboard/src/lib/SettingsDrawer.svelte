@@ -35,6 +35,7 @@
   let {
     onClose,
     onLogout = undefined,
+    onOpenSessionLifecycle = undefined,
     connection = undefined,
     quagmireSettings = null,
     statusLineSettings = null,
@@ -48,6 +49,7 @@
     onBulkResetSummary = () => {},
   }: {
     onClose: () => void;
+    onOpenSessionLifecycle?: ((agentId: string) => void) | undefined;
     /** Logout relay (phase-31 31-7): on smartphone the header hides its
      *  logout button, so the drawer carries the affordance. Rendered at
      *  every size (DOM stays common — ADR-0052 F6); omitted = no row. */
@@ -79,6 +81,14 @@
   } = $props();
 
   let retentionError = $state<string | null>(null);
+  let lifecycleAgentId = $state("");
+
+  function openSessionLifecycle(event: SubmitEvent): void {
+    event.preventDefault();
+    const id = lifecycleAgentId.trim();
+    if (id === "" || !connection || !onOpenSessionLifecycle) return;
+    onOpenSessionLifecycle(id);
+  }
 
   const retentionSourceLabel = $derived(
     statusLineSettings === null
@@ -770,6 +780,22 @@
   </label>
 
   {#if connection}
+    {#if onOpenSessionLifecycle}
+      <section class="session-lifecycle">
+        <h3>セッション履歴</h3>
+        <form onsubmit={openSessionLifecycle}>
+          <label for="lifecycle-agent-id">エージェント ID</label>
+          <input id="lifecycle-agent-id" bind:value={lifecycleAgentId} list="lifecycle-agent-ids" placeholder="host-a.agent-1" />
+          <datalist id="lifecycle-agent-ids">
+            {#each [...new Set([...Object.keys(agents), ...Object.keys(directory)])].sort() as id}
+              <option value={id}></option>
+            {/each}
+          </datalist>
+          <button type="submit" disabled={lifecycleAgentId.trim() === ""}>履歴を表示</button>
+        </form>
+        <p>削除済みのエージェントも、ID を入力して保持されている履歴を確認できます。</p>
+      </section>
+    {/if}
     <section class="quagmire">
       <h3>停滞検知のしきい値</h3>
       <p class="hint">
@@ -1126,6 +1152,10 @@
 </Modal>
 
 <style>
+  .session-lifecycle form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; }
+  .session-lifecycle form label { grid-column: 1 / -1; }
+  .session-lifecycle input { min-width: 0; }
+  .session-lifecycle p { font-size: .85rem; opacity: .75; }
   /* issue #277: modal chrome (backdrop, native <dialog>, focus handling)
      now lives in Modal.svelte -- this positions/sizes ONLY the content
      box it renders into `.modal-content` (needs :global(), same

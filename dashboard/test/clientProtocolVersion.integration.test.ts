@@ -207,6 +207,7 @@ const PUSH_CASES: ReadonlyArray<{
   event: string | null;
   fire: (conn: KaoiroConnection) => unknown;
 }> = [
+  { method: "listSessionEvents", event: "list_session_events", fire: c => void c.listSessionEvents(AGENT_ID).catch(() => {}) },
   { method: "getDeliveryPolicy", event: "get_delivery_policy", fire: c => void c.getDeliveryPolicy(AGENT_ID).catch(() => {}) },
   { method: "setDeliveryPolicy", event: "set_delivery_policy", fire: c => void c.setDeliveryPolicy(AGENT_ID, "off", 1).catch(() => {}) },
   {

@@ -117,6 +117,27 @@ cross-checks the wrapper's copy in CI.
 `timeout` never appears in this payload because the wrapper transport owns that result when a
 request receives no reply.
 
+### Operator session history
+
+The dashboard's **Session history** button in agent detail and its agent-ID
+lookup in Settings use `list_session_events`. Both entry points are restricted
+to operators/admins; a viewer's connection does not enable them. To inspect a
+deleted agent, the operator must know its ID. The lookup does not maintain an
+index of deleted agents or extend retention.
+
+Rows preserve the server's newest-first order. Director resets show the
+requester's name/ID and `work_title (work_id)`, falling back to `work_id` when
+no title is returned. Legacy rows do not invent an origin. An unknown or
+unreadable row remains visible. A partial reply, retrieval failure, and a
+successful empty reply have distinct presentations.
+
+Automatic re-fetch on `session_reset_started` / `session_reset_completed` is
+best-effort. These notifications may precede lifecycle recording, so the
+triggering row may require the **Refresh** button to appear. Other lifecycle
+records are read on opening the dialog or manual refresh. The separate
+wrapper-to-server `session_lifecycle` event is not a dashboard broadcast or an
+`Envelope.type`. No polling is added.
+
 ### ADR-0063 capability and event contract
 
 The wrapper join request may declare

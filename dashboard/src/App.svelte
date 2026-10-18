@@ -9,6 +9,7 @@
   import PersonaFace from "./lib/PersonaFace.svelte";
   import SettingsDrawer from "./lib/SettingsDrawer.svelte";
   import StatusLineHistoryDialog from "./lib/StatusLineHistoryDialog.svelte";
+  import SessionLifecycleDialog from "./lib/SessionLifecycleDialog.svelte";
   import type { StatusLineSettings } from "./lib/statusLine";
   import { StatusLines } from "./lib/statusLines.svelte";
   import { adjacentAgentId } from "./lib/agentNavigation";
@@ -388,6 +389,8 @@
   const statusLines = new StatusLines();
   let statusLineSettings = $state<StatusLineSettings | null>(null);
   let statusHistoryAgentId = $state<string | null>(null);
+  let sessionLifecycleAgentId = $state<string | null>(null);
+  let sessionLifecycleRefreshSeq = $state(0);
   // issue #273: review-quagmire notices. Deliberately NOT the 6-second
   // spawn-notice toast — the whole point is that nobody was watching, so a
   // notice that expires on its own reproduces the problem it reports. One
@@ -856,6 +859,8 @@
         onDeliveryPolicyControl: (available) => { policyStore.available = available; if (!available) policyStore.disconnect(); },
         onDeliveryPolicyChanged: (id, view) => policyStore.event(id, view),
         onJoined: () => {
+          sessionLifecycleAgentId = null;
+          sessionLifecycleRefreshSeq = 0;
           policyStore.reset();
           invalidatePersonas();
           personaMembership = null;
@@ -1382,6 +1387,7 @@
         // unsupported_session_reset / session_reset_pending /
         // runner_unavailable / spawn_failed / rollback_failed / timeout).
         onSessionResetStarted: (payload) => {
+          if (payload.agent_id === sessionLifecycleAgentId) sessionLifecycleRefreshSeq += 1;
           sessionResets = {
             ...sessionResets,
             [payload.agent_id]: {
@@ -1391,6 +1397,7 @@
           };
         },
         onSessionResetCompleted: (payload) => {
+          if (payload.agent_id === sessionLifecycleAgentId) sessionLifecycleRefreshSeq += 1;
           const { [payload.agent_id]: _drop, ...rest } = sessionResets;
           void _drop;
           sessionResets = rest;
@@ -1559,6 +1566,8 @@
     statusLines.reset();
     statusLineSettings = null;
     statusHistoryAgentId = null;
+    sessionLifecycleAgentId = null;
+    sessionLifecycleRefreshSeq = 0;
   }
 
   // Bulk restore of every offline entry (ADR-0030 D5). Confirms once, then
@@ -2032,6 +2041,9 @@
 {#if showSettings}
   <SettingsDrawer
     onClose={() => (showSettings = false)}
+    onOpenSessionLifecycle={isOperator && status === "connected" && connection
+      ? (id) => { showSettings = false; sessionLifecycleAgentId = id; }
+      : undefined}
     onLogout={logout}
     connection={
       isOperator && status === "connected"
@@ -2049,6 +2061,20 @@
     {quagmireSettings}
     {statusLineSettings}
   />
+{/if}
+
+{#if sessionLifecycleAgentId !== null && isOperator && connection !== null}
+  {#key sessionLifecycleAgentId}
+    <SessionLifecycleDialog
+      agentId={sessionLifecycleAgentId}
+      label={agentDisplayName(sessionLifecycleAgentId)}
+      fetchEvents={connection.listSessionEvents}
+      refreshKey={sessionLifecycleRefreshSeq}
+      {agents}
+      {directory}
+      onClose={() => (sessionLifecycleAgentId = null)}
+    />
+  {/key}
 {/if}
 
 {#if statusHistoryAgentId !== null && connection !== null}
@@ -2131,6 +2157,7 @@
             }
           }}
           onRename={isOperator && connection ? connection.renameAgent : undefined}
+          onOpenSessionLifecycle={isOperator && connection ? (id) => (sessionLifecycleAgentId = id) : undefined}
           onOpenPersonaDetail={isOperator ? (id) => (personaDetailId = id) : undefined}
           onSetPermission={isOperator && connection
             ? connection.setPermission

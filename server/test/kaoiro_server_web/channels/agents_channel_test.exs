@@ -8230,6 +8230,219 @@ defmodule KaoiroServerWeb.AgentsChannelTest do
   end
 
   describe "list_session_events 経路 (issue #190, ADR-0055, require_operator ゲート)" do
+    @lifecycle_query_fixture Path.expand(
+                               "../../../../protocol/fixtures/session-lifecycle-query.json",
+                               __DIR__
+                             )
+
+    test "matches the shared dashboard lifecycle fixture through real recording, loader, channel and serializer" do
+      fixture = Jason.decode!(File.read!(@lifecycle_query_fixture))
+      suffix = System.unique_integer([:positive])
+      event_name = :"lifecycle_fixture_#{suffix}"
+      work_name = :"lifecycle_fixture_work_#{suffix}"
+      legacy_name = :"lifecycle_fixture_legacy_#{suffix}"
+
+      paths =
+        Enum.map(
+          [event_name, work_name, legacy_name],
+          &Path.join([System.tmp_dir!(), "kaoiro_test_dets", "#{&1}.dets"])
+        )
+
+      [event_path, work_path, legacy_path] = paths
+      events = start_supervised!({SessionLifecycleEvents, name: event_name, path: event_path})
+      works = start_supervised!({WorkStore, name: work_name, path: work_path})
+
+      :sys.replace_state(works, fn state ->
+        %{state | works: %{"wrk_active" => %{state: "active", title: "Example work"}}}
+      end)
+
+      :ok =
+        SessionLifecycleEvents.append(
+          "host-a.target",
+          "session_reset_started",
+          nil,
+          "2026-01-01T00:00:01Z",
+          events
+        )
+
+      :ok =
+        SessionLifecycleEvents.record_session_reset_started(
+          "host-a.target",
+          "2026-01-01T00:00:02Z",
+          %{"origin" => "operator", "reason" => "ignored"},
+          events
+        )
+
+      :ok =
+        SessionLifecycleEvents.record_session_reset_started(
+          "host-a.target",
+          "2026-01-01T00:00:03Z",
+          %{"origin" => "agent_self"},
+          events
+        )
+
+      for {work_id, second} <- [{"wrk_missing", "04"}, {"wrk_active", "05"}] do
+        :ok =
+          SessionLifecycleEvents.record_session_reset_started(
+            "host-a.target",
+            "2026-01-01T00:00:#{second}Z",
+            %{
+              "origin" => "director",
+              "requested_by" => %{"kind" => "agent", "id" => "host-a.director"},
+              "work_id" => work_id
+            },
+            events
+          )
+      end
+
+      :ok =
+        SessionLifecycleEvents.record_disconnect_event(
+          "host-a.extra",
+          "2026-01-01T00:00:00Z",
+          %{"origin" => "operator", "reason" => "stop", "extra" => 1},
+          events
+        )
+
+      :ok =
+        SessionLifecycleEvents.append(
+          "host-a.comma",
+          "compacting",
+          nil,
+          "2026-01-01T00:00:00,123Z",
+          events
+        )
+
+      :ok =
+        SessionLifecycleEvents.append(
+          "host-a.compact-null",
+          "compact_boundary",
+          nil,
+          "2026-01-01T00:00:00Z",
+          events
+        )
+
+      for row <- Enum.reverse(fixture["disconnect_pairs"]["events"]) do
+        :ok =
+          SessionLifecycleEvents.record_disconnect_event(
+            "host-a.pairs",
+            row["at"],
+            row["details"],
+            events
+          )
+      end
+
+      :ok =
+        SessionLifecycleEvents.record_permission_event(
+          "host-a.permission",
+          "permission_requested",
+          "2026-01-01T00:00:00Z",
+          %{
+            "revision" => 0,
+            "requested" => %{"sandbox" => "workspace-write", "network_access" => false},
+            "actor" => %{"kind" => "user", "id" => "example-user"},
+            "previous" => nil
+          },
+          events
+        )
+
+      {:ok, recorded} = SessionLifecycleEvents.fetch_for_agent("host-a.target", events)
+      assert length(recorded) == 5
+      refute Map.has_key?(hd(recorded).details, "work_title")
+
+      {:ok, ^legacy_name} = :dets.open_file(legacy_name, file: String.to_charlist(legacy_path))
+
+      :ok =
+        :dets.insert(
+          legacy_name,
+          {"host-a.legacy",
+           [
+             %{
+               kind: "permission_requested",
+               trigger: nil,
+               at: "2026-01-01T00:00:00Z",
+               details: %{
+                 "revision" => 0,
+                 "requested" => %{"sandbox" => "workspace-write", "network_access" => false},
+                 "actor" => %{"kind" => "user", "id" => "example-user"},
+                 "previous" => nil
+               }
+             }
+           ]}
+        )
+
+      :ok = :dets.close(legacy_name)
+
+      legacy =
+        start_supervised!(
+          Supervisor.child_spec({SessionLifecycleEvents, name: legacy_name, path: legacy_path},
+            id: legacy_name
+          )
+        )
+
+      previous =
+        for key <- [:session_lifecycle_events_server, :work_store_server],
+            into: %{},
+            do: {key, Application.fetch_env(:kaoiro_server, key)}
+
+      on_exit(fn ->
+        for {key, value} <- previous do
+          case value do
+            {:ok, original} -> Application.put_env(:kaoiro_server, key, original)
+            :error -> Application.delete_env(:kaoiro_server, key)
+          end
+        end
+
+        Enum.each(paths, &File.rm/1)
+      end)
+
+      Application.put_env(:kaoiro_server, :session_lifecycle_events_server, events)
+      Application.put_env(:kaoiro_server, :work_store_server, works)
+      socket = join_as(:operator)
+
+      for {name, id} <- [
+            {"target", "host-a.target"},
+            {"extra", "host-a.extra"},
+            {"empty", "host-a.empty"},
+            {"comma", "host-a.comma"},
+            {"compact_null", "host-a.compact-null"},
+            {"disconnect_pairs", "host-a.pairs"},
+            {"permission", "host-a.permission"}
+          ] do
+        ref = push(socket, "list_session_events", %{"version" => "0", "agent_id" => id})
+        assert_reply ref, :ok, reply
+        assert lifecycle_fixture_wire(:ok, reply) == fixture[name]
+      end
+
+      Application.put_env(:kaoiro_server, :session_lifecycle_events_server, legacy)
+
+      ref =
+        push(socket, "list_session_events", %{"version" => "0", "agent_id" => "host-a.legacy"})
+
+      assert_reply ref, :ok, loaded
+      assert lifecycle_fixture_wire(:ok, loaded) == fixture["legacy"]
+      viewer = join_as(:viewer)
+
+      ref =
+        push(viewer, "list_session_events", %{"version" => "0", "agent_id" => "host-a.target"})
+
+      assert_reply ref, :error, denied
+      assert lifecycle_fixture_wire(:error, denied) == fixture["viewer"]
+    end
+
+    defp lifecycle_fixture_wire(status, payload) do
+      reply = %Phoenix.Socket.Reply{
+        topic: "agents:lobby",
+        status: status,
+        payload: payload,
+        ref: nil,
+        join_ref: nil
+      }
+
+      {:socket_push, :text, encoded} = Phoenix.Socket.V2.JSONSerializer.encode!(reply)
+      [_, _, _, "phx_reply", body] = Jason.decode!(IO.iodata_to_binary(encoded))
+      body["response"]
+    end
+
     # `SessionLifecycleEvents.append/4` casts, so it returns before the
     # store necessarily processed it. `:sys.get_state/1` forces a
     # synchronous round trip through the SAME mailbox, so any append

@@ -10,6 +10,17 @@ import { agentDisplayName } from "./personaName";
 
 import { Socket } from "phoenix";
 import type { Channel } from "phoenix";
+import type {
+  SessionLifecycleEventKind,
+  SessionLifecycleEventList,
+  SessionLifecycleEventView,
+  SessionResetAttributionView,
+} from "../../../protocol/src/index";
+export type {
+  SessionLifecycleEventList,
+  SessionLifecycleEventView,
+  SessionResetAttributionView,
+} from "../../../protocol/src/index";
 
 import { DeliveryPolicyError, parseDeliveryPolicy, parseLaunchDeliveryPolicy, policyObject, policyRevision,
   type DeliveryPolicy, type DeliveryPolicyView, type DeliveryPolicyAccepted, type LaunchDeliveryPolicy } from "./deliveryPolicy";
@@ -59,6 +70,89 @@ export interface Envelope {
 export interface DisconnectInfo {
   origin: "operator" | "runner" | "agent_self" | "unplanned";
   reason: "stop" | "quota_exhausted" | "crash" | "socket_lost";
+}
+
+export const SESSION_LIFECYCLE_KINDS = [
+  "compacting", "compact_boundary", "compact_failed", "resume_reserved",
+  "resume_fired", "threshold_notice", "conversation_reset", "permission_requested",
+  "permission_applied", "permission_failed", "disconnected", "reconnecting",
+  "reconnected", "session_reset_started", "session_reset_completed",
+] as const satisfies readonly SessionLifecycleEventKind[];
+
+function lifecycleObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function lifecycleText(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+export function parseDisconnectDetails(value: unknown): DisconnectInfo | null {
+  if (!lifecycleObject(value)) return null;
+  const { origin, reason } = value;
+  const valid =
+    (origin === "operator" && reason === "stop") ||
+    (origin === "runner" && reason === "stop") ||
+    (origin === "agent_self" &&
+      (reason === "stop" || reason === "quota_exhausted" || reason === "crash")) ||
+    (origin === "unplanned" && reason === "socket_lost");
+  return valid ? { origin, reason } as DisconnectInfo : null;
+}
+
+function lifecycleReset(value: unknown): SessionResetAttributionView | null | "malformed" {
+  if (value === null || value === undefined) return null;
+  if (!lifecycleObject(value)) return "malformed";
+  if (value.origin === "operator" || value.origin === "agent_self") {
+    return { origin: value.origin };
+  }
+  if (value.origin !== "director") return "malformed";
+  const requester = value.requested_by;
+  if (!lifecycleObject(requester) || requester.kind !== "agent" ||
+      !lifecycleText(requester.id) || !lifecycleText(value.work_id)) return "malformed";
+  if (value.work_title !== undefined && value.work_title !== null &&
+      !lifecycleText(value.work_title)) return "malformed";
+  return {
+    origin: "director",
+    requested_by: { kind: "agent", id: requester.id },
+    work_id: value.work_id,
+    ...(value.work_title === undefined || value.work_title === null
+      ? {} : { work_title: value.work_title }),
+  };
+}
+
+function lifecycleRow(value: unknown): SessionLifecycleEventView {
+  if (!lifecycleObject(value)) return { status: "malformed", rawKind: null, rawAt: null };
+  const rawKind = lifecycleText(value.kind) ? value.kind : null;
+  const rawAt = lifecycleText(value.at) ? value.at : null;
+  const malformed = { status: "malformed", rawKind, rawAt } as const;
+  if (rawKind === null || rawAt === null ||
+      !SESSION_LIFECYCLE_KINDS.includes(rawKind as SessionLifecycleEventKind)) return malformed;
+  if (value.trigger !== undefined && value.trigger !== null && !lifecycleText(value.trigger)) {
+    return malformed;
+  }
+  const resetAttribution = rawKind === "session_reset_started" ? lifecycleReset(value.details) : null;
+  const disconnect = rawKind === "disconnected" && value.details !== undefined && value.details !== null
+    ? parseDisconnectDetails(value.details) : null;
+  if (resetAttribution === "malformed") return malformed;
+  if (rawKind === "disconnected" && value.details !== undefined && value.details !== null &&
+      disconnect === null) return malformed;
+  return {
+    status: "ok",
+    kind: rawKind as SessionLifecycleEventKind,
+    at: rawAt,
+    trigger: value.trigger as string | null | undefined ?? null,
+    resetAttribution,
+    disconnect,
+  };
+}
+
+export function parseSessionLifecycleReply(raw: unknown): SessionLifecycleEventList {
+  if (!lifecycleObject(raw)) throw new Error("invalid_reply");
+  if (!Array.isArray(raw.events)) throw new Error("invalid_reply");
+  if (raw.events_incomplete !== undefined && typeof raw.events_incomplete !== "boolean") {
+    throw new Error("invalid_reply");
+  }
+  return { events: raw.events.map(lifecycleRow), incomplete: raw.events_incomplete === true };
 }
 
 export function disconnectFrom(envelope: Envelope): DisconnectInfo | null {
@@ -3128,6 +3222,7 @@ export interface KaoiroConnection {
    *  parsed (a malformed entry is dropped, not the whole list). Rejects
    *  on forbidden / transport disconnect / timeout. */
   listConversations: () => Promise<ConversationList>;
+  listSessionEvents: (agentId: string) => Promise<SessionLifecycleEventList>;
   /** Manual conversation close (issue #276): rides the same tombstone +
    *  conversation_closed notification every hard-limit/GC closure
    *  already uses — no new termination path. Resolves on server accept.
@@ -5573,6 +5668,8 @@ export function connectKaoiro(
           )
           .receive("timeout", () => reject(new Error("timeout")));
       }),
+    listSessionEvents: async (agentId) =>
+      parseSessionLifecycleReply(await pushAsyncReply(channel, "list_session_events", { agent_id: agentId })),
     listConversations: () =>
       new Promise((resolve, reject) => {
         pushVersioned(channel, "list_conversations", {})

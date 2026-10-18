@@ -94,6 +94,7 @@
     wrapperBuildInfo = null,
     statusLine = { kind: "none" },
     onOpenStatusLineHistory,
+    onOpenSessionLifecycle,
     onClose,
     onSelectAgent,
     onRename,
@@ -172,6 +173,7 @@
      *  That structurally removes the stale-closure class of bug a test
      *  could only catch after the fact. */
     onRename?: ((agentId: string, name: string) => Promise<void>) | undefined;
+    onOpenSessionLifecycle?: ((agentId: string) => void) | undefined;
     /** Opens the persona pack detail modal (issue #232) for this agent's
      *  persona; pass undefined to disable the portrait's click affordance
      *  (e.g. no resolved persona id). */
@@ -3104,6 +3106,9 @@
            above stays pinned. (Inner content is intentionally left at its
            original indentation to keep this a 2-line structural wrap.) -->
       <div class="status-scroll">
+      {#if onOpenSessionLifecycle}
+        <button type="button" class="session-lifecycle-open" onclick={() => onOpenSessionLifecycle?.(envelope.agent_id)}>セッション履歴</button>
+      {/if}
       {#if policyStore}
         <DeliveryPolicyControl agentId={envelope.agent_id} view={policyStore.views[envelope.agent_id]}
           connected={policyConnected && envelope.state !== "disconnected"}

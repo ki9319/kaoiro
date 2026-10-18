@@ -663,6 +663,32 @@ export type SessionLifecycleEvent =
 
 export type SessionLifecycleEventKind = SessionLifecycleEvent["kind"];
 
+export type SessionResetAttributionView =
+  | { origin: "operator" | "agent_self" }
+  | {
+      origin: "director";
+      requested_by: { kind: "agent"; id: string };
+      work_id: string;
+      work_title?: string;
+    };
+
+/** Query projection only: persisted/broadcast event types stay closed. */
+export type SessionLifecycleEventView =
+  | {
+      status: "ok";
+      kind: SessionLifecycleEventKind;
+      at: string;
+      trigger: string | null;
+      resetAttribution: SessionResetAttributionView | null;
+      disconnect: DisconnectExt | null;
+    }
+  | { status: "malformed"; rawKind: string | null; rawAt: string | null };
+
+export interface SessionLifecycleEventList {
+  events: SessionLifecycleEventView[];
+  incomplete: boolean;
+}
+
 /** One launch-selectable model of an engine (ADR-0032 F4bc). Same shape as
  *  the `ext.models[]` entries the Claude adapter already publishes (#54),
  *  reused for the LaunchDialog's engine -> model -> effort cascade. */
