@@ -2,7 +2,7 @@
 title: Release notes
 description: One page per production release, listing what changed since the previous production release.
 status: accepted
-last_updated: 2026-10-15
+last_updated: 2026-10-18
 ---
 
 # Release notes
@@ -46,6 +46,7 @@ production run records outside the repository.
 
 | Release | Date | Previous | Highlights |
 |---|---|---|---|
+| [v2026.10.18.1](v2026.10.18.1.md) | 2026-10-18 | v2026.10.17.1 | Directors reset the session of their assigned peer, operator session lifecycle history in the agent detail view, follow-up sends after an inline-recovery reply |
 | [v2026.10.17.1](v2026.10.17.1.md) | 2026-10-17 | v2026.10.15.22 | Claude Code peers own native continuations by default, replies from subagent hand-backs and Monitor or background-task notifications |
 | [v2026.10.15.22](v2026.10.15.22.md) | 2026-10-16 | v2026.10.15.17 | Grok peers resumed from a full-access history run again, `whoami` reports the agent's display name |
 | [v2026.10.15.17](v2026.10.15.17.md) | 2026-10-16 | v2026.10.15.9 | HTTP/2 off pending a Bandit fix, display names and persona faces in the timeline, personas shirogane and moegi, `list_agents` names that follow renames |
