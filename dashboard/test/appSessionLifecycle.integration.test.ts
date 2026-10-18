@@ -25,7 +25,7 @@ class ControlledWebSocket {
     if (event === "list_session_events") return;
     const responses: Record<string, unknown> = {
       phx_join: { delivery_policy_control: "v1" }, list_conversations: { conversations: [] }, list_users: { users: [] },
-      get_delivery_policy: { policy: "unknown", confirmed: false, pending: false, wrapper_support: false },
+      get_delivery_policy: { agent_id: payload.agent_id, delivery_policy: { policy: "unknown", confirmed: false, pending: false, wrapper_support: false } },
     };
     queueMicrotask(() => this.reply(frame, responses[event] ?? {}));
   }
