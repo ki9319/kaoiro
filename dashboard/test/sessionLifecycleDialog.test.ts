@@ -33,6 +33,8 @@ const raw = (reply: unknown) => async () => parseSessionLifecycleReply(reply);
 describe("session lifecycle dialog", () => {
   it("renders actual reset origins, requester and work fallback", async () => {
     await open(raw(fixture.target)); await settled();
+    expect(document.querySelector("h2")?.textContent).toBe("Target のセッション履歴");
+    expect(document.querySelector(".target-id")?.textContent).toBe("host-a.target");
     expect(rows()).toHaveLength(5);
     expect(text()).toContain("要求元: operator");
     expect(text()).toContain("要求元: agent_self");

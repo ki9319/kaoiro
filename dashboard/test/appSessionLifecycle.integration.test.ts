@@ -109,12 +109,20 @@ describe("real App session lifecycle wiring", () => {
     const ws = await boot(); const request = await openHistory(ws);
     expect(request.payload).toEqual({ version: "0", agent_id: TARGET });
     ws.reply(request, fixture.target); await flush();
+    expect(history()!.querySelector("h2")?.textContent).toBe("Target のセッション履歴");
+    expect(history()!.querySelector(".target-id")?.textContent).toBe(TARGET);
     expect(history()!.querySelectorAll(".lifecycle-row")).toHaveLength(5);
     for (const origin of ["operator", "agent_self", "director"]) expect(historyText()).toContain(`要求元: ${origin}`);
     expect(historyText()).toContain("Director (host-a.director)");
     expect(historyText()).toContain("Example work (wrk_active)");
     expect(historyText()).toContain("work: wrk_missing");
     expect(history()!.querySelector(".empty")).toBeNull();
+  });
+  it("passes persistent directory names into the history dialog", async () => {
+    const ws = await boot();
+    ws.push("directory", { entries: { "host-a.director": { display_name: "Archived Director", last_seen: null, persona: { id: "director" } } } }); await flush();
+    const request = await openHistory(ws); ws.reply(request, fixture.target); await flush();
+    expect(history()!.querySelector(".requester")?.textContent).toBe("要求者: Archived Director (host-a.director)");
   });
   it("looks up a deleted ID through settings without keeping two dialogs open", async () => {
     const ws = await boot(); await settings();
