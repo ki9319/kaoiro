@@ -83,7 +83,7 @@ describe("session lifecycle display parser", () => {
     expect(parse(normal("disconnected", { details }))).toMatchObject({ status: "ok", disconnect: null });
   });
   it.each(["operator", "agent_self"])("keeps only origin for %s", origin => {
-    expect(parse(normal("session_reset_started", { details: { origin, extra: "ignored" } }))).toMatchObject({ status: "ok", resetAttribution: { origin } });
+    expect(parse(normal("session_reset_started", { details: { origin, extra: "ignored" } }))).toEqual({ status: "ok", kind: "session_reset_started", at, trigger: null, disconnect: null, resetAttribution: { origin } });
   });
   it.each([undefined, null, "Title"])("extracts optional director title %j", work_title => {
     const result = parse(normal("session_reset_started", { details: { ...director, work_title, extra: 1 } }));
@@ -102,7 +102,7 @@ describe("session lifecycle display parser", () => {
     expect(parse(normal("session_reset_started", { details }))).toMatchObject({ status: "malformed" });
   });
   it.each(fixture.disconnect_pairs.events)("extracts server disconnection pair $details.origin/$details.reason", row => {
-    expect(parse({ ...row, details: { ...row.details, extra: 1 } })).toMatchObject({ status: "ok", disconnect: row.details });
+    expect(parse({ ...row, details: { ...row.details, extra: 1 } })).toEqual({ status: "ok", kind: "disconnected", at: row.at, trigger: null, resetAttribution: null, disconnect: row.details });
     expect(parse({ ...row, details: { ...row.details, extra: 1 } })).not.toHaveProperty("details");
   });
   it.each(["details", [], { origin: "runner", reason: "crash" }, { origin: ["operator"], reason: "stop" }, { origin: "operator", reason: ["stop"] }, { origin: "future", reason: "stop" }])("retains invalid disconnection %j", details => {
