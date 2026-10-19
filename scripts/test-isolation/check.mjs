@@ -5,6 +5,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 import { join, posix, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -19,19 +20,8 @@ export const EXEMPT = [
   { pattern: /^protocol\/src\/[^/]+\.type-test\.ts$/, reason: "compile-time type tests run by tsc" },
   { pattern: /^dashboard\/e2e\//, reason: "Playwright specs with their own runner; not in CI" },
 ];
-// Files allowed to call permitHostAccess, with the kinds each may relax.
-export const PERMIT_ALLOW = {
-  "scripts/test/production-release-native.test.mjs": ["systemd"],
-  "scripts/test/production-release-unit.test.mjs": ["systemd"],
-  "scripts/test/test-isolation.test.mjs": ["systemd"],
-  "scripts/test/runner-pairing.test.mjs": ["docker"],
-  "runner/test/grok_sessions.native.test.ts": ["network"],
-  "wrapper/antigravity/test/agy131_native.test.ts": ["network"],
-  "wrapper/antigravity/test/live_agy_stream_input.test.ts": ["network"],
-  "wrapper/claude-code/test/haiku55_native.test.ts": ["network"],
-  ...Object.fromEntries(["history", "inspect", "lifecycle", "mcp", "permission-answer", "permission-switch",
-    "rate-limits", "resume", "sandbox"].map(name => [`wrapper/grok/test/native-${name}.test.ts`, ["network"]])),
-};
+// Files allowed to call permitHostAccess; the guard enforces their kinds.
+export const PERMIT_ALLOW = createRequire(import.meta.url)("../test/fixtures/test-isolation-permits.cjs");
 
 const SOURCE = /\.(?:js|cjs|mjs|ts|cts|mts)$/;
 const PERMIT_SOURCE = /\.(?:js|cjs|mjs|jsx|ts|cts|mts|tsx|svelte)$/;
@@ -97,14 +87,18 @@ if (process.env.NODE_TEST_CONTEXT && !process.env.KAOIRO_ISOLATION_RECORDED) {
 // removed and host pointers lead nowhere. Files are passed as arguments;
 // `words` are glob words from a launch line, already checked for shell syntax.
 const SCRUBBED = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "SSH_AUTH_SOCK", "DOCKER_CONTEXT"];
-function discover(scratch, cwd, { files = [], words = "" }, label) {
-  const record = join(scratch, `record-${Math.random().toString(16).slice(2)}.jsonl`);
+function cleanEnvironment(scratch) {
   const nowhere = join(scratch, "nowhere");
-  const command = `exec "$0" --test --test-name-pattern='${NO_MATCH}' ${words} "$@"`;
-  const result = spawnSync("env", ["-u", "NODE_OPTIONS", "-u", "KAOIRO_TEST_ISOLATION_CHILD", "-u", "NODE_TEST_CONTEXT",
+  return ["-u", "NODE_OPTIONS", "-u", "KAOIRO_TEST_ISOLATION_CHILD", "-u", "NODE_TEST_CONTEXT",
     "-u", "KAOIRO_ISOLATION_RECORDED", ...SCRUBBED.flatMap(key => ["-u", key]),
     `DBUS_SESSION_BUS_ADDRESS=unix:path=${nowhere}/bus`, `XDG_RUNTIME_DIR=${nowhere}`,
-    `DOCKER_HOST=unix://${nowhere}/docker.sock`, `DOCKER_CONFIG=${nowhere}`, `GH_CONFIG_DIR=${nowhere}`,
+    `DOCKER_HOST=unix://${nowhere}/docker.sock`, `DOCKER_CONFIG=${nowhere}`, `GH_CONFIG_DIR=${nowhere}`];
+}
+
+function discover(scratch, cwd, { files = [], words = "" }, label) {
+  const record = join(scratch, `record-${Math.random().toString(16).slice(2)}.jsonl`);
+  const command = `exec "$0" --test --test-name-pattern='${NO_MATCH}' ${words} "$@"`;
+  const result = spawnSync("env", [...cleanEnvironment(scratch),
     `NODE_OPTIONS=--import=${pathToFileURL(recorder(scratch)).href}`, `KAOIRO_ISOLATION_RECORD=${record}`,
     "sh", "-c", command, process.execPath, ...files], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   const rows = existsSync(record) ? readFileSync(record, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse) : [];
@@ -159,13 +153,19 @@ function launchSegment(root, cwd, segment, label, entries, scratch, problems) {
     if (reported.length === 0) problems.push(`${label}: discovers no test file`);
     for (const file of reported) if (!entries.includes(file)) problems.push(`${label}: starts ${file}, outside the canonical entries`);
   }
-  const vitest = tokens.findIndex(token => /(?:^|\/)vitest$/.test(token));
-  if (vitest >= 0) {
-    if (!VITEST_PACKAGES.includes(cwd)) problems.push(`${label}: vitest outside a declared package (${cwd || "."})`);
-    const config = tokens.indexOf("--config") >= 0 ? tokens[tokens.indexOf("--config") + 1]
-      : tokens.find(token => token.startsWith("--config="))?.slice("--config=".length);
-    if (config !== undefined && !/^(?:\.\/)?vitest\.config\.[cm]?[jt]s$/.test(config)) {
-      problems.push(`${label}: vitest --config ${config} is not the package's inventoried config`);
+  // Prefixes (assignments, launchers) may come before the runner; what
+  // follows it is matched as a whole.
+  const runner = tokens.findIndex(token => RUNNER.test(posix.basename(token)));
+  if (runner >= 0) {
+    const rest = tokens.slice(runner);
+    // For node only the program position matters: its arguments do not choose what runs.
+    const program = posix.basename(rest[0]) === "node" ? rest.slice(0, rest.findIndex((token, index) => index > 0 &&
+      !token.startsWith("-")) + 1 || undefined) : rest;
+    if (program.some(token => token.includes("$"))) {
+      problems.push(`${label}: ${rest[0]} line uses substitution the checker does not evaluate`);
+    } else if (rest.includes("test") &&
+        !(posix.basename(rest[0]) === "pnpm" && TEST_INVOCATION.test(["pnpm", ...rest.slice(1)].join(" ")))) {
+      problems.push(`${label}: a test script is invoked in a form the checker does not accept (${segment})`);
     }
   }
   if (tokens.some((token, index) => /(?:^|\/)playwright$/.test(token) && tokens[index + 1] === "test")) {
@@ -212,11 +212,27 @@ export function workflowRuns(text) {
   return runs.map(({ job, step, body }) => ({ job: job.name, cwd: step?.cwd ?? job.cwd, body }));
 }
 
+// The closed set of ways to reach Vitest: a declared package's test script
+// with one of these bodies, invoked with no further words. The checker then
+// observes exactly that launch (observeVitest).
+export const VITEST_TEST_SCRIPTS = ["vitest run", "pnpm build && vitest run",
+  "python3 ../../scripts/run-grok-test-namespace.py -- vitest run"];
+const RUNNER = /^(?:pnpm|npm|npx|yarn|node)$/;
+const TEST_INVOCATION = /^pnpm (?:-C \S+ )?(?:run )?test$|^pnpm -r(?: --filter \S+)+ run test$/;
+
+function vitestLaunch(label, body, accepted, problems) {
+  if (!/vitest/i.test(body)) return;
+  if (!accepted || !VITEST_TEST_SCRIPTS.includes(body.trim().split(/\s+/).join(" "))) {
+    problems.push(`${label}: reaches Vitest outside the accepted forms (${VITEST_TEST_SCRIPTS.join(" | ")} as a declared package's test script)`);
+  }
+}
+
 function launchLines(root, all, entries, scratch, problems) {
   for (const path of all.filter(path => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(path))) {
     const runs = workflowRuns(readFileSync(join(root, path), "utf8"));
     if (runs.length === 0) problems.push(`${path}: no run steps were read; the workflow layout is not understood`);
     for (const run of runs) {
+      vitestLaunch(`${path} job ${run.job}`, run.body, false, problems);
       const cwd = (run.cwd ?? "").replace(/^\.(?:\/|$)/, "").replace(/\/$/, "");
       for (const segment of segments(run.body.split("\n").filter(line => !/^\s*#/.test(line)).join("\n"))) {
         launchSegment(root, cwd, segment, `${path} job ${run.job}`, entries, scratch, problems);
@@ -227,12 +243,37 @@ function launchLines(root, all, entries, scratch, problems) {
     const scripts = JSON.parse(readFileSync(join(root, path), "utf8")).scripts ?? {};
     const cwd = posix.dirname(path) === "." ? "" : posix.dirname(path);
     for (const [name, script] of Object.entries(scripts)) {
+      vitestLaunch(`${path} script ${name}`, script, name === "test" && VITEST_PACKAGES.includes(cwd), problems);
       for (const segment of segments(script)) launchSegment(root, cwd, segment, `${path} script ${name}`, entries, scratch, problems);
     }
   }
 }
 
-function vitestWiring(root, all, problems) {
+// Runs the package's own Vitest as its accepted launch does (no arguments,
+// in the package directory), but only collecting: setupFiles and each file's
+// module scope run, so the canary's module-scope assertion fails the listing
+// when the project does not load the guard. setupFiles is per project, so one
+// project whose canary passes covers every file it selects.
+export function observeVitest(root, pkg, scratch) {
+  const directory = join(root, pkg);
+  const vitest = join(directory, "node_modules", ".bin", "vitest");
+  if (!existsSync(vitest)) return [`${pkg}: cannot observe the suite: vitest is not installed (install dependencies first)`];
+  const result = spawnSync("env", [...cleanEnvironment(scratch), vitest, "list", "--json"],
+    { cwd: directory, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  let rows;
+  try { rows = JSON.parse(result.stdout); } catch { rows = undefined; }
+  if (result.status !== 0 || !Array.isArray(rows)) {
+    return [`${pkg}: vitest list exited ${result.status}\n${`${result.stdout}${result.stderr}`.slice(-4_000)}`];
+  }
+  const problems = [];
+  const projects = new Set(rows.map(row => row.projectName ?? ""));
+  if (projects.size !== 1) problems.push(`${pkg}: vitest selects ${projects.size} projects; exactly one is required`);
+  const files = new Set(rows.map(row => relative(root, realpathSync(row.file))));
+  if (!files.has(`${pkg}/${CANARY}`)) problems.push(`${pkg}: vitest does not select ${CANARY}`);
+  return problems;
+}
+
+function vitestWiring(root, all, scratch, observe, problems) {
   const owners = new Set();
   for (const path of all) {
     const base = posix.basename(path);
@@ -245,59 +286,53 @@ function vitestWiring(root, all, problems) {
   for (const owner of owners) if (!VITEST_PACKAGES.includes(owner)) problems.push(`${owner}: vitest package outside the declared inventory`);
   for (const pkg of VITEST_PACKAGES) {
     if (!all.includes(`${pkg}/${CANARY}`)) problems.push(`${pkg}: missing ${CANARY}`);
-    else if (!/assertIsolationActive\(/.test(readFileSync(join(root, `${pkg}/${CANARY}`), "utf8"))) {
-      problems.push(`${pkg}: ${CANARY} does not call assertIsolationActive`);
+    else if (!/^await assertIsolationActive\(\);$/m.test(readFileSync(join(root, `${pkg}/${CANARY}`), "utf8"))) {
+      problems.push(`${pkg}: ${CANARY} does not assert the guard at module scope (await assertIsolationActive();)`);
     }
-    // vitest.config wins over vite.config, as in Vitest's own lookup.
-    const configs = all.filter(path => posix.dirname(path) === pkg && /^(?:vitest|vite)\.config\.[cm]?[jt]s$/.test(posix.basename(path)))
-      .sort((a, b) => Number(posix.basename(b).startsWith("vitest")) - Number(posix.basename(a).startsWith("vitest")));
-    const texts = configs.map(path => readFileSync(join(root, path), "utf8").replace(/^\s*\/\/.*$/gm, ""));
-    const text = texts.find(candidate => /setupFiles:\s*\[/.test(candidate));
-    const entries = [...(text?.match(/setupFiles:\s*\[([^\]]*)\]/)?.[1] ?? "").matchAll(/["']([^"']+)["']/g)].map(match => match[1]);
+    problems.push(...observe(root, pkg, scratch));
+    setupOrder(root, all, pkg, problems);
+  }
+}
+
+// Order is not observable from the listing, so every config file in the
+// package that names setupFiles must load the module first and, with more
+// than one entry, run them in sequence. Which file Vitest selects does not
+// matter here: all of them are held to it.
+function setupOrder(root, all, pkg, problems) {
+  for (const path of all.filter(path => posix.dirname(path) === pkg && /^(?:vitest|vite)\.config\.[cm]?[jt]s$/.test(posix.basename(path)))) {
+    const text = readFileSync(join(root, path), "utf8").replace(/^\s*\/\/.*$/gm, "");
+    if (!/setupFiles\s*:/.test(text)) continue;
+    const list = text.match(/setupFiles:\s*\[([^\]]*)\]/)?.[1];
+    const entries = [...(list ?? "").matchAll(/["']([^"']+)["']/g)].map(match => match[1]);
     if (entries.length > 1 && !/sequence:\s*\{[^}]*setupFiles:\s*["']list["']/.test(text)) {
-      problems.push(`${pkg}: several setupFiles run in parallel unless sequence.setupFiles is "list"`);
+      problems.push(`${path}: several setupFiles run in parallel unless sequence.setupFiles is "list"`);
     }
-    const first = entries[0];
-    let loaded = first && posix.normalize(posix.join(pkg, first));
+    let loaded = entries[0] && posix.normalize(posix.join(pkg, entries[0]));
     // One hop: a package-local setup file whose first import is the module.
     if (loaded && loaded !== MODULE && all.includes(loaded)) {
       const hop = firstImport(readFileSync(join(root, loaded), "utf8"));
       loaded = hop && posix.normalize(posix.join(posix.dirname(loaded), hop));
     }
-    if (loaded !== MODULE) problems.push(`${pkg}: setupFiles does not load ${MODULE} first`);
+    if (loaded !== MODULE) problems.push(`${path}: setupFiles does not load ${MODULE} first`);
   }
 }
 
-const PERMIT_EXEMPT = [MODULE, "scripts/test/fixtures/test-isolation.cjs", "scripts/test-isolation/check.mjs"];
-const KIND_NAMES = ["systemd", "gh", "docker", "network"];
+const PERMIT_EXEMPT = [MODULE, "scripts/test/fixtures/test-isolation.cjs", "scripts/test/fixtures/test-isolation-permits.cjs",
+  "scripts/test-isolation/check.mjs"];
 
-// Any mention counts, so an aliased import cannot hide a call site; in an
-// allowed file every known kind named in a kinds list must be allowed.
+// Early notice only: the guard checks the calling file and its kinds at run
+// time. Any mention counts, so an aliased import cannot hide a call site.
 function permitCalls(root, all, problems) {
   for (const path of all) {
     if (!PERMIT_SOURCE.test(path) || DECLARATION.test(path) || PERMIT_EXEMPT.includes(path)) continue;
-    const text = readFileSync(join(root, path), "utf8");
-    if (!text.includes("permitHostAccess")) continue;
-    const allowed = PERMIT_ALLOW[path];
-    if (!allowed) { problems.push(`${path}: permitHostAccess outside the allow-list`); continue; }
-    for (const call of text.matchAll(/permitHostAccess\(([^)]*)\)/g)) {
-      if (!/kinds:\s*\[/.test(call[1])) problems.push(`${path}: permitHostAccess kinds must be a literal list`);
-    }
-    for (const [, optIn] of text.matchAll(/optIn:\s*["']([^"']*)["']/g)) {
-      if (!/^KAOIRO_[A-Z0-9_]+$/.test(optIn) || optIn.startsWith("KAOIRO_TEST_ISOLATION_")) {
-        problems.push(`${path}: permitHostAccess optIn ${optIn} is not a probe's own KAOIRO_ variable`);
-      }
-    }
-    for (const list of text.matchAll(/kinds:\s*\[([^\]]*)\]/g)) {
-      for (const [, kind] of list[1].matchAll(/["']([a-z]+)["']/g)) {
-        if (KIND_NAMES.includes(kind) && !allowed.includes(kind)) problems.push(`${path}: permitHostAccess kind ${kind} not allowed`);
-      }
+    if (!PERMIT_ALLOW[path] && readFileSync(join(root, path), "utf8").includes("permitHostAccess")) {
+      problems.push(`${path}: permitHostAccess outside the allow-list`);
     }
   }
 }
 
 /** Returns the contract violations for the repository at root. */
-export function checkTestIsolation(root) {
+export function checkTestIsolation(root, { observe = observeVitest } = {}) {
   const problems = [];
   root = realpathSync(root);
   const all = files(root);
@@ -308,7 +343,7 @@ export function checkTestIsolation(root) {
     if (entries.length > 0) runtimeProof(root, entries, scratch, problems);
     strayFiles(all, problems);
     launchLines(root, all, entries, scratch, problems);
-    vitestWiring(root, all, problems);
+    vitestWiring(root, all, scratch, observe, problems);
     permitCalls(root, all, problems);
     return { entries: entries.length, problems };
   } finally {

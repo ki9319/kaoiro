@@ -32,7 +32,7 @@ makes loading it mandatory.
 |---|---|---|
 | L1a root environment | the first test process | Removes `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, `SSH_AUTH_SOCK`, `DOCKER_CONTEXT`. Points `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR`, `DOCKER_HOST`, `DOCKER_CONFIG`, `GH_CONFIG_DIR` at a fresh owned directory |
 | L1b spawn boundary | every `child_process` call | After product code has built `options.env`, replaces any of those pointers that is missing or not owned, removes `DOCKER_CONTEXT` unless `DOCKER_CONFIG` is owned, and adds the guard's preload to `NODE_OPTIONS` together with the internal child marker. Reaches non-Node descendants through the environment |
-| L2 commands | Node processes | `systemctl`, `systemd-run`, `busctl`, `journalctl`, `loginctl`, `gh`, `docker` run only from an owned root. Otherwise they are refused with `ERR_TEST_HOST_SYSTEMD` or `ERR_TEST_HOST_TOOL`, including through `PATH`, symlinks, shells and launchers. Executing the real updater shell (directly, as a shell's script, or through a launcher) is refused unless its manager resolves to an owned program; passing its path to another program is not a launch. Privilege tools (`sudo`, `doas`, `pkexec`, `run0`, `su`) and login or interactive shells are refused (`ERR_TEST_ISOLATION`), because they rebuild the environment; a shell started by a launcher is checked like a direct one |
+| L2 commands | Node processes | `systemctl`, `systemd-run`, `busctl`, `journalctl`, `loginctl`, `gh`, `docker` run only from an owned root. Otherwise they are refused with `ERR_TEST_HOST_SYSTEMD` or `ERR_TEST_HOST_TOOL`, including through `PATH`, symlinks, shells and launchers. A direct spawn is resolved as the child's `execvp` does: from the child's `PATH` (or `/usr/bin:/bin`) and its cwd, so relative and empty `PATH` elements count from there. A shell or launcher resolves its words again after it may have changed `PATH` or its cwd, so there the systemd tools are refused by name and `gh` and `docker` must be an absolute path to an owned program; a bare or relative `gh` or `docker` word is refused even when it would not run (`echo gh` too). Executing the real updater shell (directly, as a shell's script, or through a launcher) is refused unless its manager resolves to an owned program; passing its path to another program is not a launch. Privilege tools (`sudo`, `doas`, `pkexec`, `run0`, `su`) and login or interactive shells are refused (`ERR_TEST_ISOLATION`), because they rebuild the environment; a shell started by a launcher is checked like a direct one |
 | L2c Node descendants | Node processes | `NODE_OPTIONS` is the single propagation channel. It carries `--require` of the CommonJS implementation. It covers `fork`, `process.execPath`, any `node` on `PATH`, shebang scripts and Node under shells. `--import` is not used, because it routes every main entry through the ES module loader and breaks Node scripts named like `fake-docker.sh`. Loading an ES module with `require` is not used either, because it fails in processes with asynchronous loader hooks such as `tsx`. `worker_threads` workers are refused (`ERR_TEST_ISOLATION`) |
 | L3 network | Node processes | TCP (including `http`, `https`, `tls`, `fetch`), UDP and DNS to anything but loopback are refused with `ERR_TEST_NETWORK`. Unix sockets are allowed |
 
@@ -59,8 +59,13 @@ root's own environment for them comes back (`systemd`: the session bus and
 runtime directory; `docker`: `DOCKER_HOST`, `DOCKER_CONFIG`, `DOCKER_CONTEXT`;
 `gh`: its config directory and tokens; `network`: `SSH_AUTH_SOCK`). In a
 reused Vitest worker the permission and that environment end with the test
-file. The checker allows the
-call only from the files in its `PERMIT_ALLOW` table. An environment
+file. The calling file and its kinds must be listed in
+[`test-isolation-permits.cjs`](../../scripts/test/fixtures/test-isolation-permits.cjs):
+the guard reads the caller from V8 call sites and throws `TypeError` for a
+file that is not listed, a kind it is not allowed, or a caller without a
+repository file (`node -e`, standard input). This is checked on every call,
+also without the opt-in, so a module-scope call fails in an ordinary run. The
+checker reports any other file that mentions `permitHostAccess`. An environment
 variable alone never relaxes a root: the opt-in needs the call as well.
 
 ## Adding a test or a suite
@@ -72,7 +77,27 @@ variable alone never relaxes a root: the opt-in needs the call as well.
 - vitest packages: the config's `setupFiles` loads the module **first**,
   directly or through a package-local setup file whose first import is the
   module (`dashboard` does this, because a separate root cannot load an outside
-  setup file in jsdom files). The package has `test/test-isolation.canary.test.ts`.
+  setup file in jsdom files); with several entries, `sequence.setupFiles` is
+  `"list"`. Every `vitest.config.*` and `vite.config.*` in the package that
+  names `setupFiles` is held to this. The package has
+  `test/test-isolation.canary.test.ts`, which calls
+  `await assertIsolationActive();` at module scope as well as in its test.
+- Vitest is reached only through a declared package's `test` script whose body
+  is exactly `vitest run`, `pnpm build && vitest run`, or
+  `python3 ../../scripts/run-grok-test-namespace.py -- vitest run`, invoked
+  with no further words (`pnpm test`, `pnpm run test`, `pnpm -C <dir> test`,
+  or the wrapper's `pnpm -r --filter … run test`). Any other mention of
+  Vitest in a workflow step or a `package.json` script, any further word after
+  an accepted invocation, `npm`/`npx`/`yarn` naming `test`, and a
+  `pnpm`/`npm`/`npx`/`yarn` line with a `$` substitution (for `node`, in the
+  program position) are reported. The checker then observes each package as
+  that launch resolves it: it runs the package's own `vitest list --json` in
+  the package directory with no arguments and requires exit 0, exactly one
+  project, and the canary among the selected files. Listing collects every
+  file, which runs `setupFiles` and module scope, so a project without the
+  guard fails at the canary. The checker therefore needs the dependencies
+  installed and what the accepted scripts build (CI builds `wrapper` and
+  `runner` first); without them it reports that it cannot observe.
 - A new package, tree, or launch line (workflow step or `package.json`
   script) must be added to the checker's inventory first. Otherwise
   `node scripts/test-isolation/check.mjs` fails in CI.
@@ -89,9 +114,16 @@ variable alone never relaxes a root: the opt-in needs the call as well.
   accept the handed-on permissions. The threat model is accident by cooperative
   test code, not forgery.
 - The content of a script file, or of a script read from standard input, is
-  not inspected; only the environment layer applies to it.
-- Shell strings are read only literally: a `gh` or `docker` reached through a
-  variable, an alias or a `PATH` assignment inside the string is not resolved.
+  not inspected; only the environment layer applies to it. This includes the
+  accepted Vitest prefix `scripts/run-grok-test-namespace.py`.
+- Only the listed launchers (`env`, `setsid`, `nohup`, `timeout`, `nice`,
+  `xargs`) have their arguments checked; another program that executes its
+  arguments (`stdbuf`, `flock`, …) is covered by the environment layer only.
+- Shell strings are matched by words, not parsed: a `gh` or `docker` produced
+  by a variable or a function inside the string is not seen.
+- The Vitest observation runs in the checker's environment. A config that
+  branches on the environment is observed as it resolves there. Vitest 2.1.9
+  and 4.1.8 read no `VITEST_*` variable that selects the config file.
 - Unix sockets are not checked, so a fixed path to a host service socket is
   reachable from Node.
 - Playwright specs under `dashboard/e2e/` have their own runner, are not in
