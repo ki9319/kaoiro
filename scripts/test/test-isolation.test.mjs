@@ -598,7 +598,7 @@ test("a TMPDIR that holds the real runtime directory does not make the session b
   } finally { rmSync(temp, { recursive: true, force: true }); }
 });
 
-test("the updater runs with an owned manager and refuses a reachable host systemd-run", () => {
+test("the updater runs with an owned manager and refuses a host systemd-run only for --detach", () => {
   const host = standIns();
   const owned = mkdtempSync(join(tmpdir(), "kaoiro577-updater-"));
   try {
@@ -609,10 +609,16 @@ test("the updater runs with an owned manager and refuses a reachable host system
     const updater = join(owned, "kaoiro-runner-update.sh");
     const env = { PATH: `${owned}:/nonexistent`, KAOIRO_SYSTEMCTL: join(owned, "systemctl") };
     assert.equal(spawnSync(updater, [], { env }).status, 0);
-    assert.throws(() => spawnSync(updater, [], { env: { ...env, KAOIRO_SYSTEMD_RUN: join(host.bin, "systemd-run") } }), { code: "ERR_TEST_HOST_SYSTEMD" });
-    assert.equal(spawnSync(updater, [], { env: { ...env, KAOIRO_SYSTEMD_RUN: "/bin/false" } }).status, 0);
+    // A host systemd-run on PATH or named by the seam, as on a CI runner, is
+    // not reached without --detach.
+    assert.equal(spawnSync(updater, [], { env: { ...env, PATH: `${owned}:${host.bin}` } }).status, 0);
+    assert.equal(spawnSync("/bin/sh", [updater, "--service", "x"], { env: { ...env, KAOIRO_SYSTEMD_RUN: join(host.bin, "systemd-run") } }).status, 0);
+    assert.throws(() => spawnSync(updater, ["--detach"], { env: { ...env, KAOIRO_SYSTEMD_RUN: join(host.bin, "systemd-run") } }), { code: "ERR_TEST_HOST_SYSTEMD" });
+    assert.throws(() => spawnSync("setsid", [updater, "--detach"], { env: { ...env, PATH: `${owned}:${host.bin}:/usr/bin:/bin` } }), { code: "ERR_TEST_HOST_SYSTEMD" });
+    assert.equal(spawnSync(updater, ["--detach"], { env: { ...env, KAOIRO_SYSTEMD_RUN: "/bin/false" } }).status, 0);
     assert.throws(() => spawnSync(updater, [], { env: { PATH: "/nonexistent" } }), { code: "ERR_TEST_HOST_SYSTEMD" });
-    assert.equal(readFileSync(sink, "utf8"), "kaoiro-runner-update.sh\nkaoiro-runner-update.sh\n");
+    assert.equal(readFileSync(sink, "utf8"), "kaoiro-runner-update.sh\n".repeat(4));
+    assert.deepEqual(host.calls(), []);
   } finally { host.cleanup(); rmSync(owned, { recursive: true, force: true }); }
 });
 

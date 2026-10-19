@@ -356,10 +356,12 @@ function protect(file, args, options) {
   if (runsUpdater && !state().permitted.has("systemd")) {
     const env = childEnv(options);
     const systemctl = program(env.KAOIRO_SYSTEMCTL ?? "systemctl", options);
-    // systemd-run serves only --detach: refused when it resolves to a host
-    // systemd tool (an inert stand-in such as /bin/false is fine); the
-    // manager itself must be an owned fake.
-    const systemdRun = program(env.KAOIRO_SYSTEMD_RUN ?? "systemd-run", options);
+    // The updater runs systemd-run only for --detach, so only then is it
+    // refused when it resolves to a host systemd tool (an inert stand-in such
+    // as /bin/false is fine). Without --detach a host systemd-run on PATH, as
+    // on a CI runner, is never reached. The manager must always be owned.
+    const detaches = [file, ...args].some(arg => arg === "--detach");
+    const systemdRun = detaches && program(env.KAOIRO_SYSTEMD_RUN ?? "systemd-run", options);
     const hostSystemdRun = systemdRun && TOOLS[basename(actualProgram(systemdRun))] === "systemd" &&
       !ownedPath(actualProgram(systemdRun));
     if (!systemctl || !ownedPath(actualProgram(systemctl)) || hostSystemdRun) {
