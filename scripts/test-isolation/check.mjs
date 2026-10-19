@@ -290,24 +290,41 @@ function vitestWiring(root, all, scratch, observe, problems) {
       problems.push(`${pkg}: ${CANARY} does not assert the guard at module scope (await assertIsolationActive();)`);
     }
     problems.push(...observe(root, pkg, scratch));
-    setupOrder(root, all, pkg, problems);
   }
+  setupOrder(root, all, problems);
 }
 
-// Order is not observable from the listing, so every config file in the
-// package that names setupFiles must load the module first and, with more
-// than one entry, run them in sequence. Which file Vitest selects does not
-// matter here: all of them are held to it.
-function setupOrder(root, all, pkg, problems) {
-  for (const path of all.filter(path => posix.dirname(path) === pkg && /^(?:vitest|vite)\.config\.[cm]?[jt]s$/.test(posix.basename(path)))) {
-    const text = readFileSync(join(root, path), "utf8").replace(/^\s*\/\/.*$/gm, "");
-    if (!/setupFiles\s*:/.test(text)) continue;
-    const list = text.match(/setupFiles:\s*\[([^\]]*)\]/)?.[1];
-    const entries = [...(list ?? "").matchAll(/["']([^"']+)["']/g)].map(match => match[1]);
-    if (entries.length > 1 && !/sequence:\s*\{[^}]*setupFiles:\s*["']list["']/.test(text)) {
+const SETUP_EXEMPT = ["scripts/test-isolation/check.mjs", "scripts/test/check-test-isolation.test.mjs"];
+const PACKAGE_CONFIG = /^(?:vitest|vite)\.config\.[cm]?[jt]s$/;
+
+// Order is not observable from the listing, so it is read from config text,
+// in the one form the checker understands: a single setupFiles list of
+// string literals in a declared package's own vitest or vite config, loading
+// the module first and, with more than one entry, run in sequence. Any other
+// mention of setupFiles (another file, a second list merged in, a spread, a
+// variable, a mutation) is reported, so a form it cannot read fails closed.
+function setupOrder(root, all, problems) {
+  for (const path of all) {
+    if (!PERMIT_SOURCE.test(path) || DECLARATION.test(path) || SETUP_EXEMPT.includes(path)) continue;
+    const text = readFileSync(join(root, path), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    if (!/\bsetupFiles\b/.test(text)) continue;
+    if (!VITEST_PACKAGES.includes(posix.dirname(path)) || !PACKAGE_CONFIG.test(posix.basename(path))) {
+      problems.push(`${path}: setupFiles outside a declared package's vitest or vite config`);
+      continue;
+    }
+    const sequences = text.match(/\bsequence\s*:\s*\{[^}]*\}/g) ?? [];
+    const rest = sequences.reduce((current, block) => current.replace(block, ""), text);
+    const list = rest.match(/\bsetupFiles\s*:\s*\[([^\]]*)\]/)?.[1];
+    if ((rest.match(/\bsetupFiles\b/g) ?? []).length !== 1 || sequences.length > 1 || list === undefined ||
+        list.replace(/"[^"]*"|'[^']*'/g, "").replace(/[\s,]/g, "") !== "") {
+      problems.push(`${path}: setupFiles must be a single list of string literals the checker can read`);
+      continue;
+    }
+    const entries = [...list.matchAll(/["']([^"']+)["']/g)].map(match => match[1]);
+    if (entries.length > 1 && !sequences.some(block => /setupFiles\s*:\s*["']list["']/.test(block))) {
       problems.push(`${path}: several setupFiles run in parallel unless sequence.setupFiles is "list"`);
     }
-    let loaded = entries[0] && posix.normalize(posix.join(pkg, entries[0]));
+    let loaded = entries[0] && posix.normalize(posix.join(posix.dirname(path), entries[0]));
     // One hop: a package-local setup file whose first import is the module.
     if (loaded && loaded !== MODULE && all.includes(loaded)) {
       const hop = firstImport(readFileSync(join(root, loaded), "utf8"));

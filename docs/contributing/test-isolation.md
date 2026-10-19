@@ -78,8 +78,12 @@ variable alone never relaxes a root: the opt-in needs the call as well.
   directly or through a package-local setup file whose first import is the
   module (`dashboard` does this, because a separate root cannot load an outside
   setup file in jsdom files); with several entries, `sequence.setupFiles` is
-  `"list"`. Every `vitest.config.*` and `vite.config.*` in the package that
-  names `setupFiles` is held to this. The package has
+  `"list"`. The order cannot be observed, so it is read from the config
+  text: `setupFiles` may appear only in a declared package's own
+  `vitest.config.*` or `vite.config.*`, once, as a list of string literals.
+  Every such file is held to this; any other form (a second list merged in, a
+  spread, a variable, a change after the list, `setupFiles` in another file)
+  is reported. The package has
   `test/test-isolation.canary.test.ts`, which calls
   `await assertIsolationActive();` at module scope as well as in its test.
 - Vitest is reached only through a declared package's `test` script whose body

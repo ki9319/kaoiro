@@ -91,6 +91,23 @@ const mutations = {
   "a vitest package whose setup does not load the module first": [
     root => write(root, "runner/vitest.config.ts", 'export default { test: { setupFiles: ["test/setup.ts"] } };\n'),
     /runner\/vitest\.config\.ts: setupFiles does not load/],
+  "a config that merges a second setupFiles list in front of the guard": [
+    root => write(root, "wrapper/core/vitest.config.ts", [
+      'import { defineConfig, mergeConfig } from "vitest/config";',
+      `const base = defineConfig({ test: { setupFiles: ["${posix.relative("wrapper/core", MODULE)}"] } });`,
+      'export default mergeConfig(defineConfig({ test: { setupFiles: ["test/first.setup.ts"] } }), base);', ""].join("\n")),
+    /wrapper\/core\/vitest\.config\.ts: setupFiles must be a single list of string literals/],
+  "a setupFiles list with a spread": [
+    root => write(root, "wrapper/core/vitest.config.ts",
+      `const more = ["test/other.setup.ts"];\nexport default { test: { setupFiles: ["${posix.relative("wrapper/core", MODULE)}", ...more] } };\n`),
+    /wrapper\/core\/vitest\.config\.ts: setupFiles must be a single list of string literals/],
+  "a config that changes setupFiles after the list": [
+    root => write(root, "wrapper/core/vitest.config.ts",
+      `const config = { test: { setupFiles: ["${posix.relative("wrapper/core", MODULE)}"] } };\nconfig.test.setupFiles.unshift("test/other.setup.ts");\nexport default config;\n`),
+    /wrapper\/core\/vitest\.config\.ts: setupFiles must be a single list of string literals/],
+  "setupFiles in a file the config imports": [
+    root => write(root, "wrapper/core/vitest.shared.ts", 'export const shared = { setupFiles: ["test/other.setup.ts"] };\n'),
+    /wrapper\/core\/vitest\.shared\.ts: setupFiles outside a declared package's vitest or vite config/],
   "a second config file whose setup does not load the module first": [
     root => write(root, "runner/vite.config.ts", 'export default { test: { setupFiles: ["test/setup.ts"] } };\n'),
     /runner\/vite\.config\.ts: setupFiles does not load/],
