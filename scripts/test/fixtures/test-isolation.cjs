@@ -22,6 +22,7 @@ const CHILD = "KAOIRO_TEST_ISOLATION_CHILD";
 const ROOTS = "KAOIRO_TEST_ISOLATION_ROOTS";
 const PERMIT = "KAOIRO_TEST_ISOLATION_PERMIT";
 const FOREIGN = "KAOIRO_TEST_ISOLATION_FOREIGN";
+const INERT = "KAOIRO_TEST_ISOLATION_INERT";
 const TOKENS = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "SSH_AUTH_SOCK"];
 const POINTERS = ["DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "DOCKER_HOST", "DOCKER_CONFIG", "GH_CONFIG_DIR"];
 const NEUTRALISED = [...TOKENS, "DOCKER_CONTEXT", ...POINTERS];
@@ -125,6 +126,7 @@ function boundaryEnvironment(env) {
   result[CHILD] = "1";
   result[ROOTS] = JSON.stringify(current.roots);
   result[FOREIGN] = JSON.stringify(current.foreign);
+  result[INERT] = JSON.stringify(inertPointers());
   if (current.permitted.size > 0) result[PERMIT] = [...current.permitted].join(",");
   else delete result[PERMIT];
   return result;
@@ -156,11 +158,20 @@ function initialise() {
     handOff(FOREIGN, foreign);
     for (const kind of (process.env[PERMIT] ?? "").split(",")) if (KINDS.has(kind)) permitted.add(kind);
   }
+  // A child reuses the root's inert pointers instead of creating its own
+  // directory under whatever TMPDIR the test gave it.
+  let inert;
+  if (child) {
+    try {
+      const handed = JSON.parse(process.env[INERT] ?? "null");
+      if (handed && POINTERS.every(key => typeof handed[key] === "string")) inert = Object.fromEntries(POINTERS.map(key => [key, handed[key]]));
+    } catch { inert = undefined; }
+  }
   const original = child ? {} : Object.fromEntries(NEUTRALISED.filter(key => key in process.env)
     .map(key => [key, process.env[key]]));
   // A TMPDIR inside the real runtime directory must not make the session bus owned.
   for (const path of ["/run/user", original.XDG_RUNTIME_DIR]) if (typeof path === "string" && isAbsolute(path)) foreign.add(canonical(path));
-  globalThis[STATE] = { child, roots: [...roots], foreign: [...foreign], permitted, original, inert: undefined,
+  globalThis[STATE] = { child, roots: [...roots], foreign: [...foreign], permitted, original, inert,
     initialRoots: [...roots], initialForeign: [...foreign] };
   if (!child) neutralise();
 }

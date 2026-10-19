@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync, execFile, spawn, execSync, exec, fork } from "node:child_process";
 import dgram from "node:dgram";
 import dns from "node:dns";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import net from "node:net";
 import tls from "node:tls";
@@ -518,4 +518,15 @@ test("the updater runs with an owned manager and refuses a reachable host system
     assert.throws(() => spawnSync(updater, [], { env: { PATH: "/nonexistent" } }), { code: "ERR_TEST_HOST_SYSTEMD" });
     assert.equal(readFileSync(sink, "utf8"), "kaoiro-runner-update.sh\nkaoiro-runner-update.sh\n");
   } finally { host.cleanup(); rmSync(owned, { recursive: true, force: true }); }
+});
+
+test("a child reuses the root's inert pointers instead of creating its own", () => {
+  const temp = mkdtempSync(join(tmpdir(), "kaoiro577-child-temp-"));
+  try {
+    const grandchild = "process.stdout.write(process.env.DBUS_SESSION_BUS_ADDRESS)";
+    const child = `process.stdout.write(require("node:child_process").execFileSync(process.execPath, ["-e", ${JSON.stringify(grandchild)}], { env: { PATH: process.env.PATH }, encoding: "utf8" }))`;
+    const seen = execFileSync(process.execPath, ["-e", child], { env: { PATH: CHILD_PATH_FOR_TESTS, TMPDIR: temp }, encoding: "utf8" });
+    assert.equal(seen, process.env.DBUS_SESSION_BUS_ADDRESS);
+    assert.deepEqual(readdirSync(temp), []);
+  } finally { rmSync(temp, { recursive: true, force: true }); }
 });
