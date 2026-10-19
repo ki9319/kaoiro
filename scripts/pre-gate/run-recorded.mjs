@@ -36,29 +36,37 @@ export function createCountParser() {
       add("mix", "failed", Number(mix[2]));
     }
   };
-  // Each stream keeps its own unfinished line and its own UTF-8 decoder, so
-  // output from two pipes never joins and a character split across chunks is
-  // decoded whole.
-  const streams = new Map();
-  const state = (name) => {
-    if (!streams.has(name)) streams.set(name, { decoder: new StringDecoder("utf8"), pending: "" });
-    return streams.get(name);
-  };
-  const feed = (stream, text) => {
-    const lines = (stream.pending + text).split("\n");
-    stream.pending = lines.pop();
-    lines.forEach(line);
+  // The only place where bytes become characters. A stream owns one reader;
+  // write() takes bytes (a string is encoded first, so it takes the same
+  // route) and end() flushes the decoder and the unfinished line together, so a
+  // character split across chunks is whole and one cut off at the end of the
+  // stream is never dropped. Streams never share a reader, so output from two
+  // pipes cannot join.
+  const readers = new Map();
+  const reader = (name) => {
+    if (!readers.has(name)) {
+      const decoder = new StringDecoder("utf8");
+      let pending = "";
+      const feed = (text) => {
+        const lines = (pending + text).split("\n");
+        pending = lines.pop();
+        lines.forEach(line);
+      };
+      readers.set(name, {
+        write: (chunk) => feed(decoder.write(typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk)),
+        end() {
+          feed(decoder.end());
+          if (pending) line(pending);
+          pending = "";
+        },
+      });
+    }
+    return readers.get(name);
   };
   return {
-    push(chunk, name = "stdout") {
-      const stream = state(name);
-      feed(stream, typeof chunk === "string" ? chunk : stream.decoder.write(chunk));
-    },
+    push: (chunk, name = "stdout") => reader(name).write(chunk),
     result() {
-      for (const stream of streams.values()) {
-        if (stream.pending) line(stream.pending);
-        stream.pending = "";
-      }
+      for (const each of readers.values()) each.end();
       return Object.keys(counts).length ? counts : null;
     },
   };

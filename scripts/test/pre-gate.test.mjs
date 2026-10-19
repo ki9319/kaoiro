@@ -350,6 +350,58 @@ test("the parser decodes each stream with its own decoder", () => {
   assert.deepEqual(parser.result(), { "node:test": { passed: 2 } });
 });
 
+test("a string and a buffer pushed to one stream share one unfinished line", () => {
+  const parser = createCountParser();
+  parser.push("# pass ", "stdout");
+  parser.push(Buffer.from("3\n"), "stdout");
+  assert.deepEqual(parser.result(), { "node:test": { passed: 3 } });
+});
+
+// Every place where bytes become characters, each pinned through the real CLI:
+//   1. a chunk arrives (a character split across chunks, either stream)
+//   2. a stream ends (a truncated character at the end, either stream, 2/3/4-byte)
+//   3. the child dies in the middle of a character
+//   4. the bytes also go to the terminal, and must come out unchanged
+const cliRun = (script) => {
+  const file = join(fresh("rec"), "r.jsonl");
+  const result = spawnSync(process.execPath, [join(realGateDir, "run-recorded.mjs"), "--record", file, "--", process.execPath, "-e", script], { encoding: "buffer" });
+  return { result, record: JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1)) };
+};
+const writeBytes = (stream, bytes) => `process.${stream}.write(Buffer.from(${JSON.stringify(bytes)}));`;
+const ascii = (text) => [...text].map((character) => character.charCodeAt(0));
+
+for (const stream of ["stdout", "stderr"]) {
+  test(`${stream}: a character split across two chunks is decoded whole`, () => {
+    const { record } = cliRun(`process.${stream}.write(Buffer.from([0xc2])); setTimeout(() => process.${stream}.write(Buffer.from([0xa0, ...${JSON.stringify(ascii("# pass 1\n"))}])), 80);`);
+    assert.deepEqual(record.counts, { "node:test": { passed: 1 } });
+  });
+  for (const [label, tail] of [["2-byte", [0xc2]], ["3-byte", [0xe3, 0x81]], ["4-byte", [0xf0, 0x9f, 0x98]]]) {
+    test(`${stream}: a truncated ${label} character at the end does not complete a count line`, () => {
+      const { result, record } = cliRun(writeBytes(stream, [...ascii("# pass 1"), ...tail]));
+      assert.equal(result.status, 0);
+      assert.equal(record.counts, null);
+    });
+  }
+  test(`${stream}: a complete character at the end of the stream still leaves the count line intact`, () => {
+    const { record } = cliRun(writeBytes(stream, [...ascii("# pass 1"), 0xc2, 0xa0]));
+    assert.deepEqual(record.counts, { "node:test": { passed: 1 } });
+  });
+}
+
+test("a child that dies in the middle of a character is recorded without a count and without an error", () => {
+  const { result, record } = cliRun(`process.stdout.write(Buffer.from([...${JSON.stringify(ascii("# pass 1"))}, 0xe3, 0x81])); setTimeout(() => process.kill(process.pid, "SIGTERM"), 50);`);
+  assert.equal(result.status, 143);
+  assert.equal(record.signal, "SIGTERM");
+  assert.equal(record.counts, null);
+});
+
+test("bytes that are not valid UTF-8 reach the terminal unchanged", async () => {
+  const chunks = [];
+  const out = { write: (chunk) => chunks.push(Buffer.from(chunk)) };
+  await runRecorded({ command: interleaved("process.stdout.write(Buffer.from([0xff, 0xfe, 0x0a]));"), recordFile: join(fresh("rec"), "r.jsonl"), stdout: out, stderr: sink() });
+  assert.deepEqual([...Buffer.concat(chunks)], [0xff, 0xfe, 0x0a]);
+});
+
 test("the recorder preserves a failing child's exit code and records it", async () => {
   const record = await runRecorded({ command: [process.execPath, "-e", "console.log('# tests 1\\n# pass 0\\n# fail 1'); process.exit(3)"],
     recordFile: join(fresh("rec"), "r.jsonl"), stdout: sink(), stderr: sink() });
