@@ -558,6 +558,10 @@ test("a launcher-wrapped shell string is checked like a direct one", () => {
   try {
     assert.throws(() => spawnSync("env", ["sh", "-c", "docker ps"], { env: { PATH: `${host.bin}:/usr/bin:/bin` } }), { code: "ERR_TEST_HOST_TOOL" });
     assert.throws(() => spawnSync("timeout", ["5", "sh", "-c", "gh api user"], { env: { PATH: `${host.bin}:/usr/bin:/bin` } }), { code: "ERR_TEST_HOST_TOOL" });
+    // Only the shell string itself shows these; the launcher sees one argument.
+    assert.throws(() => spawnSync("env", ["sh", "-c", "sudo true"]), { code: "ERR_TEST_ISOLATION" });
+    const updater = fileURLToPath(new URL("../../runner/deploy/kaoiro-runner-update.sh", import.meta.url));
+    assert.throws(() => spawnSync("setsid", ["sh", "-c", `${updater} --service kaoiro-runner`]), { code: "ERR_TEST_HOST_SYSTEMD" });
     assert.deepEqual(host.calls(), []);
   } finally { host.cleanup(); }
 });
