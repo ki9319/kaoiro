@@ -160,6 +160,7 @@ test("all new safety decisions use inert native sinks in the mutation self-test"
 });
 
 const MODULE = fileURLToPath(new URL("./fixtures/test-isolation.mjs", import.meta.url));
+const PERMIT_PROBE = fileURLToPath(new URL("./fixtures/test-isolation-permit-probe.cjs", import.meta.url));
 const CHILD_PATH_FOR_TESTS = `${dirname(process.execPath)}:/usr/bin:/bin`;
 const HOST_TOOLS = ["systemctl", "systemd-run", "busctl", "journalctl", "loginctl", "gh", "docker"];
 
@@ -365,8 +366,8 @@ test("permitHostAccess needs its opt-in variable and is handed to children", () 
     assert.throws(() => permitHostAccess({ optIn: "KAOIRO_ISOLATION_SELF_PROBE", reason: "r", kinds: ["root"] }), TypeError);
     assert.throws(() => permitHostAccess({ optIn: "KAOIRO_ISOLATION_SELF_PROBE", kinds: ["systemd"] }), TypeError);
     const code = optIn => `
-      const { permitHostAccess } = await import(${JSON.stringify(MODULE)});
-      const granted = permitHostAccess({ kinds: ["systemd"], optIn: "KAOIRO_ISOLATION_SELF_PROBE", reason: "self-test" });
+      const { permitSelfProbe } = await import(${JSON.stringify(PERMIT_PROBE)});
+      const granted = permitSelfProbe();
       const { execFileSync } = await import("node:child_process");
       let direct; try { execFileSync(${JSON.stringify(join(host.bin, "systemctl"))}, ["direct"]); direct = "ran"; } catch (error) { direct = error.code; }
       const child = execFileSync(process.execPath, ["-e", "try { require('node:child_process').execFileSync(" + ${JSON.stringify(JSON.stringify(join(host.bin, "systemctl")))} + ", ['child']); process.stdout.write('ran'); } catch (error) { process.stdout.write(String(error.code)); }"], { encoding: "utf8" });
@@ -378,6 +379,67 @@ test("permitHostAccess needs its opt-in variable and is handed to children", () 
     assert.deepEqual(JSON.parse(withOptIn.stdout), { granted: true, direct: "ran", child: "ran" });
     assert.equal(host.calls().length, 2);
   } finally { host.cleanup(); }
+});
+
+test("a permit is checked against the calling file's table entry, with or without its opt-in", () => {
+  const extraKinds = ["network"];
+  for (const kinds of [["systemd", "network"], ["systemd", ...extraKinds], ["docker"]]) {
+    assert.throws(() => permitHostAccess({ kinds, optIn: "KAOIRO_ISOLATION_SELF_PROBE", reason: "r" }),
+      { name: "TypeError", message: /not allowed for scripts\/test\/test-isolation\.test\.mjs/ });
+  }
+  assert.equal(permitHostAccess({ kinds: ["systemd"], optIn: "KAOIRO_ISOLATION_SELF_PROBE", reason: "r" }), false);
+  const outside = mkdtempSync(join(tmpdir(), "kaoiro577-permit-caller-"));
+  try {
+    const call = `permitHostAccess({ kinds: ["systemd"], optIn: "KAOIRO_ISOLATION_SELF_PROBE", reason: "r" })`;
+    writeFileSync(join(outside, "caller.mjs"), `import { permitHostAccess } from ${JSON.stringify(MODULE)};\n${call};\n`);
+    for (const result of [spawnSync(process.execPath, [join(outside, "caller.mjs")], { encoding: "utf8" }),
+      nodeEval(`const { permitHostAccess } = await import(${JSON.stringify(MODULE)});\n${call};`)]) {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /permitHostAccess is not allowed from a caller without a repository file/);
+    }
+  } finally { rmSync(outside, { recursive: true, force: true }); }
+});
+
+test("finding the caller keeps the process's stack settings and works without frames", () => {
+  const prepare = Error.prepareStackTrace, limit = Error.stackTraceLimit;
+  const custom = (error, sites) => `custom ${sites.length}`;
+  try {
+    Error.prepareStackTrace = custom;
+    Error.stackTraceLimit = 0;
+    assert.equal(permitHostAccess({ kinds: ["systemd"], optIn: "KAOIRO_ISOLATION_SELF_PROBE", reason: "r" }), false);
+    assert.equal(Error.prepareStackTrace, custom);
+    assert.equal(Error.stackTraceLimit, 0);
+  } finally {
+    Error.prepareStackTrace = prepare;
+    Error.stackTraceLimit = limit;
+  }
+});
+
+test("a shell or launcher that may change PATH or its cwd cannot reach a foreign gh or docker", () => {
+  const host = standIns();
+  const owned = mkdtempSync(join(tmpdir(), "kaoiro577-indirect-owned-"));
+  try {
+    for (const name of ["gh", "docker"]) writeFileSync(join(owned, name), `#!/bin/sh\nprintf 'owned ${name}'\n`, { mode: 0o700 });
+    const env = { PATH: `${owned}:/usr/bin:/bin` };
+    for (const run of [
+      () => spawnSync("sh", ["-c", `PATH=${host.bin} docker version`], { env }),
+      () => execSync(`export PATH=${host.bin}; gh api user`, { env }),
+      () => spawnSync("env", [`PATH=${host.bin}`, "docker", "version"], { env }),
+      () => spawnSync("env", ["-u", "PATH", "gh", "api", "user"], { env }),
+      () => spawnSync("env", ["-C", host.root, "bin/docker", "version"], { env }),
+      () => spawnSync("timeout", ["5", "gh", "api", "user"], { env }),
+    ]) {
+      assert.throws(run, { code: "ERR_TEST_HOST_TOOL", message: /absolute path to an owned program/ });
+    }
+    symlinkSync(join(host.bin, "gh"), join(owned, "renamed"));
+    assert.throws(() => spawnSync("env", [join(owned, "renamed"), "api", "user"]), { code: "ERR_TEST_HOST_TOOL" });
+    assert.deepEqual(host.calls(), []);
+    assert.equal(execFileSync("env", [`PATH=${host.bin}`, join(owned, "docker")], { encoding: "utf8" }), "owned docker");
+    assert.equal(execFileSync("sh", ["-c", `cd ${host.root} && ${join(owned, "gh")}`], { encoding: "utf8" }), "owned gh");
+  } finally {
+    host.cleanup();
+    rmSync(owned, { recursive: true, force: true });
+  }
 });
 
 test("a Node script with a non-JavaScript name still starts and is guarded", () => {
@@ -396,7 +458,7 @@ test("an updater path passed to another program is not an updater launch", () =>
   assert.throws(() => spawnSync("setsid", [updater, "--service", "kaoiro-runner"]), { code: "ERR_TEST_HOST_SYSTEMD" });
 });
 
-test("gh and docker in shell strings are judged by what the shell would run", () => {
+test("through a shell, gh and docker run only as an owned absolute path", () => {
   const host = standIns();
   const owned = mkdtempSync(join(tmpdir(), "kaoiro577-shell-owned-"));
   const empty = mkdtempSync(join(tmpdir(), "kaoiro577-shell-empty-"));
@@ -406,8 +468,11 @@ test("gh and docker in shell strings are judged by what the shell would run", ()
     assert.throws(() => execSync("docker version", { env: { PATH: `${host.bin}:/usr/bin:/bin` } }), { code: "ERR_TEST_HOST_TOOL" });
     assert.deepEqual(host.calls(), []);
     writeFileSync(join(owned, "gh"), "#!/bin/sh\nprintf 'owned gh'\n", { mode: 0o700 });
-    assert.equal(execFileSync("/bin/sh", ["-c", "gh api user"], { env: { PATH: `${owned}:/usr/bin:/bin` }, encoding: "utf8" }), "owned gh");
-    assert.equal(execFileSync("/bin/sh", ["-c", "echo gh docker"], { env: { PATH: empty }, encoding: "utf8" }), "gh docker\n");
+    assert.equal(execFileSync("/bin/sh", ["-c", `${join(owned, "gh")} api user`], { encoding: "utf8" }), "owned gh");
+    // A bare name is refused even when it would find the owned fake, or nothing.
+    assert.throws(() => execFileSync("/bin/sh", ["-c", "gh api user"], { env: { PATH: `${owned}:/usr/bin:/bin` } }),
+      { code: "ERR_TEST_HOST_TOOL", message: /absolute path to an owned program/ });
+    assert.throws(() => execFileSync("/bin/sh", ["-c", "echo gh docker"], { env: { PATH: empty } }), { code: "ERR_TEST_HOST_TOOL" });
   } finally {
     host.cleanup();
     rmSync(owned, { recursive: true, force: true });
@@ -420,10 +485,11 @@ test("an opt-in gets the root's own environment back for its kinds, and a new en
     const implementation = MODULE.replace(/\.mjs$/, ".cjs");
     const code = `
       const isolation = require(${JSON.stringify(implementation)});
+      const { permitSelfProbe } = require(${JSON.stringify(PERMIT_PROBE)});
       const { execFileSync } = require("node:child_process");
       const view = () => execFileSync("sh", ["-c", 'printf "%s|%s|%s" "$DBUS_SESSION_BUS_ADDRESS" "$XDG_RUNTIME_DIR" "$DOCKER_HOST"'], { encoding: "utf8" });
       const grandchild = () => execFileSync(process.execPath, ["-e", "process.stdout.write(require('node:child_process').execFileSync('sh', ['-c', 'printf %s \\"$DBUS_SESSION_BUS_ADDRESS\\"'], { encoding: 'utf8' }))"], { encoding: "utf8" });
-      const granted = isolation.permitHostAccess({ kinds: ["systemd"], optIn: "KAOIRO_ISOLATION_SELF_PROBE", reason: "self-test" });
+      const granted = permitSelfProbe();
       const during = view(), nested = grandchild();
       isolation.beginEntry();
       let after; try { execFileSync("systemctl", ["after"], { env: { PATH: "/nonexistent" } }); after = "ran"; } catch (error) { after = error.code; }

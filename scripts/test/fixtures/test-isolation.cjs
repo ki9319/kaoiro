@@ -13,10 +13,11 @@ const { accessSync, constants, existsSync, lstatSync, mkdirSync, mkdtempSync, re
 const { syncBuiltinESMExports } = require("node:module");
 const net = require("node:net");
 const { homedir, tmpdir } = require("node:os");
-const { basename, delimiter, dirname, isAbsolute, join, resolve, sep } = require("node:path");
+const { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } = require("node:path");
 const { fileURLToPath } = require("node:url");
 const { promisify } = require("node:util");
 const workerThreads = require("node:worker_threads");
+const PERMITS = require("./test-isolation-permits.cjs");
 
 const STATE = Symbol.for("kaoiro.test.isolation");
 const CHILD = "KAOIRO_TEST_ISOLATION_CHILD";
@@ -48,7 +49,8 @@ const SYSTEMD_TEXT = /(?:systemd-run|systemctl|busctl|journalctl|loginctl)/;
 const SHELL_TOOL = /(?:^|[\s;&|()`'"])([^\s;&|()`'"]*\/)?(gh|docker)(?=$|[\s;&|()`'"])/g;
 // What libuv searches when a child environment has no PATH.
 const DEFAULT_PATH = "/usr/bin:/bin";
-const PRELOAD_FLAG = `--require="${__filename.replace(/(["\\])/g, "\\$1")}"`;
+const REPOSITORY = realpathSync(resolve(__dirname, "../../.."));
+const PRELOAD_FLAG =`--require="${__filename.replace(/(["\\])/g, "\\$1")}"`;
 
 function refuse(code, message) {
   throw Object.assign(new Error(message), { code });
@@ -204,10 +206,35 @@ function registerForeignRoot(directory) {
   if (!state().foreign.includes(root)) state().foreign.push(root);
 }
 
+// The repository-relative file that called permitHostAccess, read from V8
+// call sites; undefined when it has no file name (eval, stdin), a query or
+// fragment, or lies outside the repository.
+function callingFile() {
+  const prepare = Error.prepareStackTrace, limit = Error.stackTraceLimit;
+  let sites;
+  try {
+    Error.stackTraceLimit = 30;
+    Error.prepareStackTrace = (_, callSites) => callSites;
+    const holder = {};
+    Error.captureStackTrace(holder, permitHostAccess);
+    // The stack is formatted when first read, so read it before restoring.
+    sites = holder.stack;
+  } finally {
+    Error.prepareStackTrace = prepare;
+    Error.stackTraceLimit = limit;
+  }
+  const name = Array.isArray(sites) ? sites[0]?.getFileName() : undefined;
+  if (typeof name !== "string" || /[?#]/.test(name) || !(isAbsolute(name) || name.startsWith("file:"))) return undefined;
+  let file;
+  try { file = realpathSync(name.startsWith("file:") ? fileURLToPath(name) : name); } catch { return undefined; }
+  const path = relative(REPOSITORY, file);
+  return path.startsWith("..") || isAbsolute(path) ? undefined : path.split(sep).join("/");
+}
+
 /** Relax the listed kinds for this process and its children, only when the
  *  probe's own opt-in variable is "1": their tools run and the root's own
- *  environment for them comes back. Allowed callers are fixed by
- *  scripts/test-isolation/check.mjs. */
+ *  environment for them comes back. The calling file and its kinds must be
+ *  in test-isolation-permits.cjs; that is checked even without the opt-in. */
 function permitHostAccess({ kinds, optIn, reason }) {
   if (!Array.isArray(kinds) || kinds.some(kind => !KINDS.has(kind)) || typeof optIn !== "string" ||
       typeof reason !== "string" || reason.length === 0) {
@@ -216,6 +243,14 @@ function permitHostAccess({ kinds, optIn, reason }) {
   if (!/^KAOIRO_[A-Z0-9_]+$/.test(optIn) || optIn.startsWith("KAOIRO_TEST_ISOLATION_")) {
     throw new TypeError("permitHostAccess optIn must be a probe's own KAOIRO_ variable");
   }
+  const caller = callingFile();
+  const allowed = caller === undefined ? undefined : PERMITS[caller];
+  if (!allowed) {
+    throw new TypeError(`permitHostAccess is not allowed from ${caller ?? "a caller without a repository file"}; ` +
+      "add the file to scripts/test/fixtures/test-isolation-permits.cjs");
+  }
+  const extra = kinds.filter(kind => !allowed.includes(kind));
+  if (extra.length > 0) throw new TypeError(`permitHostAccess kinds ${extra.join(", ")} are not allowed for ${caller}`);
   if (process.env[optIn] !== "1") return false;
   const current = state();
   for (const kind of kinds) {
@@ -275,7 +310,22 @@ function checkTool(name, path) {
     `test refused host ${name}: ${path ?? "not found"}`);
 }
 
-function shellCommand(command, options = {}) {
+// A shell or launcher resolves its words again, after it may have changed
+// PATH or its cwd, so there gh and docker must be an owned absolute path.
+// Even a word that is never run is refused: telling it apart would mean
+// parsing the shell, and the text itself may reassign PATH.
+function checkIndirectWords(text) {
+  for (const [, prefix = "", tool] of text.matchAll(SHELL_TOOL)) {
+    if (state().permitted.has(tool)) continue;
+    if (!isAbsolute(prefix)) {
+      refuse("ERR_TEST_HOST_TOOL",
+        `test refused ${tool} through a shell or launcher: name it by an absolute path to an owned program`);
+    }
+    checkTool(tool, actualProgram(`${prefix}${tool}`));
+  }
+}
+
+function shellCommand(command) {
   if (/(?:^|[\s;&|()`'"])(?:sudo|doas|pkexec|run0|su)(?=$|[\s;&|()`'"])/.test(command)) {
     refuse("ERR_TEST_ISOLATION", "test refused privilege tool in shell command");
   }
@@ -287,15 +337,7 @@ function shellCommand(command, options = {}) {
   if (!state().permitted.has("systemd") && SYSTEMD_TEXT.test(command)) {
     refuse("ERR_TEST_HOST_SYSTEMD", "test refused manager in shell command");
   }
-  // gh and docker are resolved the way the shell would, through the PATH it
-  // receives; a word that resolves to nothing cannot reach a host program.
-  for (const [, prefix, tool] of command.matchAll(SHELL_TOOL)) {
-    if (state().permitted.has(tool)) continue;
-    const path = prefix ? resolve(options.cwd ?? process.cwd(), `${prefix}${tool}`) : program(tool, options);
-    if (path && existsSync(path) && !ownedPath(actualProgram(path))) {
-      refuse("ERR_TEST_HOST_TOOL", `test refused ${tool} in shell command: ${path}`);
-    }
-  }
+  checkIndirectWords(command);
 }
 
 function protect(file, args, options) {
@@ -330,7 +372,9 @@ function protect(file, args, options) {
       if (!state().permitted.has("systemd") && (SYSTEMD_TEXT.test(arg) || USER_FLAG.test(arg))) {
         refuse("ERR_TEST_HOST_SYSTEMD", "test refused manager or user option in shell or launcher arguments");
       }
-      checkTool(basename(arg), arg.includes("/") ? arg : program(arg, options));
+      checkIndirectWords(arg);
+      // A launcher may run a symlink whose name hides the tool it points to.
+      if (isAbsolute(arg)) checkTool(basename(actualProgram(arg)), actualProgram(arg));
     }
   }
   // A launcher's own arguments may start a shell: check that shell's -c too.
@@ -338,8 +382,8 @@ function protect(file, args, options) {
     ? args.findIndex(arg => typeof arg === "string" && SHELLS.has(basename(arg))) : -2;
   const shellArgs = shellAt === -1 ? args : shellAt >= 0 ? args.slice(shellAt + 1) : [];
   const shellIndex = shellArgs.findIndex(arg => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg));
-  if (shellIndex >= 0) shellCommand(shellArgs[shellIndex + 1] ?? "", options);
-  if (options.shell) shellCommand([file, ...args].join(" "), options);
+  if (shellIndex >= 0) shellCommand(shellArgs[shellIndex + 1] ?? "");
+  if (options.shell) shellCommand([file, ...args].join(" "));
   // Only the shell's own options count, not words passed on to its script.
   const shellOptions = [];
   for (const arg of shellArgs) { if (typeof arg !== "string" || !arg.startsWith("-")) break; shellOptions.push(arg); }
@@ -391,7 +435,7 @@ function installChildProcess() {
     const original = childProcess[name];
     const wrapped = (command, options, callback) => {
       if (typeof options === "function") { callback = options; options = {}; }
-      shellCommand(command, options ?? {});
+      shellCommand(command);
       const guarded = { ...(options ?? {}), env: boundaryEnvironment(options?.env) };
       return name === "exec" ? original(command, guarded, callback) : original(command, guarded);
     };
