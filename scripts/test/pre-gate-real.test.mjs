@@ -2,6 +2,7 @@
 // a scratch clone, checks that the defect is in the commit the gate will read,
 // and runs the clone's own gate on that SHA. Slow (about a minute each), so it
 // runs only with KAOIRO_PREGATE_REAL=1, in the remote test slot.
+import "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
