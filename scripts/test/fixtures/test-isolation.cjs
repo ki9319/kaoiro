@@ -9,7 +9,7 @@
 const childProcess = require("node:child_process");
 const dgram = require("node:dgram");
 const dns = require("node:dns");
-const { existsSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, realpathSync, rmSync } = require("node:fs");
+const { accessSync, constants, existsSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, realpathSync, rmSync, statSync } = require("node:fs");
 const { syncBuiltinESMExports } = require("node:module");
 const net = require("node:net");
 const { homedir, tmpdir } = require("node:os");
@@ -36,7 +36,11 @@ const TOOLS = { systemctl: "systemd", "systemd-run": "systemd", busctl: "systemd
   loginctl: "systemd", gh: "gh", docker: "docker" };
 const KINDS = new Set(Object.keys(KIND_KEYS));
 const SHELLS = new Set(["sh", "bash", "dash", "zsh", "ksh"]);
-const LAUNCHERS = new Set(["env", "setsid", "nohup", "timeout", "nice", "sudo", "xargs"]);
+const LAUNCHERS = new Set(["env", "setsid", "nohup", "timeout", "nice", "xargs"]);
+// Privilege tools reset the environment, so the inert pointers would not hold.
+const ESCALATORS = new Set(["sudo", "doas", "pkexec", "run0", "su"]);
+// A login or interactive shell rebuilds PATH and the environment from profiles.
+const LOGIN_FLAG = /^(?:--login|--interactive|-[a-zA-Z]*[li][a-zA-Z]*)$/;
 const USER_FLAG = /^--u(?:s(?:e(?:r)?)?)?(?:=|$)/;
 const SYSTEMD_TEXT = /(?:systemd-run|systemctl|busctl|journalctl|loginctl)/;
 const SHELL_TOOL = /(?:^|[\s;&|()`'"])([^\s;&|()`'"]*\/)?(gh|docker)(?=$|[\s;&|()`'"])/g;
@@ -139,7 +143,7 @@ function initialise() {
   try { home = canonical(homedir()); } catch { home = undefined; }
   // A child given a broad TMPDIR (/, or a directory holding HOME) must not
   // make that whole tree owned.
-  if (!child || (temp !== sep && !(home && `${home}${sep}`.startsWith(`${temp}${sep}`)))) roots.add(temp);
+  if (temp !== sep && !(home && `${home}${sep}`.startsWith(`${temp}${sep}`))) roots.add(temp);
   const permitted = new Set();
   const foreign = new Set();
   const handOff = (key, into) => {
@@ -154,6 +158,8 @@ function initialise() {
   }
   const original = child ? {} : Object.fromEntries(NEUTRALISED.filter(key => key in process.env)
     .map(key => [key, process.env[key]]));
+  // A TMPDIR inside the real runtime directory must not make the session bus owned.
+  for (const path of ["/run/user", original.XDG_RUNTIME_DIR]) if (typeof path === "string" && isAbsolute(path)) foreign.add(canonical(path));
   globalThis[STATE] = { child, roots: [...roots], foreign: [...foreign], permitted, original, inert: undefined,
     initialRoots: [...roots], initialForeign: [...foreign] };
   if (!child) neutralise();
@@ -195,6 +201,9 @@ function permitHostAccess({ kinds, optIn, reason }) {
       typeof reason !== "string" || reason.length === 0) {
     throw new TypeError("permitHostAccess needs known kinds, an opt-in variable and a reason");
   }
+  if (!/^KAOIRO_[A-Z0-9_]+$/.test(optIn) || optIn.startsWith("KAOIRO_TEST_ISOLATION_")) {
+    throw new TypeError("permitHostAccess optIn must be a probe's own KAOIRO_ variable");
+  }
   if (process.env[optIn] !== "1") return false;
   const current = state();
   for (const kind of kinds) {
@@ -215,7 +224,18 @@ function childEnv(options) {
 function program(file, options) {
   if (file.includes("/")) return resolve(options.cwd ?? process.cwd(), file);
   const path = options.env ? (options.env.PATH ?? DEFAULT_PATH) : (process.env.PATH ?? "");
-  return path.split(delimiter).filter(Boolean).map(directory => resolve(directory, file)).find(existsSync);
+  return path.split(delimiter).filter(Boolean).map(directory => resolve(directory, file)).find(executable);
+}
+
+// What execvp would run: a regular file with an execute bit.
+function executable(path) {
+  try {
+    if (!statSync(path).isFile()) return false;
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Follows symlinks even when the final target is missing, so a link to a host
@@ -241,6 +261,9 @@ function checkTool(name, path) {
 }
 
 function shellCommand(command, options = {}) {
+  if (/(?:^|[\s;&|()`'"])(?:sudo|doas|pkexec|run0|su)(?=$|[\s;&|()`'"])/.test(command)) {
+    refuse("ERR_TEST_ISOLATION", "test refused privilege tool in shell command");
+  }
   if (!state().permitted.has("systemd") && /kaoiro-runner-update\.sh/.test(command)) {
     refuse("ERR_TEST_HOST_SYSTEMD", "test refused updater in shell command");
   }
@@ -266,6 +289,9 @@ function protect(file, args, options) {
   checkTool(basename(file), actual);
   if (actual) checkTool(basename(actual), actual);
   const name = basename(actual ?? file);
+  if (ESCALATORS.has(name) || ((SHELLS.has(name) || LAUNCHERS.has(name)) && args.some(arg => typeof arg === "string" && ESCALATORS.has(basename(arg))))) {
+    refuse("ERR_TEST_ISOLATION", `test refused privilege tool: ${name}`);
+  }
   const isUpdater = arg => typeof arg === "string" && basename(arg) === "kaoiro-runner-update.sh";
   // Only an executed updater can reach a manager: run directly, by a shell, or
   // through a launcher. A path merely passed to another program is not a launch.
@@ -288,9 +314,19 @@ function protect(file, args, options) {
       checkTool(basename(arg), arg.includes("/") ? arg : program(arg, options));
     }
   }
-  const shellIndex = SHELLS.has(name) ? args.findIndex(arg => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg)) : -1;
-  if (shellIndex >= 0) shellCommand(args[shellIndex + 1] ?? "", options);
+  // A launcher's own arguments may start a shell: check that shell's -c too.
+  const shellAt = SHELLS.has(name) ? -1 : LAUNCHERS.has(name)
+    ? args.findIndex(arg => typeof arg === "string" && SHELLS.has(basename(arg))) : -2;
+  const shellArgs = shellAt === -1 ? args : shellAt >= 0 ? args.slice(shellAt + 1) : [];
+  const shellIndex = shellArgs.findIndex(arg => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg));
+  if (shellIndex >= 0) shellCommand(shellArgs[shellIndex + 1] ?? "", options);
   if (options.shell) shellCommand([file, ...args].join(" "), options);
+  // Only the shell's own options count, not words passed on to its script.
+  const shellOptions = [];
+  for (const arg of shellArgs) { if (typeof arg !== "string" || !arg.startsWith("-")) break; shellOptions.push(arg); }
+  if (shellAt >= -1 && shellOptions.some(arg => LOGIN_FLAG.test(arg))) {
+    refuse("ERR_TEST_ISOLATION", "test refused a login or interactive shell");
+  }
 }
 
 // Mirrors Node's (file, [args], [options], [callback]) parsing; an explicit

@@ -106,7 +106,7 @@ const mutations = {
     },
     /extra\.yml job x: starts scripts\/other\/x\.test\.mjs, outside the canonical entries/],
   "a launch line that discovers nothing": [
-    root => write(root, ".github/workflows/extra.yml", "jobs:\n  x:\n    steps:\n      - run: node --test 'scripts/test/none*.test.mjs'\n"),
+    root => write(root, ".github/workflows/extra.yml", "jobs:\n  x:\n    steps:\n      - run: node --test scripts/test/none*.test.mjs\n"),
     /extra\.yml job x: discovers no test file/],
   "vitest with a config outside the inventory": [
     root => write(root, "wrapper/grok/package.json", JSON.stringify({ scripts: { test: "vitest run --config vitest.other.config.ts" } })),
@@ -140,6 +140,18 @@ const mutations = {
     root => write(root, "scripts/test/a.test.mjs",
       `import { ${PERMIT} as allow } from "./fixtures/test-isolation.mjs";\nallow({ kinds: ["network"], optIn: "X", reason: "r" });\n`),
     new RegExp(`scripts/test/a\\.test\\.mjs: ${PERMIT} outside the allow-list`)],
+  "a launch line with shell syntax": [
+    root => write(root, ".github/workflows/extra.yml", "jobs:\n  x:\n    steps:\n      - run: node --test scripts/test/a.test.mjs $(id)\n"),
+    /extra\.yml job x: node --test arguments use shell syntax/],
+  "a launch line whose working directory leaves the repository": [
+    root => write(root, ".github/workflows/extra.yml", "jobs:\n  x:\n    defaults:\n      run:\n        working-directory: ../..\n    steps:\n      - run: node --test\n"),
+    /extra\.yml job x: working directory \.\.\/\.\. is outside the repository/],
+  "a permit with a computed kinds list": [
+    root => write(root, "scripts/test/test-isolation.test.mjs", `${entry("scripts/test/test-isolation.test.mjs")}const kinds = ["systemd"];\n${PERMIT}({ kinds, optIn: "KAOIRO_X_PROBE", reason: "r" });\n`),
+    new RegExp(`scripts/test/test-isolation\\.test\\.mjs: ${PERMIT} kinds must be a literal list`)],
+  "a permit whose opt-in is the guard's own variable": [
+    root => write(root, "scripts/test/test-isolation.test.mjs", `${entry("scripts/test/test-isolation.test.mjs")}${PERMIT}({ kinds: ["systemd"], optIn: "KAOIRO_TEST_ISOLATION_CHILD", reason: "r" });\n`),
+    /optIn KAOIRO_TEST_ISOLATION_CHILD is not a probe's own KAOIRO_ variable/],
   "a correctly named import that does not install the guard": [
     root => write(root, MODULE, "export {};\n"),
     /scripts\/test\/a\.test\.mjs: loaded without the isolation marker/],

@@ -141,7 +141,7 @@ test("all new safety decisions use inert native sinks in the mutation self-test"
       () => childProcess.spawnSync('sh',['-c','"$1" --version','sh','systemd-run']),
       () => childProcess.spawnSync('sh',['-c','"$1" "$2" --version','sh','systemctl','--user']),
       () => childProcess.spawnSync('sh',['-c','true','sh','--us']),
-      ...['env','setsid','nohup','timeout','nice','sudo','xargs'].flatMap(launcher => [
+      ...['env','setsid','nohup','timeout','nice','xargs'].flatMap(launcher => [
         () => childProcess.spawnSync(launcher,['systemd-run','--version']),
         () => childProcess.spawnSync(launcher,['systemctl','--user','--version']),
         () => childProcess.spawnSync(launcher,['bash','-lc','systemd-run --version']),
@@ -336,11 +336,11 @@ test("children keep explicit fixture tokens and owned pointers across generation
 test("permitHostAccess needs its opt-in variable and is handed to children", () => {
   const host = standIns();
   try {
-    assert.throws(() => permitHostAccess({ optIn: "X", reason: "r", kinds: ["root"] }), TypeError);
-    assert.throws(() => permitHostAccess({ optIn: "X", kinds: ["systemd"] }), TypeError);
+    assert.throws(() => permitHostAccess({ optIn: "KAOIRO_ISOLATION_SELF_PROBE", reason: "r", kinds: ["root"] }), TypeError);
+    assert.throws(() => permitHostAccess({ optIn: "KAOIRO_ISOLATION_SELF_PROBE", kinds: ["systemd"] }), TypeError);
     const code = optIn => `
       const { permitHostAccess } = await import(${JSON.stringify(MODULE)});
-      const granted = permitHostAccess({ kinds: ["systemd"], optIn: "KAOIRO_TEST_ISOLATION_SELF_PROBE", reason: "self-test" });
+      const granted = permitHostAccess({ kinds: ["systemd"], optIn: "KAOIRO_ISOLATION_SELF_PROBE", reason: "self-test" });
       const { execFileSync } = await import("node:child_process");
       let direct; try { execFileSync(${JSON.stringify(join(host.bin, "systemctl"))}, ["direct"]); direct = "ran"; } catch (error) { direct = error.code; }
       const child = execFileSync(process.execPath, ["-e", "try { require('node:child_process').execFileSync(" + ${JSON.stringify(JSON.stringify(join(host.bin, "systemctl")))} + ", ['child']); process.stdout.write('ran'); } catch (error) { process.stdout.write(String(error.code)); }"], { encoding: "utf8" });
@@ -348,7 +348,7 @@ test("permitHostAccess needs its opt-in variable and is handed to children", () 
     const without = nodeEval(code(), { env: { PATH: CHILD_PATH_FOR_TESTS } });
     assert.deepEqual(JSON.parse(without.stdout), { granted: false, direct: "ERR_TEST_HOST_SYSTEMD", child: "ERR_TEST_HOST_SYSTEMD" });
     assert.deepEqual(host.calls(), []);
-    const withOptIn = nodeEval(code(), { env: { PATH: CHILD_PATH_FOR_TESTS, KAOIRO_TEST_ISOLATION_SELF_PROBE: "1" } });
+    const withOptIn = nodeEval(code(), { env: { PATH: CHILD_PATH_FOR_TESTS, KAOIRO_ISOLATION_SELF_PROBE: "1" } });
     assert.deepEqual(JSON.parse(withOptIn.stdout), { granted: true, direct: "ran", child: "ran" });
     assert.equal(host.calls().length, 2);
   } finally { host.cleanup(); }
@@ -397,7 +397,7 @@ test("an opt-in gets the root's own environment back for its kinds, and a new en
       const { execFileSync } = require("node:child_process");
       const view = () => execFileSync("sh", ["-c", 'printf "%s|%s|%s" "$DBUS_SESSION_BUS_ADDRESS" "$XDG_RUNTIME_DIR" "$DOCKER_HOST"'], { encoding: "utf8" });
       const grandchild = () => execFileSync(process.execPath, ["-e", "process.stdout.write(require('node:child_process').execFileSync('sh', ['-c', 'printf %s \\"$DBUS_SESSION_BUS_ADDRESS\\"'], { encoding: 'utf8' }))"], { encoding: "utf8" });
-      const granted = isolation.permitHostAccess({ kinds: ["systemd"], optIn: "KAOIRO_TEST_ISOLATION_SELF_PROBE", reason: "self-test" });
+      const granted = isolation.permitHostAccess({ kinds: ["systemd"], optIn: "KAOIRO_ISOLATION_SELF_PROBE", reason: "self-test" });
       const during = view(), nested = grandchild();
       isolation.beginEntry();
       let after; try { execFileSync("systemctl", ["after"], { env: { PATH: "/nonexistent" } }); after = "ran"; } catch (error) { after = error.code; }
@@ -406,7 +406,7 @@ test("an opt-in gets the root's own environment back for its kinds, and a new en
     const probe = join(mkdtempSync(join(tmpdir(), "kaoiro577-optin-")), "probe.cjs");
     writeFileSync(probe, code);
     const run = optIn => spawnSync("env", ["-u", "KAOIRO_TEST_ISOLATION_CHILD", "DBUS_SESSION_BUS_ADDRESS=unix:path=/planted/bus",
-      "XDG_RUNTIME_DIR=/planted/runtime", "DOCKER_HOST=unix:///planted/docker.sock", `KAOIRO_TEST_ISOLATION_SELF_PROBE=${optIn}`,
+      "XDG_RUNTIME_DIR=/planted/runtime", "DOCKER_HOST=unix:///planted/docker.sock", `KAOIRO_ISOLATION_SELF_PROBE=${optIn}`,
       process.execPath, probe], { encoding: "utf8" });
     const opted = run("1");
     assert.equal(opted.status, 0, opted.stderr);
@@ -447,4 +447,57 @@ test("a child environment without PATH is searched the way libuv does, not with 
 test("an explicit undefined options slot keeps the callback and the promise", { timeout: 10_000 }, async () => {
   await new Promise((resolve, reject) => execFile("/usr/bin/true", [], undefined, error => error ? reject(error) : resolve()));
   assert.equal((await promisify(execFile)("/usr/bin/true", [], undefined)).stdout, "");
+});
+
+test("privilege tools and login shells are refused, also behind launchers", () => {
+  for (const work of [
+    () => spawnSync("sudo", ["true"]),
+    () => spawnSync("env", ["sudo", "true"]),
+    () => spawnSync("sh", ["-c", "sudo true"]),
+    () => spawnSync("bash", ["-lc", "true"]),
+    () => spawnSync("bash", ["--login", "-c", "true"]),
+    () => spawnSync("setsid", ["bash", "-ic", "true"]),
+  ]) assert.throws(work, { code: "ERR_TEST_ISOLATION" });
+  assert.equal(execFileSync("sh", ["-c", 'printf "%s" "$1"', "sh", "-la"], { encoding: "utf8" }), "-la");
+});
+
+test("a launcher-wrapped shell string is checked like a direct one", () => {
+  const host = standIns();
+  try {
+    assert.throws(() => spawnSync("env", ["sh", "-c", "docker ps"], { env: { PATH: `${host.bin}:/usr/bin:/bin` } }), { code: "ERR_TEST_HOST_TOOL" });
+    assert.throws(() => spawnSync("timeout", ["5", "sh", "-c", "gh api user"], { env: { PATH: `${host.bin}:/usr/bin:/bin` } }), { code: "ERR_TEST_HOST_TOOL" });
+    assert.deepEqual(host.calls(), []);
+  } finally { host.cleanup(); }
+});
+
+test("a fake that is not executable does not count as the owned program", () => {
+  const owned = mkdtempSync(join(tmpdir(), "kaoiro577-noexec-"));
+  try {
+    writeFileSync(join(owned, "systemctl"), "#!/bin/sh\nexit 0\n", { mode: 0o600 });
+    assert.throws(() => spawnSync("systemctl", ["--version"], { env: { PATH: `${owned}:/nonexistent` } }), { code: "ERR_TEST_HOST_SYSTEMD" });
+  } finally { rmSync(owned, { recursive: true, force: true }); }
+});
+
+test("a permit must name a probe's own KAOIRO_ variable", () => {
+  for (const optIn of ["KAOIRO_TEST_ISOLATION_CHILD", "CI", "kaoiro_probe"]) {
+    assert.throws(() => permitHostAccess({ kinds: ["systemd"], optIn, reason: "r" }), TypeError);
+  }
+});
+
+test("a TMPDIR that holds the real runtime directory does not make the session bus owned", () => {
+  const temp = mkdtempSync(join(tmpdir(), "kaoiro577-runtime-temp-"));
+  try {
+    const runtime = join(temp, "runtime");
+    mkdirSync(runtime);
+    const probe = join(temp, "probe.cjs");
+    writeFileSync(probe, `
+      require(${JSON.stringify(MODULE.replace(/\.mjs$/, ".cjs"))});
+      const { execFileSync } = require("node:child_process");
+      process.stdout.write(execFileSync("sh", ["-c", 'printf "%s" "$DBUS_SESSION_BUS_ADDRESS"'],
+        { env: { PATH: process.env.PATH, DBUS_SESSION_BUS_ADDRESS: "unix:path=${join(runtime, "bus")}" }, encoding: "utf8" }));`);
+    const result = spawnSync("env", ["-u", "KAOIRO_TEST_ISOLATION_CHILD", `TMPDIR=${temp}`, `XDG_RUNTIME_DIR=${runtime}`,
+      process.execPath, probe], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /kaoiro-test-isolation-.*\/no-bus$/);
+  } finally { rmSync(temp, { recursive: true, force: true }); }
 });

@@ -34,6 +34,7 @@ export const PERMIT_ALLOW = {
 };
 
 const SOURCE = /\.(?:js|cjs|mjs|ts|cts|mts)$/;
+const PERMIT_SOURCE = /\.(?:js|cjs|mjs|jsx|ts|cts|mts|tsx|svelte)$/;
 const DECLARATION = /\.d\.[cm]?ts$/;
 const TEST_NAME = /(?:^|\/)(?:[^/]+[.\-_](?:test|spec)\.[^/]+|test[-.][^/]+)$/;
 const TEST_DIR = /(?:^|\/)tests?\//;
@@ -92,19 +93,26 @@ if (process.env.NODE_TEST_CONTEXT && !process.env.KAOIRO_ISOLATION_RECORDED) {
 // only loads its imports; the recorder reports each file and its marker.
 // `env -u` drops an isolation guard and test-runner context inherited from a
 // calling test process, so the marker shows only what each file loads itself.
-function discover(scratch, cwd, args, label) {
+// A file without the guard still runs its top level here, so credentials are
+// removed and host pointers lead nowhere. Files are passed as arguments;
+// `words` are glob words from a launch line, already checked for shell syntax.
+const SCRUBBED = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "SSH_AUTH_SOCK", "DOCKER_CONTEXT"];
+function discover(scratch, cwd, { files = [], words = "" }, label) {
   const record = join(scratch, `record-${Math.random().toString(16).slice(2)}.jsonl`);
-  const command = `exec "$0" --test --test-name-pattern='${NO_MATCH}' ${args}`;
+  const nowhere = join(scratch, "nowhere");
+  const command = `exec "$0" --test --test-name-pattern='${NO_MATCH}' ${words} "$@"`;
   const result = spawnSync("env", ["-u", "NODE_OPTIONS", "-u", "KAOIRO_TEST_ISOLATION_CHILD", "-u", "NODE_TEST_CONTEXT",
-    "-u", "KAOIRO_ISOLATION_RECORDED",
+    "-u", "KAOIRO_ISOLATION_RECORDED", ...SCRUBBED.flatMap(key => ["-u", key]),
+    `DBUS_SESSION_BUS_ADDRESS=unix:path=${nowhere}/bus`, `XDG_RUNTIME_DIR=${nowhere}`,
+    `DOCKER_HOST=unix://${nowhere}/docker.sock`, `DOCKER_CONFIG=${nowhere}`, `GH_CONFIG_DIR=${nowhere}`,
     `NODE_OPTIONS=--import=${pathToFileURL(recorder(scratch)).href}`, `KAOIRO_ISOLATION_RECORD=${record}`,
-    "sh", "-c", command, process.execPath], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    "sh", "-c", command, process.execPath, ...files], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   const rows = existsSync(record) ? readFileSync(record, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse) : [];
-  return { label, status: result.status, output: `${result.stdout}${result.stderr}`, rows };
+  return { label, status: result.status, output: `${result.stdout}${result.stderr}`.slice(0, 4_000), rows };
 }
 
 function runtimeProof(root, entries, scratch, problems) {
-  const run = discover(scratch, root, entries.map(entry => `'${entry}'`).join(" "), "canonical entries");
+  const run = discover(scratch, root, { files: entries }, "canonical entries");
   if (run.status !== 0) problems.push(`canonical entries: node --test exited ${run.status}\n${run.output}`);
   const seen = new Map(run.rows.map(row => [relative(root, realpathSync(row.file)), row.marker]));
   for (const entry of entries) {
@@ -135,8 +143,17 @@ function launchSegment(root, cwd, segment, label, entries, scratch, problems) {
   const node = tokens.findIndex(token => /(?:^|\/)node$/.test(token));
   const at = node >= 0 ? tokens.indexOf("--test", node) : -1;
   if (at >= 0) {
-    const args = [...tokens.slice(node + 1, at), ...tokens.slice(at + 1)].join(" ");
-    const run = discover(scratch, join(root, cwd), args, label);
+    const words = [...tokens.slice(node + 1, at), ...tokens.slice(at + 1)];
+    const directory = resolve(root, cwd);
+    if (words.some(word => /[^A-Za-z0-9_./*?=,:@+%^-]/.test(word))) {
+      problems.push(`${label}: node --test arguments use shell syntax the checker does not evaluate`);
+      return;
+    }
+    if (!existsSync(directory) || !`${realpathSync(directory)}/`.startsWith(`${root}/`)) {
+      problems.push(`${label}: working directory ${cwd} is outside the repository`);
+      return;
+    }
+    const run = discover(scratch, directory, { words: words.join(" ") }, label);
     const reported = run.rows.map(row => relative(root, realpathSync(row.file)));
     if (run.status !== 0) problems.push(`${label}: node --test exited ${run.status}\n${run.output}`);
     if (reported.length === 0) problems.push(`${label}: discovers no test file`);
@@ -200,7 +217,7 @@ function launchLines(root, all, entries, scratch, problems) {
     const runs = workflowRuns(readFileSync(join(root, path), "utf8"));
     if (runs.length === 0) problems.push(`${path}: no run steps were read; the workflow layout is not understood`);
     for (const run of runs) {
-      const cwd = (run.cwd ?? "").replace(/^\.\/?/, "").replace(/\/$/, "");
+      const cwd = (run.cwd ?? "").replace(/^\.(?:\/|$)/, "").replace(/\/$/, "");
       for (const segment of segments(run.body.split("\n").filter(line => !/^\s*#/.test(line)).join("\n"))) {
         launchSegment(root, cwd, segment, `${path} job ${run.job}`, entries, scratch, problems);
       }
@@ -258,11 +275,19 @@ const KIND_NAMES = ["systemd", "gh", "docker", "network"];
 // allowed file every known kind named in a kinds list must be allowed.
 function permitCalls(root, all, problems) {
   for (const path of all) {
-    if (!SOURCE.test(path) || DECLARATION.test(path) || PERMIT_EXEMPT.includes(path)) continue;
+    if (!PERMIT_SOURCE.test(path) || DECLARATION.test(path) || PERMIT_EXEMPT.includes(path)) continue;
     const text = readFileSync(join(root, path), "utf8");
     if (!text.includes("permitHostAccess")) continue;
     const allowed = PERMIT_ALLOW[path];
     if (!allowed) { problems.push(`${path}: permitHostAccess outside the allow-list`); continue; }
+    for (const call of text.matchAll(/permitHostAccess\(([^)]*)\)/g)) {
+      if (!/kinds:\s*\[/.test(call[1])) problems.push(`${path}: permitHostAccess kinds must be a literal list`);
+    }
+    for (const [, optIn] of text.matchAll(/optIn:\s*["']([^"']*)["']/g)) {
+      if (!/^KAOIRO_[A-Z0-9_]+$/.test(optIn) || optIn.startsWith("KAOIRO_TEST_ISOLATION_")) {
+        problems.push(`${path}: permitHostAccess optIn ${optIn} is not a probe's own KAOIRO_ variable`);
+      }
+    }
     for (const list of text.matchAll(/kinds:\s*\[([^\]]*)\]/g)) {
       for (const [, kind] of list[1].matchAll(/["']([a-z]+)["']/g)) {
         if (KIND_NAMES.includes(kind) && !allowed.includes(kind)) problems.push(`${path}: permitHostAccess kind ${kind} not allowed`);

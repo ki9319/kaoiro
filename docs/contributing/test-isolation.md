@@ -32,7 +32,7 @@ makes loading it mandatory.
 |---|---|---|
 | L1a root environment | the first test process | Removes `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, `SSH_AUTH_SOCK`, `DOCKER_CONTEXT`. Points `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR`, `DOCKER_HOST`, `DOCKER_CONFIG`, `GH_CONFIG_DIR` at a fresh owned directory |
 | L1b spawn boundary | every `child_process` call | After product code has built `options.env`, replaces any of those pointers that is missing or not owned, removes `DOCKER_CONTEXT` unless `DOCKER_CONFIG` is owned, and adds the guard's preload to `NODE_OPTIONS` together with the internal child marker. Reaches non-Node descendants through the environment |
-| L2 commands | Node processes | `systemctl`, `systemd-run`, `busctl`, `journalctl`, `loginctl`, `gh`, `docker` run only from an owned root. Otherwise they are refused with `ERR_TEST_HOST_SYSTEMD` or `ERR_TEST_HOST_TOOL`, including through `PATH`, symlinks, shells and launchers. Executing the real updater shell (directly, as a shell's script, or through a launcher) is refused unless its manager resolves to an owned program; passing its path to another program is not a launch |
+| L2 commands | Node processes | `systemctl`, `systemd-run`, `busctl`, `journalctl`, `loginctl`, `gh`, `docker` run only from an owned root. Otherwise they are refused with `ERR_TEST_HOST_SYSTEMD` or `ERR_TEST_HOST_TOOL`, including through `PATH`, symlinks, shells and launchers. Executing the real updater shell (directly, as a shell's script, or through a launcher) is refused unless its manager resolves to an owned program; passing its path to another program is not a launch. Privilege tools (`sudo`, `doas`, `pkexec`, `run0`, `su`) and login or interactive shells are refused (`ERR_TEST_ISOLATION`), because they rebuild the environment; a shell started by a launcher is checked like a direct one |
 | L2c Node descendants | Node processes | `NODE_OPTIONS` is the single propagation channel. It carries `--require` of the CommonJS implementation. It covers `fork`, `process.execPath`, any `node` on `PATH`, shebang scripts and Node under shells. `--import` is not used, because it routes every main entry through the ES module loader and breaks Node scripts named like `fake-docker.sh`. Loading an ES module with `require` is not used either, because it fails in processes with asynchronous loader hooks such as `tsx`. `worker_threads` workers are refused (`ERR_TEST_ISOLATION`) |
 | L3 network | Node processes | TCP (including `http`, `https`, `tls`, `fetch`), UDP and DNS to anything but loopback are refused with `ERR_TEST_NETWORK`. Unix sockets are allowed |
 
@@ -52,7 +52,8 @@ A test that deliberately needs a host surface calls
 permitHostAccess({ kinds: ["systemd"], optIn: "KAOIRO_RELEASE_UNIT_PROBE", reason: "..." });
 ```
 
-The permission applies only when the named variable is `"1"`. It covers that
+The variable must be the probe's own `KAOIRO_` variable (not one of the guard's
+`KAOIRO_TEST_ISOLATION_` variables), and the permission applies only when it is `"1"`. It covers that
 process and its children, and only the listed kinds: their tools run, and the
 root's own environment for them comes back (`systemd`: the session bus and
 runtime directory; `docker`: `DOCKER_HOST`, `DOCKER_CONFIG`, `DOCKER_CONTEXT`;
@@ -60,7 +61,7 @@ runtime directory; `docker`: `DOCKER_HOST`, `DOCKER_CONFIG`, `DOCKER_CONTEXT`;
 reused Vitest worker the permission and that environment end with the test
 file. The checker allows the
 call only from the files in its `PERMIT_ALLOW` table. An environment
-variable alone never disables the guard.
+variable alone never relaxes a root: the opt-in needs the call as well.
 
 ## Adding a test or a suite
 
@@ -82,6 +83,13 @@ variable alone never disables the guard.
   `ssh` with keys under `HOME`) is not stopped outside the container.
 - A non-Node intermediate that clears the environment drops the guard for
   any Node process below it.
+- The guard trusts its internal hand-off variables (`KAOIRO_TEST_ISOLATION_*`),
+  which only the spawn boundary sets. A shell that has them exported by hand
+  starts its Node processes as children: they skip root initialisation and
+  accept the handed-on permissions. The threat model is accident by cooperative
+  test code, not forgery.
+- The content of a script file, or of a script read from standard input, is
+  not inspected; only the environment layer applies to it.
 - Shell strings are read only literally: a `gh` or `docker` reached through a
   variable, an alias or a `PATH` assignment inside the string is not resolved.
 - Unix sockets are not checked, so a fixed path to a host service socket is
