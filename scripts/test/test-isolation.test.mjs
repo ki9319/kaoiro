@@ -369,3 +369,22 @@ test("an updater path passed to another program is not an updater launch", () =>
   assert.throws(() => spawnSync("sh", [updater, "--service", "kaoiro-runner"]), { code: "ERR_TEST_HOST_SYSTEMD" });
   assert.throws(() => spawnSync("setsid", [updater, "--service", "kaoiro-runner"]), { code: "ERR_TEST_HOST_SYSTEMD" });
 });
+
+test("gh and docker in shell strings are judged by what the shell would run", () => {
+  const host = standIns();
+  const owned = mkdtempSync(join(tmpdir(), "kaoiro577-shell-owned-"));
+  const empty = mkdtempSync(join(tmpdir(), "kaoiro577-shell-empty-"));
+  try {
+    assert.throws(() => spawnSync("/bin/sh", ["-c", "gh api user"], { env: { PATH: `${host.bin}:/usr/bin:/bin` } }), { code: "ERR_TEST_HOST_TOOL" });
+    assert.throws(() => spawnSync("/bin/sh", ["-c", `${host.bin}/docker version`]), { code: "ERR_TEST_HOST_TOOL" });
+    assert.throws(() => execSync("docker version", { env: { PATH: `${host.bin}:/usr/bin:/bin` } }), { code: "ERR_TEST_HOST_TOOL" });
+    assert.deepEqual(host.calls(), []);
+    writeFileSync(join(owned, "gh"), "#!/bin/sh\nprintf 'owned gh'\n", { mode: 0o700 });
+    assert.equal(execFileSync("/bin/sh", ["-c", "gh api user"], { env: { PATH: `${owned}:/usr/bin:/bin` }, encoding: "utf8" }), "owned gh");
+    assert.equal(execFileSync("/bin/sh", ["-c", "echo gh docker"], { env: { PATH: empty }, encoding: "utf8" }), "gh docker\n");
+  } finally {
+    host.cleanup();
+    rmSync(owned, { recursive: true, force: true });
+    rmSync(empty, { recursive: true, force: true });
+  }
+});

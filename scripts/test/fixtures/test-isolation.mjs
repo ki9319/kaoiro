@@ -15,7 +15,8 @@ import { promisify } from "node:util";
 import workerThreads from "node:worker_threads";
 
 const STATE = Symbol.for("kaoiro.test.isolation");
-const PRELOAD = fileURLToPath(new URL("./test-isolation-preload.cjs", import.meta.url));
+// Built from the path string: under jsdom the global URL is not Node's.
+const PRELOAD = join(dirname(fileURLToPath(import.meta.url)), "test-isolation-preload.cjs");
 const CHILD = "KAOIRO_TEST_ISOLATION_CHILD";
 const ROOTS = "KAOIRO_TEST_ISOLATION_ROOTS";
 const PERMIT = "KAOIRO_TEST_ISOLATION_PERMIT";
@@ -29,7 +30,7 @@ const SHELLS = new Set(["sh", "bash", "dash", "zsh", "ksh"]);
 const LAUNCHERS = new Set(["env", "setsid", "nohup", "timeout", "nice", "sudo", "xargs"]);
 const USER_FLAG = /^--u(?:s(?:e(?:r)?)?)?(?:=|$)/;
 const SYSTEMD_TEXT = /(?:systemd-run|systemctl|busctl|journalctl|loginctl)/;
-const SHELL_TOOL = /(?:^|[\s;&|()`'"/])(?:gh|docker)(?=$|[\s;&|()`'"])/;
+const SHELL_TOOL = /(?:^|[\s;&|()`'"])([^\s;&|()`'"]*\/)?(gh|docker)(?=$|[\s;&|()`'"])/g;
 
 function refuse(code, message) {
   throw Object.assign(new Error(message), { code });
@@ -185,7 +186,7 @@ function checkTool(name, path) {
     `test refused host ${name}: ${path ?? "not found"}`);
 }
 
-function shellCommand(command) {
+function shellCommand(command, options = {}) {
   if (!state().permitted.has("systemd") && /kaoiro-runner-update\.sh/.test(command)) {
     refuse("ERR_TEST_HOST_SYSTEMD", "test refused updater in shell command");
   }
@@ -194,8 +195,15 @@ function shellCommand(command) {
   if (!state().permitted.has("systemd") && SYSTEMD_TEXT.test(command)) {
     refuse("ERR_TEST_HOST_SYSTEMD", "test refused manager in shell command");
   }
-  const tool = command.match(SHELL_TOOL)?.[0].replace(/^[^a-z]/, "");
-  if (tool && !state().permitted.has(tool)) refuse("ERR_TEST_HOST_TOOL", `test refused ${tool} in shell command`);
+  // gh and docker are resolved the way the shell would, through the PATH it
+  // receives; a word that resolves to nothing cannot reach a host program.
+  for (const [, prefix, tool] of command.matchAll(SHELL_TOOL)) {
+    if (state().permitted.has(tool)) continue;
+    const path = prefix ? resolve(options.cwd ?? process.cwd(), `${prefix}${tool}`) : program(tool, options);
+    if (path && existsSync(path) && !ownedPath(actualProgram(path))) {
+      refuse("ERR_TEST_HOST_TOOL", `test refused ${tool} in shell command: ${path}`);
+    }
+  }
 }
 
 function protect(file, args, options) {
@@ -227,8 +235,8 @@ function protect(file, args, options) {
     }
   }
   const shellIndex = SHELLS.has(name) ? args.findIndex(arg => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg)) : -1;
-  if (shellIndex >= 0) shellCommand(args[shellIndex + 1] ?? "");
-  if (options.shell) shellCommand([file, ...args].join(" "));
+  if (shellIndex >= 0) shellCommand(args[shellIndex + 1] ?? "", options);
+  if (options.shell) shellCommand([file, ...args].join(" "), options);
 }
 
 function invocation(params) {
@@ -271,7 +279,7 @@ function installChildProcess() {
     const original = childProcess[name];
     const wrapped = (command, options, callback) => {
       if (typeof options === "function") { callback = options; options = {}; }
-      shellCommand(command);
+      shellCommand(command, options ?? {});
       const guarded = { ...(options ?? {}), env: boundaryEnvironment(options?.env) };
       return name === "exec" ? original(command, guarded, callback) : original(command, guarded);
     };
