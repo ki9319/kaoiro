@@ -665,7 +665,12 @@ test("the operator card binds the fixed workflow/ref and audit reports omitted p
   const landingFixture = repairFixture();
   try {
     const pendingCard = productionDispatchCard({ dir, cwd: landingFixture.repo, repository: "fixture/repo" });
-    const pending = spawnSync("sh", ["-c", pendingCard.command], {
+    // The isolation guard refuses a bare gh in a shell string, so the
+    // fixture's gh is named by its path; the card's order is unchanged.
+    const fixtureGh = join(dirname(landingFixture.marker), "bin", "gh");
+    const command = pendingCard.command.replace(" && gh workflow run ", ` && ${fixtureGh} workflow run `);
+    assert.notEqual(command, pendingCard.command);
+    const pending = spawnSync("sh", ["-c", command], {
       cwd: landingFixture.repo, env: landingFixture.env, encoding: "utf8", timeout: 30_000,
     });
     assert.equal(pending.status, 78, pending.stderr);
