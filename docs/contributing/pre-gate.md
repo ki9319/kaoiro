@@ -68,12 +68,13 @@ line to stderr (prefix `KAOIRO_TEST_RUN`, then a space) and appends it to
 |---|---|
 | `revision`, `dirty` | the commit checked (the gate resolves `--rev` to a full SHA) and whether the source tree had tracked changes |
 | `command`, `cwd_relative` | what ran |
-| `started_at`, `ended_at`, `duration_ms` | timing; the gate also sets `over_budget` past 2 minutes |
+| `started_at`, `ended_at`, `duration_ms` | timing of the whole run, including the suite |
+| `precheck_ms`, `over_budget` | gate only: the time spent on the checks before the suite starts, and whether it passed 2 minutes (a target, not enforced) |
 | `exit_code`, `signal`, `error` | the result; a signal is `128 + its number`; a command that cannot start is 127 with `error` set |
 | `stage_failed` | `null`, or the stage where the run stopped (`revision`, `toolchain`, `install`, `build`, `ci-layout`, `suite`) |
-| `failure` | `null`, or `{kind, detail}` with `kind` one of `toolchain_mismatch`, `step_exit`, `marker_missing`, `artifact_missing` |
+| `failure` | `null`, or `{kind, detail}` with `kind` one of `toolchain_mismatch`, `step_exit`, `marker_missing`, `artifact_missing`, `internal_error` (an exception the gate did not plan for; the exit code is 2) |
 | `steps` | one `{name, exit, elapsed_ms}` per executed step |
-| `counts` | summed test counts for vitest, `node:test` and `mix` summaries found in the output; `null` if none |
+| `counts` | summed test counts for vitest, `node:test` and `mix` summaries found in the output, read line by line per stream (stdout and stderr are never joined); `null` if none |
 
 The record states **where** a run stopped and what was detected. It does not
 say whether the environment or the code under test was at fault: a type error

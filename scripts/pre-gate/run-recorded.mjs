@@ -56,7 +56,6 @@ export function createCountParser() {
     },
     result() {
       for (const stream of streams.values()) {
-        feed(stream, stream.decoder.end());
         if (stream.pending) line(stream.pending);
         stream.pending = "";
       }
