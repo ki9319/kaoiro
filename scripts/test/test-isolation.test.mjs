@@ -206,6 +206,30 @@ test("owned fakes keep supplying behaviour", () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("relative and empty PATH elements are searched from the child's cwd, as the child does", () => {
+  const host = standIns();
+  const parent = mkdtempSync(join(tmpdir(), "kaoiro577-relative-path-"));
+  const before = process.cwd();
+  try {
+    mkdirSync(join(parent, "bin"));
+    for (const name of ["gh", "docker", "systemctl"]) {
+      writeFileSync(join(parent, "bin", name), `#!/bin/sh\nprintf 'owned ${name}'\n`, { mode: 0o700 });
+    }
+    process.chdir(parent);
+    for (const [name, code] of [["gh", "ERR_TEST_HOST_TOOL"], ["docker", "ERR_TEST_HOST_TOOL"], ["systemctl", "ERR_TEST_HOST_SYSTEMD"]]) {
+      assert.throws(() => spawnSync(name, ["--version"], { cwd: host.root, env: { PATH: "bin" } }), { code });
+      assert.throws(() => spawnSync(name, ["--version"], { cwd: host.bin, env: { PATH: ":/nonexistent" } }), { code });
+      assert.equal(execFileSync(name, [], { cwd: parent, env: { PATH: "bin" }, encoding: "utf8" }), `owned ${name}`);
+      assert.equal(execFileSync(name, [], { cwd: join(parent, "bin"), env: { PATH: "/nonexistent::" }, encoding: "utf8" }), `owned ${name}`);
+    }
+    assert.deepEqual(host.calls(), []);
+  } finally {
+    process.chdir(before);
+    host.cleanup();
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test("issue 571 replay: a fixed PATH that skips the fake reaches a refusal, not the host", () => {
   const host = standIns();
   const fake = mkdtempSync(join(tmpdir(), "kaoiro577-skipped-fake-"));

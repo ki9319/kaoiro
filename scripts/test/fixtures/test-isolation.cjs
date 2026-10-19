@@ -14,6 +14,7 @@ const { syncBuiltinESMExports } = require("node:module");
 const net = require("node:net");
 const { homedir, tmpdir } = require("node:os");
 const { basename, delimiter, dirname, isAbsolute, join, resolve, sep } = require("node:path");
+const { fileURLToPath } = require("node:url");
 const { promisify } = require("node:util");
 const workerThreads = require("node:worker_threads");
 
@@ -232,10 +233,13 @@ function childEnv(options) {
   return options.env ?? process.env;
 }
 
+// The child changes to its cwd before execvp, so relative PATH elements, and
+// an empty one (the cwd itself), are searched from there.
 function program(file, options) {
-  if (file.includes("/")) return resolve(options.cwd ?? process.cwd(), file);
-  const path = options.env ? (options.env.PATH ?? DEFAULT_PATH) : (process.env.PATH ?? "");
-  return path.split(delimiter).filter(Boolean).map(directory => resolve(directory, file)).find(executable);
+  const cwd = resolve(options.cwd instanceof URL ? fileURLToPath(options.cwd) : options.cwd ?? ".");
+  if (file.includes("/")) return resolve(cwd, file);
+  const path = childEnv(options).PATH ?? DEFAULT_PATH;
+  return path.split(delimiter).map(directory => resolve(cwd, directory, file)).find(executable);
 }
 
 // What execvp would run: a regular file with an execute bit.
