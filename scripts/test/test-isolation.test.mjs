@@ -246,7 +246,9 @@ test("a root process removes inherited credentials and host pointers once", () =
   const result = spawnSync("env", ["-u", "KAOIRO_TEST_ISOLATION_CHILD", "GH_TOKEN=planted-host-token",
     "SSH_AUTH_SOCK=/planted/agent.sock", "DOCKER_CONTEXT=planted", "DBUS_SESSION_BUS_ADDRESS=unix:path=/planted/bus",
     process.execPath, "--input-type=module", "-e", `
-      await import(${JSON.stringify(MODULE)});
+      // The CommonJS implementation alone, as a --require preload loads it: the
+      // ES facade would neutralise again for each entry and hide a missing root step.
+      (await import("node:module")).createRequire(import.meta.url)(${JSON.stringify(MODULE.replace(/\.mjs$/, ".cjs"))});
       const { execFileSync } = await import("node:child_process");
       process.stdout.write(execFileSync("sh", ["-c", 'printf "%s|%s|%s|%s" "\${GH_TOKEN-unset}" "\${SSH_AUTH_SOCK-unset}" "\${DOCKER_CONTEXT-unset}" "$DBUS_SESSION_BUS_ADDRESS"'], { encoding: "utf8" }));`],
   { encoding: "utf8" });
