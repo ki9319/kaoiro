@@ -501,3 +501,20 @@ test("a TMPDIR that holds the real runtime directory does not make the session b
     assert.match(result.stdout, /kaoiro-test-isolation-.*\/no-bus$/);
   } finally { rmSync(temp, { recursive: true, force: true }); }
 });
+
+test("the updater runs with an owned manager and refuses a reachable host systemd-run", () => {
+  const host = standIns();
+  const owned = mkdtempSync(join(tmpdir(), "kaoiro577-updater-"));
+  try {
+    const sink = join(owned, "sink.log");
+    for (const name of ["systemctl", "kaoiro-runner-update.sh"]) {
+      writeFileSync(join(owned, name), `#!/bin/sh\nprintf '${name}\\n' >> '${sink}'\n`, { mode: 0o700 });
+    }
+    const updater = join(owned, "kaoiro-runner-update.sh");
+    const env = { PATH: `${owned}:/nonexistent`, KAOIRO_SYSTEMCTL: join(owned, "systemctl") };
+    assert.equal(spawnSync(updater, [], { env }).status, 0);
+    assert.throws(() => spawnSync(updater, [], { env: { ...env, KAOIRO_SYSTEMD_RUN: join(host.bin, "systemd-run") } }), { code: "ERR_TEST_HOST_SYSTEMD" });
+    assert.throws(() => spawnSync(updater, [], { env: { PATH: "/nonexistent" } }), { code: "ERR_TEST_HOST_SYSTEMD" });
+    assert.equal(readFileSync(sink, "utf8"), "kaoiro-runner-update.sh\n");
+  } finally { host.cleanup(); rmSync(owned, { recursive: true, force: true }); }
+});
