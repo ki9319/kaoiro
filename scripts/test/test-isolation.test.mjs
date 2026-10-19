@@ -353,3 +353,19 @@ test("permitHostAccess needs its opt-in variable and is handed to children", () 
     assert.equal(host.calls().length, 2);
   } finally { host.cleanup(); }
 });
+
+test("a Node script with a non-JavaScript name still starts and is guarded", () => {
+  const root = mkdtempSync(join(tmpdir(), "kaoiro577-sh-node-"));
+  try {
+    const tool = join(root, "fake-tool.sh");
+    writeFileSync(tool, "#!/usr/bin/env node\nconsole.log(JSON.stringify({ marker: Boolean(globalThis[Symbol.for('kaoiro.test.isolation')]) }));\n", { mode: 0o700 });
+    assert.deepEqual(JSON.parse(execFileSync(tool, [], { env: { PATH: CHILD_PATH_FOR_TESTS }, encoding: "utf8" })), { marker: true });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an updater path passed to another program is not an updater launch", () => {
+  const updater = fileURLToPath(new URL("../../runner/deploy/kaoiro-runner-update.sh", import.meta.url));
+  assert.equal(execFileSync(process.execPath, ["-e", "process.stdout.write(process.argv[1])", updater], { encoding: "utf8" }), updater);
+  assert.throws(() => spawnSync("sh", [updater, "--service", "kaoiro-runner"]), { code: "ERR_TEST_HOST_SYSTEMD" });
+  assert.throws(() => spawnSync("setsid", [updater, "--service", "kaoiro-runner"]), { code: "ERR_TEST_HOST_SYSTEMD" });
+});

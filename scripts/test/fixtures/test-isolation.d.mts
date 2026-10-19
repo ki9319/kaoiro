@@ -6,3 +6,4 @@ export function permitHostAccess(options: {
   reason: string;
 }): boolean;
 export function registerForeignRoot(directory: string): void;
+export function isolationNodeOptions(): string;

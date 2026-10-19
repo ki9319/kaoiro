@@ -54,6 +54,13 @@ test("a repository that follows the contract has no problems", () => {
   assert.deepEqual(problemsAfter(() => {}), []);
 });
 
+test("a package-local setup file that imports the module first is accepted", () => {
+  assert.deepEqual(problemsAfter(root => {
+    write(root, "dashboard/test/isolation.setup.ts", 'import "../../scripts/test/fixtures/test-isolation.mjs";\n');
+    write(root, "dashboard/vitest.config.ts", 'export default { test: { setupFiles: ["test/isolation.setup.ts"] } };\n');
+  }), []);
+});
+
 const mutations = {
   "an existing scripts entry loses its first import": [
     root => write(root, "scripts/test/a.test.mjs", 'import { test } from "node:test";\ntest("x", () => {});\n'),
@@ -79,6 +86,12 @@ const mutations = {
   "a vitest package whose setup does not load the module first": [
     root => write(root, "runner/vitest.config.ts", 'export default { test: { setupFiles: ["test/setup.ts"] } };\n'),
     /runner: setupFiles does not load/],
+  "a package-local setup file that does not import the module first": [
+    root => {
+      write(root, "dashboard/test/isolation.setup.ts", 'import "./other.ts";\n');
+      write(root, "dashboard/vitest.config.ts", 'export default { test: { setupFiles: ["test/isolation.setup.ts"] } };\n');
+    },
+    /dashboard: setupFiles does not load/],
   "a vitest package missing its canary": [
     root => rmSync(join(root, "wrapper/core/test/test-isolation.canary.test.ts")),
     /wrapper\/core: missing test\/test-isolation\.canary\.test\.ts/],

@@ -10,12 +10,12 @@ import { syncBuiltinESMExports } from "node:module";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import workerThreads from "node:worker_threads";
 
 const STATE = Symbol.for("kaoiro.test.isolation");
-const SELF = pathToFileURL(fileURLToPath(import.meta.url)).href;
+const PRELOAD = fileURLToPath(new URL("./test-isolation-preload.cjs", import.meta.url));
 const CHILD = "KAOIRO_TEST_ISOLATION_CHILD";
 const ROOTS = "KAOIRO_TEST_ISOLATION_ROOTS";
 const PERMIT = "KAOIRO_TEST_ISOLATION_PERMIT";
@@ -77,10 +77,17 @@ function inertPointers() {
   return current.inert;
 }
 
-function appendImport(options) {
-  const flag = `--import=${SELF}`;
-  return typeof options === "string" && options.split(/\s+/).includes(flag) ? options
-    : `${options ?? ""} ${flag}`.trim();
+const PRELOAD_FLAG = `--require="${PRELOAD.replace(/(["\\])/g, "\\$1")}"`;
+
+/** The NODE_OPTIONS value the boundary gives a child whose own NODE_OPTIONS
+ *  is empty. */
+export function isolationNodeOptions() {
+  return PRELOAD_FLAG;
+}
+
+function appendPreload(options) {
+  return typeof options === "string" && options.includes(PRELOAD_FLAG) ? options
+    : `${options ?? ""} ${PRELOAD_FLAG}`.trim();
 }
 
 /** The environment a child really receives: the caller's (or the inherited
@@ -92,7 +99,7 @@ export function boundaryEnvironment(env) {
   for (const key of POINTERS) {
     if (!ownedPath(pointerPath(key, result[key]))) result[key] = inertPointers()[key];
   }
-  result.NODE_OPTIONS = appendImport(result.NODE_OPTIONS);
+  result.NODE_OPTIONS = appendPreload(result.NODE_OPTIONS);
   result[CHILD] = "1";
   result[ROOTS] = JSON.stringify(current.roots);
   result[FOREIGN] = JSON.stringify(current.foreign);
@@ -196,12 +203,20 @@ function protect(file, args, options) {
   const actual = resolved && actualProgram(resolved);
   checkTool(basename(file), actual);
   if (actual) checkTool(basename(actual), actual);
-  const runsUpdater = [file, ...args].some(arg => typeof arg === "string" && basename(arg) === "kaoiro-runner-update.sh");
+  const name = basename(actual ?? file);
+  const isUpdater = arg => typeof arg === "string" && basename(arg) === "kaoiro-runner-update.sh";
+  const scriptArg = args.find(arg => typeof arg === "string" && !arg.startsWith("-"));
+  // Only an executed updater can reach a manager: run directly, as a shell's
+  // script argument, or through a launcher. A path merely passed to another
+  // program is not a launch.
+  const runsUpdater = isUpdater(file) || (SHELLS.has(name) && isUpdater(scriptArg)) ||
+    (LAUNCHERS.has(name) && args.some(isUpdater));
   if (runsUpdater && !state().permitted.has("systemd")) {
     const manager = program(options.env?.KAOIRO_SYSTEMCTL ?? process.env.KAOIRO_SYSTEMCTL ?? "systemctl", options);
-    if (!manager || !ownedPath(manager)) refuse("ERR_TEST_HOST_SYSTEMD", "test refused updater shell with a host manager");
+    if (!manager || !ownedPath(actualProgram(manager))) {
+      refuse("ERR_TEST_HOST_SYSTEMD", "test refused updater shell with a host manager");
+    }
   }
-  const name = basename(actual ?? file);
   if (SHELLS.has(name) || LAUNCHERS.has(name)) {
     for (const arg of args) {
       if (typeof arg !== "string") continue;

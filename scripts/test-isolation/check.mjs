@@ -24,6 +24,7 @@ export const PERMIT_ALLOW = {
   "scripts/test/production-release-native.test.mjs": ["systemd"],
   "scripts/test/production-release-unit.test.mjs": ["systemd"],
   "scripts/test/test-isolation.test.mjs": ["systemd"],
+  "scripts/test/runner-pairing.test.mjs": ["docker"],
   "runner/test/grok_sessions.native.test.ts": ["network"],
   "wrapper/antigravity/test/agy131_native.test.ts": ["network"],
   "wrapper/antigravity/test/live_agy_stream_input.test.ts": ["network"],
@@ -224,7 +225,13 @@ function vitestWiring(root, all, problems) {
     const configs = all.filter(path => posix.dirname(path) === pkg && /^(?:vitest|vite)\.config\.[cm]?[jt]s$/.test(posix.basename(path)));
     const first = configs.map(path => readFileSync(join(root, path), "utf8").match(/setupFiles:\s*\[\s*["']([^"']+)["']/)?.[1])
       .find(Boolean);
-    if (!first || posix.normalize(posix.join(pkg, first)) !== MODULE) problems.push(`${pkg}: setupFiles does not load ${MODULE} first`);
+    let loaded = first && posix.normalize(posix.join(pkg, first));
+    // One hop: a package-local setup file whose first import is the module.
+    if (loaded && loaded !== MODULE && all.includes(loaded)) {
+      const hop = firstImport(readFileSync(join(root, loaded), "utf8"));
+      loaded = hop && posix.normalize(posix.join(posix.dirname(loaded), hop));
+    }
+    if (loaded !== MODULE) problems.push(`${pkg}: setupFiles does not load ${MODULE} first`);
   }
 }
 

@@ -1,4 +1,4 @@
-import "./fixtures/test-isolation.mjs";
+import { permitHostAccess } from "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -168,8 +168,21 @@ function composeArgs(command) {
   return `compose -f docker-compose.yaml -f docker-compose.dogfood.yaml ${command}`;
 }
 
+// The real Compose probes below run only when opted in; otherwise the
+// isolation guard refuses docker and they skip as unavailable.
+permitHostAccess({
+  kinds: ["docker"],
+  optIn: "KAOIRO_DOCKER_COMPOSE_PROBE",
+  reason: "real docker compose resolution probe",
+});
+
 function dockerComposeVersion() {
-  return spawnSync("docker", ["compose", "version"], { encoding: "utf8" });
+  try {
+    return spawnSync("docker", ["compose", "version"], { encoding: "utf8" });
+  } catch (error) {
+    if (error.code === "ERR_TEST_HOST_TOOL") return { status: 1 };
+    throw error;
+  }
 }
 
 test("dev launcher appends a matching runner pair before every launch", () => {
@@ -213,7 +226,7 @@ test("dogfood launcher injects a matching override and rejects comma presets", (
 test("dogfood preserves a Compose-resolved trailing newline before appending", (t) => {
   const version = dockerComposeVersion();
   if (version.status !== 0) {
-    t.skip("docker compose is unavailable; trailing-newline caller probe skipped");
+    t.skip("docker compose is unavailable or KAOIRO_DOCKER_COMPOSE_PROBE is not 1; trailing-newline caller probe skipped");
     return;
   }
   const dockerPath = spawnSync("sh", ["-c", "command -v docker"], { encoding: "utf8" });
@@ -232,7 +245,7 @@ test("dogfood preserves a Compose-resolved trailing newline before appending", (
 test("dogfood override produces the appended Compose environment", (t) => {
   const version = dockerComposeVersion();
   if (version.status !== 0) {
-    t.skip("docker compose is unavailable; Compose environment probe skipped");
+    t.skip("docker compose is unavailable or KAOIRO_DOCKER_COMPOSE_PROBE is not 1; Compose environment probe skipped");
     return;
   }
 

@@ -1,7 +1,9 @@
-import "./fixtures/test-isolation.mjs";
+import { isolationNodeOptions } from "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
@@ -14,13 +16,16 @@ const root = fileURLToPath(new URL("../..", import.meta.url));
 const hostile = { PATH: "/attacker", GIT_DIR: "/attacker", GIT_WORK_TREE: "/attacker",
   GIT_EXEC_PATH: "/attacker", GIT_SSH: "/attacker", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "evil",
   LD_PRELOAD: "/attacker", NODE_OPTIONS: "--import=/attacker", GH_TOKEN: "inert-secret", EXTRA_SECRET: "secret" };
+// The test isolation boundary gives every child exactly its own preload in
+// NODE_OPTIONS; a leaked hostile value would be kept in front of it.
+const expectedChild = key => key === "NODE_OPTIONS" ? isolationNodeOptions() : undefined;
 
 test("default constructor executes a real child with a closed environment", () => {
   const saved = { ...process.env };
   Object.assign(process.env, hostile);
   try {
     const actual = JSON.parse(execChildSync("git", process.execPath, ["-e", "console.log(JSON.stringify(process.env))"], { encoding: "utf8" }));
-    for (const key of Object.keys(hostile).filter(key => key !== "PATH")) assert.equal(actual[key], undefined, key);
+    for (const key of Object.keys(hostile).filter(key => key !== "PATH")) assert.equal(actual[key], expectedChild(key), key);
     assert.equal(actual.PATH, CHILD_PATH);
     assert.equal(actual.GIT_CONFIG_GLOBAL, "/dev/null");
   } finally { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); }
@@ -44,7 +49,7 @@ test("build children retain the exact selected toolchain PATH without ambient cr
     { encoding: "utf8", env: { ...hostile, PATH: selectedPath, PNPM_HOME: "/fixture/toolchain" } }));
   assert.equal(actual.PATH, selectedPath);
   assert.equal(actual.PNPM_HOME, "/fixture/toolchain");
-  for (const key of Object.keys(hostile).filter(key => key !== "PATH")) assert.equal(actual[key], undefined, key);
+  for (const key of Object.keys(hostile).filter(key => key !== "PATH")) assert.equal(actual[key], expectedChild(key), key);
   for (const value of [undefined, "", null, 1]) {
     assert.equal(childEnvironment("build", { PATH: value }).PATH, CHILD_PATH);
   }
@@ -101,11 +106,16 @@ test("coverage pins import-only, spawn/fork, exact legacy count and both scope-p
 });
 
 test("gh keyring session values reach a real child without SSH or loader authority", () => {
-  const env = { ...hostile, DBUS_SESSION_BUS_ADDRESS: "unix:path=/fixture/bus", XDG_RUNTIME_DIR: "/fixture/runtime", SSH_AUTH_SOCK: "/fixture/ssh" };
-  const actual = JSON.parse(execChildSync("gh", process.execPath, ["-e", "console.log(JSON.stringify(process.env))"], { encoding: "utf8", env }));
-  assert.equal(actual.DBUS_SESSION_BUS_ADDRESS, env.DBUS_SESSION_BUS_ADDRESS);
-  assert.equal(actual.XDG_RUNTIME_DIR, env.XDG_RUNTIME_DIR);
-  assert.equal(actual.SSH_AUTH_SOCK, undefined);
-  assert.equal(actual.LD_PRELOAD, undefined);
-  assert.equal(actual.GIT_DIR, undefined);
+  // Session pointers live in an owned directory: the isolation boundary would
+  // replace a host-like pointer, which would hide whether the product kept it.
+  const session = mkdtempSync(join(tmpdir(), "kaoiro-gh-session-"));
+  try {
+    const env = { ...hostile, DBUS_SESSION_BUS_ADDRESS: `unix:path=${join(session, "bus")}`, XDG_RUNTIME_DIR: join(session, "runtime"), SSH_AUTH_SOCK: "/fixture/ssh" };
+    const actual = JSON.parse(execChildSync("gh", process.execPath, ["-e", "console.log(JSON.stringify(process.env))"], { encoding: "utf8", env }));
+    assert.equal(actual.DBUS_SESSION_BUS_ADDRESS, env.DBUS_SESSION_BUS_ADDRESS);
+    assert.equal(actual.XDG_RUNTIME_DIR, env.XDG_RUNTIME_DIR);
+    assert.equal(actual.SSH_AUTH_SOCK, undefined);
+    assert.equal(actual.LD_PRELOAD, undefined);
+    assert.equal(actual.GIT_DIR, undefined);
+  } finally { rmSync(session, { recursive: true, force: true }); }
 });
