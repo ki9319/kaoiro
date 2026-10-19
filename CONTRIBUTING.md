@@ -12,3 +12,7 @@
 
 See [README.md](README.md) for the project's architecture and design
 documents under `docs/`.
+
+Tests must not reach host services (the user service manager, `gh`,
+`docker`) or the network; see
+[docs/contributing/test-isolation.md](docs/contributing/test-isolation.md).

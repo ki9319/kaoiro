@@ -1,3 +1,4 @@
+import { permitHostAccess } from "../../../scripts/test/fixtures/test-isolation.mjs";
 // Existing Claude real-process tests substitute a CLI executable. This suite
 // uses the bundled CLI itself, so it is opt-in like live_agy_stream_input:
 // KAOIRO_LIVE_CLAUDE=1 env -u CODEX_HOME pnpm exec vitest run test/haiku55_native.test.ts
@@ -11,6 +12,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { Envelope, WrapperConfig } from "@kaoiro/agent-common";
 import { AgentHost } from "../src/host.js";
 import { runClaudeCli } from "../src/cli.js";
+
+permitHostAccess({
+  kinds: ["network"],
+  optIn: "KAOIRO_LIVE_CLAUDE",
+  reason: "live Claude provider turn",
+});
 
 const levels = ["low", "medium", "high", "xhigh", "max"] as const;
 const cases = [

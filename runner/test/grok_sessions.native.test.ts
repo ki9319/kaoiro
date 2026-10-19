@@ -1,7 +1,14 @@
+import { permitHostAccess } from "../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it, vi } from "vitest";
 import { runGrokProbe } from "../src/grok_acp_probe.js";
 import { grokSessionExists, listGrokSessions } from "../src/grok_sessions.js";
 import { makeGrokScratch, removeGrokState } from "./grok-state.js";
+
+permitHostAccess({
+  kinds: ["network"],
+  optIn: "KAOIRO_LIVE_GROK",
+  reason: "live Grok provider run",
+});
 
 // Discovery against the real grok (issue #644): Grok's session/list binds a
 // session to the exact cwd string the runner uses. KAOIRO_LIVE_GROK=1 only;

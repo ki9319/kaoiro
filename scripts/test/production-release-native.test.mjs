@@ -1,3 +1,4 @@
+import { permitHostAccess } from "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
@@ -34,6 +35,12 @@ import {
   queueProductionRunner,
   runnerWorkerUnit,
 } from "../production-runner-worker.mjs";
+
+permitHostAccess({
+  kinds: ["systemd"],
+  optIn: "KAOIRO_RELEASE_UNIT_PROBE",
+  reason: "owned native release unit probe",
+});
 
 const source = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const run = (bin, args) =>

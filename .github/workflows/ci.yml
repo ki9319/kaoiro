@@ -125,6 +125,19 @@ jobs:
           node-version: 22
       - run: node --test
 
+  # Test isolation contract (issue #577, docs/contributing/test-isolation.md):
+  # every test entry loads the isolation guard, and the guard refuses host
+  # tools and outbound network. Node only; no install needed.
+  test-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/test-isolation/check.mjs
+      - run: node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs
+
   # Checks out on the host, then runs mix inside a pinned Elixir image.
   #
   # Three findings from measuring this on the actual runner:

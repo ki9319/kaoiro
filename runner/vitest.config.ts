@@ -7,6 +7,9 @@ export default defineConfig({
   },
   test: {
     include: ["test/**/*.test.ts"],
-    setupFiles: ["test/vitest.setup.ts"],
+    setupFiles: [
+      "../scripts/test/fixtures/test-isolation.mjs",
+      "test/vitest.setup.ts",
+    ],
   },
 });

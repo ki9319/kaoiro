@@ -2,7 +2,7 @@
 title: Runner development
 description: Building, testing, and running the runner package locally, including the wrapper hot-reload dev stack.
 status: accepted
-last_updated: 2026-09-19
+last_updated: 2026-10-19
 related: [deployment]
 ---
 
@@ -13,6 +13,9 @@ pnpm -C runner typecheck
 pnpm -C runner test
 pnpm -C runner build
 ```
+
+Every test process runs under the shared isolation guard; see
+[Test isolation](test-isolation.md).
 
 For the local stack, [`scripts/dev.sh`](../../scripts/dev.sh) launches the
 server / dashboard / runner together. The runner runs under `tsx watch`, and

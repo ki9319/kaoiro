@@ -1,3 +1,4 @@
+import { permitHostAccess } from "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #534: Antigravity CLI 1.3.1 native production entrypoint acceptance.
 // Verifies through the production `runAntigravityCli` entrypoint (using the
 // default host factory and production tool assembly) against the real local
@@ -13,6 +14,12 @@ import { describe, expect, it } from "vitest";
 import type { Envelope, WrapperConfig } from "@kaoiro/agent-common";
 import { runAntigravityCli } from "../src/cli.js";
 import type { AntigravityHost } from "../src/host.js";
+
+permitHostAccess({
+  kinds: ["network"],
+  optIn: "KAOIRO_LIVE_AGY",
+  reason: "live Antigravity provider turn",
+});
 
 const LIVE = process.env.KAOIRO_LIVE_AGY === "1";
 

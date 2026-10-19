@@ -1,3 +1,4 @@
+import "./fixtures/test-isolation.mjs";
 import { syncBuiltinESMExports } from "node:module";
 import assert from "node:assert/strict";
 import childProcess, { execFileSync, spawnSync } from "node:child_process";

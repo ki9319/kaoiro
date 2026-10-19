@@ -1,3 +1,4 @@
+import { permitHostAccess } from "../../../scripts/test/fixtures/test-isolation.mjs";
 import { createServer } from "node:net";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -5,6 +6,12 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import type { PermissionControlExt } from "@kaoiro/protocol";
 import { nativeRun, type PermissionDecisionRecord } from "./native-support.js";
+
+permitHostAccess({
+  kinds: ["network"],
+  optIn: "KAOIRO_LIVE_GROK",
+  reason: "live Grok provider run",
+});
 const live = process.env.KAOIRO_LIVE_GROK === "1";
 const config = { agent_id: "native.permission-switch", display_name: "Permission fixture",
   server_url: "ws://127.0.0.1:1/agent", sandbox: "workspace-write" as const, network_access: true,

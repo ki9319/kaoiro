@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
 import { closeSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, rmSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";

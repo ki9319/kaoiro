@@ -1,3 +1,4 @@
+import { permitHostAccess } from "../../../scripts/test/fixtures/test-isolation.mjs";
 import http from "node:http";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
@@ -5,6 +6,12 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import type { WrapperConfig } from "@kaoiro/agent-common";
 import { nativeRun } from "./native-support.js";
+
+permitHostAccess({
+  kinds: ["network"],
+  optIn: "KAOIRO_LIVE_GROK",
+  reason: "live Grok provider run",
+});
 
 const live = process.env.KAOIRO_LIVE_GROK === "1";
 

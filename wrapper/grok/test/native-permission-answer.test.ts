@@ -1,9 +1,16 @@
+import { permitHostAccess } from "../../../scripts/test/fixtures/test-isolation.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import type { WrapperConfig } from "@kaoiro/agent-common";
 import { nativeRun, type PermissionDecisionRecord } from "./native-support.js";
+
+permitHostAccess({
+  kinds: ["network"],
+  optIn: "KAOIRO_LIVE_GROK",
+  reason: "live Grok provider run",
+});
 
 // Negative controls for the live permission path (issue 615): the plugin makes
 // Grok ask on any host, so the answer the test gives decides the turn.

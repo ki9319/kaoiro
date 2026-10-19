@@ -1,3 +1,4 @@
+import "./fixtures/test-isolation.mjs";
 import { installChildFixture } from "./fixtures/child-process-fixture.mjs";
 import assert from "node:assert/strict";
 import {

@@ -1,3 +1,4 @@
+import { permitHostAccess } from "../../../scripts/test/fixtures/test-isolation.mjs";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,12 @@ import type { ResolvedSnapshotExt, WrapperConfig } from "@kaoiro/agent-common";
 import type { GrokHost } from "../src/host.js";
 import { makeGrokScratch, removeGrokState } from "./grok-state.js";
 import { nativeRun } from "./native-support.js";
+
+permitHostAccess({
+  kinds: ["network"],
+  optIn: "KAOIRO_LIVE_GROK",
+  reason: "live Grok provider run",
+});
 
 // Work unit 3a acceptance against the real grok (issue #644): a resumed agent
 // keeps its cwd, engine, permission, and model and effort with their sources,

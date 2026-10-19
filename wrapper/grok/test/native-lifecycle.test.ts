@@ -1,3 +1,4 @@
+import { permitHostAccess } from "../../../scripts/test/fixtures/test-isolation.mjs";
 import {
   mkdtempSync,
   mkdirSync,
@@ -14,6 +15,12 @@ import type { WrapperConfig } from "@kaoiro/agent-common";
 import { nativeRun } from "./native-support.js";
 import * as grokEvents from "../src/grok/events.js";
 import { checkForegroundTool } from "./acceptance.js";
+
+permitHostAccess({
+  kinds: ["network"],
+  optIn: "KAOIRO_LIVE_GROK",
+  reason: "live Grok provider run",
+});
 const live = process.env.KAOIRO_LIVE_GROK === "1";
 const config: WrapperConfig = {
   agent_id: "native.lifecycle",

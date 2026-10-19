@@ -1,8 +1,15 @@
+import { permitHostAccess } from "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { unitSnapshot, unitCommandSnapshot, verifyRetainedUnitCommand } from "../production-release-unit.mjs";
+
+permitHostAccess({
+  kinds: ["systemd"],
+  optIn: "KAOIRO_RELEASE_UNIT_PROBE",
+  reason: "owned native release unit probe",
+});
 
 test("typed unit verification distinguishes argv boundaries and requires the actual expansion flag", () => {
   const argv = ["/usr/bin/true", "a b", "literal $BACKUP ${HOME} %h %%"];

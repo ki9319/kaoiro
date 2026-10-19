@@ -1,7 +1,14 @@
+import { permitHostAccess } from "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it, vi } from "vitest";
 import type { Envelope, WrapperConfig } from "@kaoiro/agent-common";
 import { makeGrokScratch, removeGrokState } from "./grok-state.js";
 import { nativeRun } from "./native-support.js";
+
+permitHostAccess({
+  kinds: ["network"],
+  optIn: "KAOIRO_LIVE_GROK",
+  reason: "live Grok provider run",
+});
 
 // Work unit 3b acceptance against the real grok (issue #645): resuming a
 // session after a tool-call turn replays its user, tool_use, tool_result and

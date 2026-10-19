@@ -1,3 +1,4 @@
+import { permitHostAccess } from "../../../scripts/test/fixtures/test-isolation.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,12 @@ import type { ServerLink, ServerLinkOptions } from "@kaoiro/wrapper-core";
 import type { Envelope, WrapperConfig } from "@kaoiro/agent-common";
 import { runGrokCli } from "../src/cli.js";
 import { GrokHost } from "../src/host.js";
+
+permitHostAccess({
+  kinds: ["network"],
+  optIn: "KAOIRO_LIVE_GROK_RATE_LIMITS",
+  reason: "live Grok provider run",
+});
 
 const live = process.env.KAOIRO_LIVE_GROK_RATE_LIMITS === "1";
 const config: WrapperConfig = {

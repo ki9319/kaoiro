@@ -1,9 +1,16 @@
+import { permitHostAccess } from "../../../scripts/test/fixtures/test-isolation.mjs";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { childEnvironment, inspectPolicy } from "../src/grok/policy.js";
+
+permitHostAccess({
+  kinds: ["network"],
+  optIn: "KAOIRO_LIVE_GROK",
+  reason: "live Grok provider run",
+});
 it.skipIf(process.env.KAOIRO_LIVE_GROK !== "1")(
   "native inspect includes a trusted project permission source",
   async () => {

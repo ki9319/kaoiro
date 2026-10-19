@@ -1,3 +1,4 @@
+import "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";

@@ -1,3 +1,4 @@
+import { permitHostAccess } from "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #377 Stage 1 M2 (kohaku design review round 1): the fixture-based
 // pins above measure the wrapper's OWN responsibility (argv shape, the
 // NDJSON write, the ack point) against a fake stdin/stdout pair -- they
@@ -19,6 +20,12 @@ import { describe, expect, it } from "vitest";
 import { PermissionBroker, type Envelope } from "@kaoiro/agent-common";
 import { AntigravityHost, type SpawnedAgy } from "../src/host.js";
 import type { AntigravityLaunchConfig } from "../src/gate.js";
+
+permitHostAccess({
+  kinds: ["network"],
+  optIn: "KAOIRO_LIVE_AGY",
+  reason: "live Antigravity provider turn",
+});
 
 const LIVE = process.env.KAOIRO_LIVE_AGY === "1";
 
