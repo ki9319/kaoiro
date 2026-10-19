@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { BUILD_COMMANDS, EXPECTED_NESTED, buildPackages, which } from "../pre-gate/pre-gate.mjs";
+import { BUILD_COMMANDS, EXPECTED_NESTED, buildPackages, runGate, which } from "../pre-gate/pre-gate.mjs";
 import { DEFAULT_RECORD, createCountParser, runRecorded } from "../pre-gate/run-recorded.mjs";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
@@ -59,7 +59,7 @@ const COUNTER = `import { appendFileSync, existsSync } from "node:fs";
 appendFileSync(process.argv[2], JSON.stringify({ cwd: process.cwd(), dist: existsSync("wrapper/core/dist") }) + "\\n");
 `;
 
-function makeFixture(mode) {
+function makeFixture(mode, rootPackage = JSON.stringify({ packageManager: "pnpm@10.20.0", engines: { node: ">=22" } })) {
   const dir = fresh("fixture");
   const repo = join(dir, "repo");
   const put = (name, content) => {
@@ -67,7 +67,7 @@ function makeFixture(mode) {
     writeFileSync(join(repo, name), content);
   };
   mkdirSync(repo);
-  put("package.json", JSON.stringify({ packageManager: "pnpm@10.20.0", engines: { node: ">=22" } }));
+  put("package.json", rootPackage);
   put("pnpm-workspace.yaml", "packages:\n  - wrapper/core\n  - runner\n# not a package\n");
   put("wrapper/core/package.json", JSON.stringify({ scripts: { build: "x" } }));
   put("runner/package.json", JSON.stringify({ scripts: { build: "x" } }));
@@ -86,8 +86,8 @@ function fakeBin() {
 
 // Runs the gate CLI from `gateDir` against a fixture whose committed
 // fake-mode.json is `mode`. The suite command is a counter script.
-function scenario({ mode, gateDir = realGateDir, withExec = true, path, repoEdit }) {
-  const fixture = makeFixture(mode);
+function scenario({ mode, gateDir = realGateDir, withExec = true, path, repoEdit, rootPackage }) {
+  const fixture = makeFixture(mode, rootPackage);
   if (repoEdit) repoEdit(fixture.repo);
   const tmp = fresh("tmp");
   const record = join(fixture.dir, "records.jsonl");
@@ -187,6 +187,32 @@ test("a nested pnpm call that never goes through PNPM_HOME is caught although th
   assert.equal(seen.gate.failure.kind, "marker_missing");
   assert.ok(buildExits(seen.gate).every((exit) => exit === 0));
   assert.equal(seen.runs.length, 0);
+});
+
+test("an unexpected exception inside the gate is recorded with its stage and returns non-zero", () => {
+  const seen = scenario({ mode: {}, rootPackage: "{ invalid JSON" });
+  assert.equal(seen.result.status, 2);
+  assert.equal(seen.gate.stage_failed, "toolchain");
+  assert.equal(seen.gate.failure.kind, "internal_error");
+  assert.match(seen.gate.failure.detail, /JSON/);
+  assert.equal(seen.gate.exit_code, 2);
+  assert.equal(seen.runs.length, 0);
+  assert.deepEqual(seen.leftovers, []);
+  assert.equal(seen.worktrees, 1);
+});
+
+test("over_budget measures the checks before the suite, not the suite", async () => {
+  const fixture = makeFixture({});
+  const base = { repo: fixture.repo, rev: fixture.sha, recordFile: join(fixture.dir, "r.jsonl"), log: () => {},
+    env: { ...process.env, PATH: `${fakeBin()}:${process.env.PATH}`, TMPDIR: fresh("tmp") },
+    exec: [process.execPath, "-e", "setTimeout(() => {}, 3000)"] };
+  const slowSuite = await runGate({ ...base, budgetMs: 2500 });
+  assert.equal(slowSuite.exit_code, 0);
+  assert.ok(slowSuite.duration_ms > 3000, String(slowSuite.duration_ms));
+  assert.ok(slowSuite.precheck_ms < 2500, String(slowSuite.precheck_ms));
+  assert.equal(slowSuite.over_budget, false);
+  const tinyBudget = await runGate({ ...base, exec: [], budgetMs: 1 });
+  assert.equal(tinyBudget.over_budget, true);
 });
 
 test("the gate alone checks the commit and starts no suite", () => {
@@ -289,6 +315,40 @@ const sink = () => {
   const chunks = [];
   return { write: (chunk) => chunks.push(String(chunk)), text: () => chunks.join("") };
 };
+
+// A child that writes stdout in pieces, with stderr output in between, the way
+// two real pipes interleave.
+const interleaved = (script) => [process.execPath, "-e", script];
+
+test("an unfinished stdout line is not joined with stderr output that arrives in the middle of it", async () => {
+  const record = await runRecorded({
+    command: interleaved("process.stdout.write('# tests 1\\n# pass '); setTimeout(() => process.stderr.write('diagnostic\\n'), 50); setTimeout(() => process.stdout.write('1\\n# fail 0\\n'), 100);"),
+    recordFile: join(fresh("rec"), "r.jsonl"), stdout: sink(), stderr: sink() });
+  assert.deepEqual(record.counts, { "node:test": { total: 1, passed: 1, failed: 0 } });
+});
+
+test("each stream's last line without a newline is parsed on its own", async () => {
+  const record = await runRecorded({
+    command: interleaved("process.stdout.write('# tests 1\\n# pass 1'); process.stderr.write('# fail 0');"),
+    recordFile: join(fresh("rec"), "r.jsonl"), stdout: sink(), stderr: sink() });
+  assert.deepEqual(record.counts, { "node:test": { total: 1, passed: 1, failed: 0 } });
+});
+
+test("a multi-byte character split across chunks is decoded as one character", async () => {
+  // U+00A0 is two bytes (c2 a0) and counts as whitespace before the summary key.
+  const record = await runRecorded({
+    command: interleaved("process.stdout.write(Buffer.from([0xc2])); setTimeout(() => process.stdout.write(Buffer.concat([Buffer.from([0xa0]), Buffer.from('# pass 1\\n')])), 80);"),
+    recordFile: join(fresh("rec"), "r.jsonl"), stdout: sink(), stderr: sink() });
+  assert.deepEqual(record.counts, { "node:test": { passed: 1 } });
+});
+
+test("the parser decodes each stream with its own decoder", () => {
+  const parser = createCountParser();
+  parser.push(Buffer.from([0xc2]), "stdout");
+  parser.push(Buffer.from("x\n"), "stderr");
+  parser.push(Buffer.concat([Buffer.from([0xa0]), Buffer.from("# pass 2\n")]), "stdout");
+  assert.deepEqual(parser.result(), { "node:test": { passed: 2 } });
+});
 
 test("the recorder preserves a failing child's exit code and records it", async () => {
   const record = await runRecorded({ command: [process.execPath, "-e", "console.log('# tests 1\\n# pass 0\\n# fail 1'); process.exit(3)"],

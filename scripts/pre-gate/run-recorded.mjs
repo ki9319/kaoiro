@@ -2,6 +2,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { constants } from "node:os";
+import { StringDecoder } from "node:string_decoder";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -16,7 +17,6 @@ export function createCountParser() {
     counts[runner] ??= {};
     counts[runner][key] = (counts[runner][key] ?? 0) + value;
   };
-  let pending = "";
   const line = (text) => {
     text = text.replace(ANSI, "");
     const vitest = /(?:^|[\s:])Tests\s+(.*?)\s*\((\d+)\)\s*$/.exec(text);
@@ -36,15 +36,30 @@ export function createCountParser() {
       add("mix", "failed", Number(mix[2]));
     }
   };
+  // Each stream keeps its own unfinished line and its own UTF-8 decoder, so
+  // output from two pipes never joins and a character split across chunks is
+  // decoded whole.
+  const streams = new Map();
+  const state = (name) => {
+    if (!streams.has(name)) streams.set(name, { decoder: new StringDecoder("utf8"), pending: "" });
+    return streams.get(name);
+  };
+  const feed = (stream, text) => {
+    const lines = (stream.pending + text).split("\n");
+    stream.pending = lines.pop();
+    lines.forEach(line);
+  };
   return {
-    push(chunk) {
-      const lines = (pending + chunk).split("\n");
-      pending = lines.pop();
-      lines.forEach(line);
+    push(chunk, name = "stdout") {
+      const stream = state(name);
+      feed(stream, typeof chunk === "string" ? chunk : stream.decoder.write(chunk));
     },
     result() {
-      if (pending) line(pending);
-      pending = "";
+      for (const stream of streams.values()) {
+        feed(stream, stream.decoder.end());
+        if (stream.pending) line(stream.pending);
+        stream.pending = "";
+      }
       return Object.keys(counts).length ? counts : null;
     },
   };
@@ -109,10 +124,10 @@ export async function runRecorded({ command, cwd = process.cwd(), recordFile = D
         resolve(value);
       }
     };
-    for (const [stream, sink] of [[child.stdout, stdout], [child.stderr, stderr]]) {
+    for (const [name, stream, sink] of [["stdout", child.stdout, stdout], ["stderr", child.stderr, stderr]]) {
       stream.on("data", (chunk) => {
         sink.write(chunk);
-        parser.push(chunk.toString("utf8"));
+        parser.push(chunk, name);
       });
     }
     child.on("error", (error) => settle({ status: null, signal: null, error: error.code ?? error.message }));

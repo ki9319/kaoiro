@@ -83,7 +83,7 @@ export function markerSeen(lines) {
 const quote = (value) => `'${value.replaceAll("'", `'\\''`)}'`;
 const seconds = (ms) => (ms / 1000).toFixed(1);
 
-export async function runGate({ repo = SCRIPT_ROOT, rev = "HEAD", keep = false, exec = [], recordFile = DEFAULT_RECORD, env = process.env, log = (line) => process.stderr.write(`${line}\n`) }) {
+export async function runGate({ repo = SCRIPT_ROOT, rev = "HEAD", keep = false, exec = [], recordFile = DEFAULT_RECORD, env = process.env, budgetMs = BUDGET_MS, log = (line) => process.stderr.write(`${line}\n`) }) {
   const started = new Date();
   const steps = [];
   let stage = null;
@@ -93,6 +93,7 @@ export async function runGate({ repo = SCRIPT_ROOT, rev = "HEAD", keep = false, 
   let scratch = null;
   let tree = null;
   let phase = "revision";
+  let precheckMs = null;
   const stop = (kind, detail) => {
     throw new GateStop(phase, kind, detail);
   };
@@ -159,12 +160,15 @@ export async function runGate({ repo = SCRIPT_ROOT, rev = "HEAD", keep = false, 
       missing = missingArtifacts(tree);
       if (missing.length) stop("artifact_missing", missing);
     } catch (error) {
-      if (!(error instanceof GateStop)) throw error;
-      stage = error.stage;
-      failure = { kind: error.kind, detail: error.detail };
-      exitCode = 1;
-      log(`[pre-gate] stopped at ${stage}: ${error.message}`);
+      // An exception the gate did not plan for is still recorded, with the
+      // stage it happened in, and still ends the run without a suite.
+      const planned = error instanceof GateStop;
+      stage = planned ? error.stage : phase;
+      failure = planned ? { kind: error.kind, detail: error.detail } : { kind: "internal_error", detail: String(error?.message ?? error) };
+      exitCode = planned ? 1 : 2;
+      log(`[pre-gate] stopped at ${stage}: ${planned ? error.message : error.stack}`);
     }
+    precheckMs = Date.now() - started.getTime();
 
     if (!failure && exec.length) {
       const t0 = Date.now();
@@ -187,7 +191,7 @@ export async function runGate({ repo = SCRIPT_ROOT, rev = "HEAD", keep = false, 
   const record = buildRecord({
     command: ["pre-gate", "--rev", sha ?? rev, ...(exec.length ? ["--exec"] : [])], cwd: repo, started, ended, exit_code: exitCode,
     revision: sha, dirty,
-    extra: { stage_failed: stage, failure, steps, over_budget: ended - started > BUDGET_MS },
+    extra: { stage_failed: stage, failure, steps, precheck_ms: precheckMs, over_budget: precheckMs !== null && precheckMs > budgetMs },
   });
   writeRecord(record, recordFile);
   return record;
