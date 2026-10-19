@@ -58,13 +58,13 @@ test("the real updater shell cannot use a production service name with its real 
 });
 
 test("the updater-shell safety self-test delegates only to an inert sink if its guard is cut", () => {
-  const guard = fileURLToPath(new URL("./fixtures/test-isolation.mjs", import.meta.url));
+  const guard = fileURLToPath(new URL("./fixtures/test-isolation.cjs", import.meta.url));
   const updater = fileURLToPath(new URL("../../runner/deploy/kaoiro-runner-update.sh", import.meta.url));
   const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
     import childProcess from 'node:child_process';
     delete globalThis[Symbol.for('kaoiro.test.isolation')];
     childProcess.execFileSync = () => { throw new Error('inert updater sink reached'); };
-    await import(${JSON.stringify(guard)} + '?updater-self-test');
+    { const { createRequire } = await import('node:module'); const load = createRequire(${JSON.stringify(guard)}); delete load.cache[${JSON.stringify(guard)}]; load(${JSON.stringify(guard)}); }
     try { childProcess.execFileSync('sh',[${JSON.stringify(updater)},'--service','kaoiro-runner']); }
     catch(error) { if(error.code === 'ERR_TEST_HOST_SYSTEMD') process.exit(0); throw error; }
     process.exit(1);`], { encoding: "utf8" });
@@ -72,12 +72,12 @@ test("the updater-shell safety self-test delegates only to an inert sink if its 
 });
 
 test("the guard self-test uses an inert native sink if its refusal is removed", () => {
-  const guard = fileURLToPath(new URL("./fixtures/test-isolation.mjs", import.meta.url));
+  const guard = fileURLToPath(new URL("./fixtures/test-isolation.cjs", import.meta.url));
   const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
     import childProcess from 'node:child_process';
     delete globalThis[Symbol.for('kaoiro.test.isolation')];
     childProcess.execFileSync = () => { throw new Error('inert native sink reached'); };
-    await import(${JSON.stringify(guard)} + '?self-test');
+    { const { createRequire } = await import('node:module'); const load = createRequire(${JSON.stringify(guard)}); delete load.cache[${JSON.stringify(guard)}]; load(${JSON.stringify(guard)}); }
     try { childProcess.execFileSync('/usr/bin/systemd-run',['--version']); }
     catch(error) { if(error.code === 'ERR_TEST_HOST_SYSTEMD') process.exit(0); throw error; }
     process.exit(1);`], { encoding: "utf8" });
@@ -126,13 +126,13 @@ test("fork and shell-launched Node carry the guard with a NODE_OPTIONS-free envi
 });
 
 test("all new safety decisions use inert native sinks in the mutation self-test", () => {
-  const guard = fileURLToPath(new URL("./fixtures/test-isolation.mjs", import.meta.url));
+  const guard = fileURLToPath(new URL("./fixtures/test-isolation.cjs", import.meta.url));
   const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
     import childProcess from 'node:child_process';
     delete globalThis[Symbol.for('kaoiro.test.isolation')];
     for (const name of ['execFileSync','spawnSync','execFile','spawn','fork','execSync','exec'])
       childProcess[name] = () => { throw new Error('inert sink reached'); };
-    await import(${JSON.stringify(guard)} + '?all-shapes-self-test');
+    { const { createRequire } = await import('node:module'); const load = createRequire(${JSON.stringify(guard)}); delete load.cache[${JSON.stringify(guard)}]; load(${JSON.stringify(guard)}); }
     const checks = [
       () => childProcess.execSync('systemd-run --version'),
       () => childProcess.exec('systemd-run --version', () => {}),
@@ -387,4 +387,64 @@ test("gh and docker in shell strings are judged by what the shell would run", ()
     rmSync(owned, { recursive: true, force: true });
     rmSync(empty, { recursive: true, force: true });
   }
+});
+
+test("an opt-in gets the root's own environment back for its kinds, and a new entry ends it", () => {
+  {
+    const implementation = MODULE.replace(/\.mjs$/, ".cjs");
+    const code = `
+      const isolation = require(${JSON.stringify(implementation)});
+      const { execFileSync } = require("node:child_process");
+      const view = () => execFileSync("sh", ["-c", 'printf "%s|%s|%s" "$DBUS_SESSION_BUS_ADDRESS" "$XDG_RUNTIME_DIR" "$DOCKER_HOST"'], { encoding: "utf8" });
+      const grandchild = () => execFileSync(process.execPath, ["-e", "process.stdout.write(require('node:child_process').execFileSync('sh', ['-c', 'printf %s \\"$DBUS_SESSION_BUS_ADDRESS\\"'], { encoding: 'utf8' }))"], { encoding: "utf8" });
+      const granted = isolation.permitHostAccess({ kinds: ["systemd"], optIn: "KAOIRO_TEST_ISOLATION_SELF_PROBE", reason: "self-test" });
+      const during = view(), nested = grandchild();
+      isolation.beginEntry();
+      let after; try { execFileSync("systemctl", ["after"], { env: { PATH: "/nonexistent" } }); after = "ran"; } catch (error) { after = error.code; }
+      process.stdout.write(JSON.stringify({ granted, during, nested, reset: view(), after }));`;
+    // The probe goes in a file: launcher arguments naming systemd tools are refused.
+    const probe = join(mkdtempSync(join(tmpdir(), "kaoiro577-optin-")), "probe.cjs");
+    writeFileSync(probe, code);
+    const run = optIn => spawnSync("env", ["-u", "KAOIRO_TEST_ISOLATION_CHILD", "DBUS_SESSION_BUS_ADDRESS=unix:path=/planted/bus",
+      "XDG_RUNTIME_DIR=/planted/runtime", "DOCKER_HOST=unix:///planted/docker.sock", `KAOIRO_TEST_ISOLATION_SELF_PROBE=${optIn}`,
+      process.execPath, probe], { encoding: "utf8" });
+    const opted = run("1");
+    assert.equal(opted.status, 0, opted.stderr);
+    const report = JSON.parse(opted.stdout);
+    const [bus, runtime, docker] = report.during.split("|");
+    assert.deepEqual({ granted: report.granted, bus, runtime, nested: report.nested, after: report.after },
+      { granted: true, bus: "unix:path=/planted/bus", runtime: "/planted/runtime", nested: "unix:path=/planted/bus", after: "ERR_TEST_HOST_SYSTEMD" });
+    assert.match(docker, /kaoiro-test-isolation-.*\/no-docker\.sock$/);
+    assert.match(report.reset.split("|")[0], /kaoiro-test-isolation-.*\/no-bus$/);
+    const plain = JSON.parse(run("0").stdout);
+    assert.equal(plain.granted, false);
+    assert.match(plain.during.split("|")[0], /kaoiro-test-isolation-.*\/no-bus$/);
+    rmSync(dirname(probe), { recursive: true, force: true });
+  }
+});
+
+test("a child environment without PATH is searched the way libuv does, not with the parent's PATH", () => {
+  const owned = mkdtempSync(join(tmpdir(), "kaoiro577-parent-path-"));
+  const saved = { PATH: process.env.PATH, KAOIRO_SYSTEMCTL: process.env.KAOIRO_SYSTEMCTL, KAOIRO_SYSTEMD_RUN: process.env.KAOIRO_SYSTEMD_RUN };
+  try {
+    const sink = join(owned, "sink.log");
+    for (const name of ["systemctl", "systemd-run", "kaoiro-runner-update.sh"]) {
+      writeFileSync(join(owned, name), `#!/bin/sh\nprintf '${name}\\n' >> '${sink}'\n`, { mode: 0o700 });
+    }
+    process.env.PATH = `${owned}:${saved.PATH}`;
+    process.env.KAOIRO_SYSTEMCTL = join(owned, "systemctl");
+    process.env.KAOIRO_SYSTEMD_RUN = join(owned, "systemd-run");
+    assert.equal(spawnSync("systemctl", [], { encoding: "utf8" }).status, 0);
+    assert.throws(() => spawnSync("systemctl", ["--version"], { env: { FIXTURE: "1" } }), { code: "ERR_TEST_HOST_SYSTEMD" });
+    assert.throws(() => spawnSync(join(owned, "kaoiro-runner-update.sh"), [], { env: { PATH: CHILD_PATH_FOR_TESTS } }), { code: "ERR_TEST_HOST_SYSTEMD" });
+    assert.equal(readFileSync(sink, "utf8"), "systemctl\n");
+  } finally {
+    for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    rmSync(owned, { recursive: true, force: true });
+  }
+});
+
+test("an explicit undefined options slot keeps the callback and the promise", { timeout: 10_000 }, async () => {
+  await new Promise((resolve, reject) => execFile("/usr/bin/true", [], undefined, error => error ? reject(error) : resolve()));
+  assert.equal((await promisify(execFile)("/usr/bin/true", [], undefined)).stdout, "");
 });

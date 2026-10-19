@@ -25,6 +25,7 @@ function fixtureRepository() {
   const root = mkdtempSync(join(tmpdir(), "kaoiro577-checker-"));
   execFileSync("git", ["init", "-q"], { cwd: root });
   write(root, MODULE, readFileSync(REAL_MODULE, "utf8"));
+  write(root, MODULE.replace(/\.mjs$/, ".cjs"), readFileSync(REAL_MODULE.replace(/\.mjs$/, ".cjs"), "utf8"));
   write(root, "scripts/test/mock-github-api.mjs", "export {};\n");
   write(root, "scripts/test/a.test.mjs", entry("scripts/test/a.test.mjs"));
   write(root, "scripts/test/fixtures/helper.mjs", "export {};\n");
@@ -32,7 +33,7 @@ function fixtureRepository() {
   write(root, "server/deploy/package.json", JSON.stringify({ scripts: { test: "node --test" } }));
   for (const pkg of VITEST_PACKAGES) {
     write(root, `${pkg}/vitest.config.ts`, `export default { test: { setupFiles: ["${posix.relative(pkg, MODULE)}"] } };\n`);
-    write(root, `${pkg}/test/test-isolation.canary.test.ts`, "// canary\n");
+    write(root, `${pkg}/test/test-isolation.canary.test.ts`, "await assertIsolationActive();\n");
     write(root, `${pkg}/package.json`, JSON.stringify({ scripts: { test: "vitest run" } }));
   }
   write(root, ".github/workflows/ci.yml", [
@@ -116,7 +117,29 @@ const mutations = {
   "a permit call outside the allow-list": [
     root => write(root, "scripts/test/a.test.mjs",
       `${entry("scripts/test/a.test.mjs")}${PERMIT}({ kinds: ["network"], optIn: "X", reason: "r" });\n`),
-    /scripts\/test\/a\.test\.mjs: permitHostAccess outside the allow-list/],
+    new RegExp(`scripts/test/a\\.test\\.mjs: ${PERMIT} outside the allow-list`)],
+  "a launch line that runs files in one process": [
+    root => write(root, "server/deploy/package.json", JSON.stringify({ scripts: { test: "node --test --test-isolation=none" } })),
+    /--test-isolation would run several files in one process/],
+  "a launch line with a flag before --test starting a file outside the set": [
+    root => {
+      write(root, "scripts/other/y.test.mjs", entry("scripts/other/y.test.mjs"));
+      write(root, ".github/workflows/extra.yml", "jobs:\n  y:\n    steps:\n      - run: node --no-warnings --test scripts/other/y.test.mjs\n");
+    },
+    /extra\.yml job y: starts scripts\/other\/y\.test\.mjs, outside the canonical entries/],
+  "a workflow whose run steps cannot be read": [
+    root => write(root, ".github/workflows/odd.yml", "jobs:\n   z:\n       steps:\n         - run: node --test scripts/other/z.test.mjs\n"),
+    /odd\.yml: no run steps were read/],
+  "a canary that does not assert anything": [
+    root => write(root, "wrapper/core/test/test-isolation.canary.test.ts", "// nothing\n"),
+    /wrapper\/core: test\/test-isolation\.canary\.test\.ts does not call assertIsolationActive/],
+  "several setup files without a sequential order": [
+    root => write(root, "runner/vitest.config.ts", `export default { test: { setupFiles: ["${posix.relative("runner", MODULE)}", "test/setup.ts"] } };\n`),
+    /runner: several setupFiles run in parallel/],
+  "an aliased permit import outside the allow-list": [
+    root => write(root, "scripts/test/a.test.mjs",
+      `import { ${PERMIT} as allow } from "./fixtures/test-isolation.mjs";\nallow({ kinds: ["network"], optIn: "X", reason: "r" });\n`),
+    new RegExp(`scripts/test/a\\.test\\.mjs: ${PERMIT} outside the allow-list`)],
   "a correctly named import that does not install the guard": [
     root => write(root, MODULE, "export {};\n"),
     /scripts\/test\/a\.test\.mjs: loaded without the isolation marker/],

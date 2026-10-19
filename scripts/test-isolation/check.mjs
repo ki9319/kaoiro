@@ -129,9 +129,13 @@ function segments(script) {
 
 function launchSegment(root, cwd, segment, label, entries, scratch, problems) {
   const tokens = segment.split(/\s+/);
-  const node = tokens.findIndex((token, index) => /(?:^|\/)node$/.test(token) && tokens[index + 1] === "--test");
-  if (node >= 0) {
-    const args = tokens.slice(node + 2).join(" ");
+  if (tokens.some(token => /^--test-isolation(?:=|$)/.test(token))) {
+    problems.push(`${label}: --test-isolation would run several files in one process`);
+  }
+  const node = tokens.findIndex(token => /(?:^|\/)node$/.test(token));
+  const at = node >= 0 ? tokens.indexOf("--test", node) : -1;
+  if (at >= 0) {
+    const args = [...tokens.slice(node + 1, at), ...tokens.slice(at + 1)].join(" ");
     const run = discover(scratch, join(root, cwd), args, label);
     const reported = run.rows.map(row => relative(root, realpathSync(row.file)));
     if (run.status !== 0) problems.push(`${label}: node --test exited ${run.status}\n${run.output}`);
@@ -176,7 +180,7 @@ export function workflowRuns(text) {
     }
     const run = line.match(/^(\s+)(-\s+)?run:\s*(.*)$/);
     if (!run) continue;
-    let body = run[3];
+    let body = run[3].trim().replace(/^(["'])(.*)\1$/, "$2");
     if (/^[|>][-+]?\s*$/.test(body)) {
       const indent = run[1].length + (run[2]?.length ?? 0);
       const block = [];
@@ -193,7 +197,9 @@ export function workflowRuns(text) {
 
 function launchLines(root, all, entries, scratch, problems) {
   for (const path of all.filter(path => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(path))) {
-    for (const run of workflowRuns(readFileSync(join(root, path), "utf8"))) {
+    const runs = workflowRuns(readFileSync(join(root, path), "utf8"));
+    if (runs.length === 0) problems.push(`${path}: no run steps were read; the workflow layout is not understood`);
+    for (const run of runs) {
       const cwd = (run.cwd ?? "").replace(/^\.\/?/, "").replace(/\/$/, "");
       for (const segment of segments(run.body.split("\n").filter(line => !/^\s*#/.test(line)).join("\n"))) {
         launchSegment(root, cwd, segment, `${path} job ${run.job}`, entries, scratch, problems);
@@ -222,9 +228,19 @@ function vitestWiring(root, all, problems) {
   for (const owner of owners) if (!VITEST_PACKAGES.includes(owner)) problems.push(`${owner}: vitest package outside the declared inventory`);
   for (const pkg of VITEST_PACKAGES) {
     if (!all.includes(`${pkg}/${CANARY}`)) problems.push(`${pkg}: missing ${CANARY}`);
-    const configs = all.filter(path => posix.dirname(path) === pkg && /^(?:vitest|vite)\.config\.[cm]?[jt]s$/.test(posix.basename(path)));
-    const first = configs.map(path => readFileSync(join(root, path), "utf8").match(/setupFiles:\s*\[\s*["']([^"']+)["']/)?.[1])
-      .find(Boolean);
+    else if (!/assertIsolationActive\(/.test(readFileSync(join(root, `${pkg}/${CANARY}`), "utf8"))) {
+      problems.push(`${pkg}: ${CANARY} does not call assertIsolationActive`);
+    }
+    // vitest.config wins over vite.config, as in Vitest's own lookup.
+    const configs = all.filter(path => posix.dirname(path) === pkg && /^(?:vitest|vite)\.config\.[cm]?[jt]s$/.test(posix.basename(path)))
+      .sort((a, b) => Number(posix.basename(b).startsWith("vitest")) - Number(posix.basename(a).startsWith("vitest")));
+    const texts = configs.map(path => readFileSync(join(root, path), "utf8").replace(/^\s*\/\/.*$/gm, ""));
+    const text = texts.find(candidate => /setupFiles:\s*\[/.test(candidate));
+    const entries = [...(text?.match(/setupFiles:\s*\[([^\]]*)\]/)?.[1] ?? "").matchAll(/["']([^"']+)["']/g)].map(match => match[1]);
+    if (entries.length > 1 && !/sequence:\s*\{[^}]*setupFiles:\s*["']list["']/.test(text)) {
+      problems.push(`${pkg}: several setupFiles run in parallel unless sequence.setupFiles is "list"`);
+    }
+    const first = entries[0];
     let loaded = first && posix.normalize(posix.join(pkg, first));
     // One hop: a package-local setup file whose first import is the module.
     if (loaded && loaded !== MODULE && all.includes(loaded)) {
@@ -235,18 +251,22 @@ function vitestWiring(root, all, problems) {
   }
 }
 
+const PERMIT_EXEMPT = [MODULE, "scripts/test/fixtures/test-isolation.cjs", "scripts/test-isolation/check.mjs"];
+const KIND_NAMES = ["systemd", "gh", "docker", "network"];
+
+// Any mention counts, so an aliased import cannot hide a call site; in an
+// allowed file every known kind named in a kinds list must be allowed.
 function permitCalls(root, all, problems) {
   for (const path of all) {
-    if (!SOURCE.test(path) || DECLARATION.test(path) || path === MODULE) continue;
+    if (!SOURCE.test(path) || DECLARATION.test(path) || PERMIT_EXEMPT.includes(path)) continue;
     const text = readFileSync(join(root, path), "utf8");
-    for (const call of text.matchAll(/permitHostAccess\(\s*\{\s*kinds:\s*\[([^\]]*)\]/g)) {
-      const kinds = [...call[1].matchAll(/["']([a-z]+)["']/g)].map(match => match[1]);
-      const allowed = PERMIT_ALLOW[path];
-      if (!allowed) problems.push(`${path}: permitHostAccess outside the allow-list`);
-      else for (const kind of kinds) if (!allowed.includes(kind)) problems.push(`${path}: permitHostAccess kind ${kind} not allowed`);
-    }
-    if (/permitHostAccess\(/.test(text) && !/permitHostAccess\(\s*\{\s*kinds:/.test(text) && !PERMIT_ALLOW[path]) {
-      problems.push(`${path}: permitHostAccess outside the allow-list`);
+    if (!text.includes("permitHostAccess")) continue;
+    const allowed = PERMIT_ALLOW[path];
+    if (!allowed) { problems.push(`${path}: permitHostAccess outside the allow-list`); continue; }
+    for (const list of text.matchAll(/kinds:\s*\[([^\]]*)\]/g)) {
+      for (const [, kind] of list[1].matchAll(/["']([a-z]+)["']/g)) {
+        if (KIND_NAMES.includes(kind) && !allowed.includes(kind)) problems.push(`${path}: permitHostAccess kind ${kind} not allowed`);
+      }
     }
   }
 }
