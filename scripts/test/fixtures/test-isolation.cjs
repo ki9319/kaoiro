@@ -299,10 +299,13 @@ function protect(file, args, options) {
   if (runsUpdater && !state().permitted.has("systemd")) {
     const env = childEnv(options);
     const systemctl = program(env.KAOIRO_SYSTEMCTL ?? "systemctl", options);
-    // systemd-run serves only --detach: refused when a host one is reachable;
-    // the manager itself must be an owned fake.
+    // systemd-run serves only --detach: refused when it resolves to a host
+    // systemd tool (an inert stand-in such as /bin/false is fine); the
+    // manager itself must be an owned fake.
     const systemdRun = program(env.KAOIRO_SYSTEMD_RUN ?? "systemd-run", options);
-    if (!systemctl || !ownedPath(actualProgram(systemctl)) || (systemdRun && !ownedPath(actualProgram(systemdRun)))) {
+    const hostSystemdRun = systemdRun && TOOLS[basename(actualProgram(systemdRun))] === "systemd" &&
+      !ownedPath(actualProgram(systemdRun));
+    if (!systemctl || !ownedPath(actualProgram(systemctl)) || hostSystemdRun) {
       refuse("ERR_TEST_HOST_SYSTEMD", "test refused updater shell with a host manager");
     }
   }
