@@ -50,7 +50,7 @@ const SHELL_TOOL = /(?:^|[\s;&|()`'"])([^\s;&|()`'"]*\/)?(gh|docker)(?=$|[\s;&|(
 // What libuv searches when a child environment has no PATH.
 const DEFAULT_PATH = "/usr/bin:/bin";
 const REPOSITORY = realpathSync(resolve(__dirname, "../../.."));
-const PRELOAD_FLAG =`--require="${__filename.replace(/(["\\])/g, "\\$1")}"`;
+const PRELOAD_FLAG = `--require="${__filename.replace(/(["\\])/g, "\\$1")}"`;
 
 function refuse(code, message) {
   throw Object.assign(new Error(message), { code });
