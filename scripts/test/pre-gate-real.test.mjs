@@ -25,7 +25,7 @@ let counter = 0;
 // hash of the mutated file, which the test logs.
 function commitMutation(file, transform) {
   const clone = join(work, `clone-${counter++}`);
-  git(work, "clone", "-q", "--local", root, clone);
+  git(work, "clone", "-q", "--no-hardlinks", root, clone);
   const before = readFileSync(join(clone, file), "utf8");
   const mutated = transform(before);
   assert.notEqual(mutated, before, `mutation changed nothing in ${file}`);
