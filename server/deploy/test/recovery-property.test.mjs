@@ -439,7 +439,12 @@ for (const change of ["container", "image", "target", "rollback-tag", "recovery-
     world.edit((s) => {
       s.faults = [];
       s.counters = {};
-      if (change === "container") s.containers[0].id = "d".repeat(64);
+      // The recorded container still exists under another name, so only the
+      // id comparison can tell that a different container now serves.
+      if (change === "container") {
+        s.containers.push({ ...s.containers[0], id: "d".repeat(64), status: "running" });
+        Object.assign(s.containers[0], { name: "kaoiro-old", status: "exited", service: "detached" });
+      }
       if (change === "image") s.containers[0].image = `sha256:${"0".repeat(63)}2`;
       if (change === "rollback-tag") s.tags[`kaoiro-server:rollback-${world.oldSha}`] = `sha256:${"0".repeat(63)}2`;
     });
@@ -451,6 +456,7 @@ for (const change of ["container", "image", "target", "rollback-tag", "recovery-
     const target = change === "target" ? world.oldSha : world.target;
     const r = world.cliRun("update", "--transaction", world.txId(), "--target", target, ...UPDATE_APPROVED);
     assert.notEqual(r.status, 0);
+    if (change === "container") assert.match(r.stderr, /not the recorded c{64}/);
     const calls = world.state().calls.slice(before);
     assert.deepEqual(calls.filter((c) => /^(tag|start|stop|compose (build|stop|up))/.test(c)), [], r.stderr);
     assert.equal(world.journal().phase, PHASE.OLD_IMAGE_SAVED);
