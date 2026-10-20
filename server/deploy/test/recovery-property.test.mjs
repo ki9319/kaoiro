@@ -295,6 +295,12 @@ function assertDestructive(world, preDeploy) {
 }
 
 const UPDATE_APPROVED = ["--maintenance-approved"];
+// A failure after `compose build` moved `latest`, whose own restore also
+// fails: the residue a later rollback or resume must cope with.
+const LATEST_LEFT_ON_TARGET = [
+  { match: "^tag kaoiro-server:latest kaoiro-server:", kind: "fail" },
+  { match: "^tag sha256:\\S+ kaoiro-server:latest", kind: "fail" },
+];
 
 // Phase plus durable side effect. `residual` is asserted before any recovery
 // runs, so a recipe that does not reach its declared state fails as a recipe.
@@ -449,9 +455,10 @@ test("recovery property: done is closed by an explicit destructive rollback", (t
 for (const change of ["container", "image", "target", "rollback-tag", "recovery-plan"]) {
   test(`recovery property: old_image_saved resume refuses a changed ${change} before any Docker mutation`, (t) => {
     const world = makeWorld(t);
-    world.faults([{ match: "^compose build", kind: "fail" }]);
+    world.faults(LATEST_LEFT_ON_TARGET);
     world.update();
     assert.equal(world.journal().phase, PHASE.OLD_IMAGE_SAVED);
+    assert.notEqual(world.latest(), OLD_IMAGE);
     world.edit((s) => {
       s.faults = [];
       s.counters = {};
@@ -496,8 +503,10 @@ test("recovery property: update --transaction on a commit-half phase is refused 
 test("recovery property: a legacy journal without the container id starts the named container only on the old image", (t) => {
   for (const reused of [false, true]) {
     const world = makeWorld(t);
-    world.faults([{ match: "^compose build", kind: "fail" }]);
+    world.faults(LATEST_LEFT_ON_TARGET);
     world.update();
+    assert.notEqual(world.latest(), OLD_IMAGE);
+    world.faults([]);
     const path = join(world.backupRoot, world.txId(), "journal.json");
     const journal = JSON.parse(readFileSync(path, "utf8"));
     delete journal.history.find((e) => e.phase === PHASE.OLD_IMAGE_SAVED).observation.old_container_id;
@@ -611,8 +620,10 @@ test("recovery property: an enrolled server killed mid-rollback leaves both lock
 
 test("recovery property: a non-destructive rollback refuses when the recorded container was replaced, even under the same name", (t) => {
   const world = makeWorld(t);
-  world.faults([{ match: "^compose build", kind: "fail" }]);
+  world.faults(LATEST_LEFT_ON_TARGET);
   world.update();
+  assert.notEqual(world.latest(), OLD_IMAGE);
+  world.faults([]);
   world.edit((s) => { s.containers[0].id = "d".repeat(64); s.containers[0].status = "exited"; });
   const before = world.state().calls.length;
   const r = world.cliRun("rollback", "--transaction", world.txId(), "--confirm-restore");
