@@ -81,6 +81,7 @@ export interface AntigravityBehaviourConfig extends WatchdogConfig {
 
 /** Codex global opt-ins next to its watchdog keys. */
 export interface CodexBehaviourConfig extends WatchdogConfig {
+  /** Retired (issue #563): parsed and ignored, never relayed. */
   operator_steer?: boolean;
   approval_axis?: boolean;
 }
@@ -107,6 +108,9 @@ interface BehaviourRow {
   /** A file value of `false` is the same as an absent key (global opt-in
    *  flags): it is neither relayed nor reported as shadowed. */
   readonly falseIsAbsent?: true;
+  /** No longer gates anything: still parsed, never relayed, and reported by
+   *  the retirement warnings instead of the generic deprecation text. */
+  readonly retired?: true;
   readonly env: string;
   readonly envIsSet: (raw: string | undefined) => boolean;
   /** Parses a runner.config.json value; throws ConfigError. */
@@ -284,6 +288,7 @@ function flagRow(
   engine: EngineKind,
   key: "operator_steer" | "approval_axis" | "phase2_delivery",
   env: string,
+  retired?: true,
 ): BehaviourRow {
   return {
     block,
@@ -291,6 +296,7 @@ function flagRow(
     wrapperField: key,
     engine,
     falseIsAbsent: true,
+    ...(retired === undefined ? {} : { retired }),
     env,
     envIsSet: (raw) => raw !== undefined && raw !== "",
     parseFile: (value) => {
@@ -305,7 +311,7 @@ function flagRow(
 }
 
 const FLAG_ROWS: readonly BehaviourRow[] = [
-  flagRow("codex", "codex", "operator_steer", "KAOIRO_CODEX_OPERATOR_STEER"),
+  flagRow("codex", "codex", "operator_steer", "KAOIRO_CODEX_OPERATOR_STEER", true),
   flagRow("codex", "codex", "approval_axis", "KAOIRO_CODEX_APPROVAL_AXIS"),
   flagRow(
     "claude_code",
@@ -510,7 +516,7 @@ export function computeBehaviourRelay(
 ): BehaviourRelay {
   const relay: Record<string, Record<string, BehaviourValue>> = {};
   for (const row of BEHAVIOUR_ROWS) {
-    if (row.engine === "runner" || row.wrapperField === undefined) continue;
+    if (row.engine === "runner" || row.wrapperField === undefined || row.retired) continue;
     if (row.envIsSet(env[row.env])) continue;
     const value = fileValue(config, row);
     if (value === undefined) continue;
@@ -534,6 +540,7 @@ export function behaviourWarnings(
 ): string[] {
   const lines: string[] = [];
   for (const { row, value } of set) {
+    if (row.retired) continue;
     const path = behaviourConfigPath(row);
     if (!seen.has(row.env)) {
       seen.add(row.env);

@@ -1,5 +1,5 @@
 import { captureDeliveryEnvironment } from "@kaoiro/agent-common";
-import { createDeliverySnapshot, deliveryBehaviourRelay, deliveryEnvironment } from "./delivery-settings.js";
+import { createDeliverySnapshot, deliveryBehaviourRelay, deliveryEnvironment, retiredDeliveryWarnings } from "./delivery-settings.js";
 // Runner CLI runtime — loads the runner config, connects to the kaoiro server
 // on `runner:<host_id>`, registers the host, heartbeats, and supervises the
 // host's wrapper processes on operator spawn/stop/restart (ADR-0023, phases
@@ -189,12 +189,15 @@ export async function runRunnerCli(
   // that is set is not relayed (the wrapper reads it itself), so the relay
   // holds only the file values.
   const deprecationSeen = new Set<string>();
-  for (const line of behaviourWarnings(
-    undefined,
-    fileConfig,
-    readSetVariables(config, process.env),
-    deprecationSeen,
-  )) {
+  for (const line of [
+    ...behaviourWarnings(
+      undefined,
+      fileConfig,
+      readSetVariables(config, process.env),
+      deprecationSeen,
+    ),
+    ...retiredDeliveryWarnings(fileConfig, deliveryEnvAtStart, deprecationSeen),
+  ]) {
     process.stderr.write(line);
   }
   let appliedDelivery = createDeliverySnapshot(config, deliveryEnvAtStart);
@@ -412,12 +415,15 @@ export async function runRunnerCli(
     // Warnings are written only once the reload is applied, so a reload that
     // fails later is never reported as having taken effect.
     const seenAfterReload = new Set(deprecationSeen);
-    const behaviourLines = behaviourWarnings(
-      fileConfig,
-      nextFile,
-      setVariables,
-      seenAfterReload,
-    );
+    const behaviourLines = [
+      ...behaviourWarnings(
+        fileConfig,
+        nextFile,
+        setVariables,
+        seenAfterReload,
+      ),
+      ...retiredDeliveryWarnings(nextFile, deliveryEnvAtStart, seenAfterReload),
+    ];
     const nextDelivery = createDeliverySnapshot(next, deliveryEnvAtStart);
     const nextBehaviourRelay = deliveryBehaviourRelay(next, nextEnvironment, nextDelivery);
     const nextHeartbeatLogging = resolveHeartbeatLogging(next, nextEnvironment);

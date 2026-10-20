@@ -225,8 +225,9 @@ export interface WrapperConfig {
   /** Antigravity idle-epoch lifetime. Relayed to Antigravity wrappers only;
    *  omitted = the environment variable, then 30 minutes. */
   antigravity_epoch_idle_ms?: number;
-  /** Global opt-in for Codex operator steer (app-server backend). `true` means
-   *  the same as the variable being "1"; a set variable overrides it. */
+  /** Retired (issue #563): no longer gates Codex operator steer. A direct
+   *  launch that still sets it gets a startup warning; the runner does not
+   *  relay it. */
   operator_steer?: boolean;
   /** Global opt-in for the Codex approval axis. Same rule as operator_steer. */
   approval_axis?: boolean;

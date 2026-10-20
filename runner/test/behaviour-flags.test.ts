@@ -14,7 +14,6 @@ const base: RunnerConfig = {
 };
 
 const FLAGS = [
-  ["codex", "codex", "operator_steer", "KAOIRO_CODEX_OPERATOR_STEER"],
   ["codex", "codex", "approval_axis", "KAOIRO_CODEX_APPROVAL_AXIS"],
   ["claude_code", "claude-code", "phase2_delivery", "KAOIRO_CLAUDE_PHASE2_DELIVERY"],
 ] as const;
@@ -63,5 +62,42 @@ describe.each(FLAGS)("%s.%s", (block, engine, key, variable) => {
   it("does not read the variable of a disabled engine", () => {
     const others = (["claude-code", "codex", "antigravity"] as const).filter((e) => e !== engine);
     expect(readSetVariables({ ...base, capabilities: [...others] }, { [variable]: "1" })).toEqual([]);
+  });
+});
+
+describe("codex.operator_steer (retired)", () => {
+  const variable = "KAOIRO_CODEX_OPERATOR_STEER";
+  const withFile = (value: boolean): RunnerConfig => ({ ...base, codex: { operator_steer: value } });
+
+  it("file: still a JSON boolean only", () => {
+    const parse = (value: unknown) =>
+      (parseRunnerConfig({ ...base, codex: { operator_steer: value } }).codex as Record<string, unknown>).operator_steer;
+    expect(parse(true)).toBe(true);
+    expect(parse(false)).toBe(false);
+    for (const bad of [1, 0, "true", "1", null, []]) {
+      expect(() => parse(bad), JSON.stringify(bad)).toThrow("codex.operator_steer must be a boolean");
+    }
+  });
+
+  it("variable: still parsed, so a set variable is read and an empty one is unset", () => {
+    expect(readSetVariables(base, { [variable]: "" })).toEqual([]);
+    expect(readSetVariables(base, { [variable]: "1" }).map((s) => s.value)).toEqual([true]);
+    expect(readSetVariables(base, { [variable]: "0" }).map((s) => s.value)).toEqual([false]);
+  });
+
+  it("relay: never relayed to a wrapper, whatever the file and the variable say", () => {
+    expect(computeBehaviourRelay(withFile(true), {})).toEqual({});
+    expect(computeBehaviourRelay(withFile(false), {})).toEqual({});
+    expect(computeBehaviourRelay(withFile(true), { [variable]: "0" })).toEqual({});
+  });
+
+  it("warnings: neither the deprecation text nor a shadow line, which the retirement warnings replace", () => {
+    for (const [file, value] of [[withFile(true), "0"], [withFile(true), "1"], [withFile(false), "1"], [base, "1"]] as const) {
+      expect(behaviourWarnings(undefined, file, readSetVariables(file, { [variable]: value }), new Set()), `${value}`).toEqual([]);
+    }
+  });
+
+  it("does not read the variable of a disabled engine", () => {
+    expect(readSetVariables({ ...base, capabilities: ["claude-code", "antigravity"] }, { [variable]: "1" })).toEqual([]);
   });
 });

@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, statSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { captureDeliveryEnvironment } from "@kaoiro/agent-common";
 import { makeLauncher, resolveWrapperLaunch, toManagedChild } from "../src/spawn.js";
 
 describe("resolveWrapperLaunch", () => {
@@ -129,6 +130,50 @@ process.exit(0);`);
     else process.env.NODE_OPTIONS = previous.NODE_OPTIONS;
     if (previous.FUJI464_CAPTURE === undefined) delete process.env.FUJI464_CAPTURE;
     else process.env.FUJI464_CAPTURE = previous.FUJI464_CAPTURE;
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+it("the default launcher gives a wrapper child neither retired Codex variable and keeps every other delivery variable", async () => {
+  const scratch = mkdtempSync(join(tmpdir(), "ao563-runner-env-"));
+  const names = ["KAOIRO_CODEX_OPERATOR_STEER", "KAOIRO_CODEX_OPERATOR_STEER_PERSONAS", "KAOIRO_CLAUDE_PHASE2_DELIVERY",
+    "KAOIRO_CLAUDE_PHASE2_DELIVERY_PERSONAS", "KAOIRO_CODEX_APPROVAL_AXIS", "KAOIRO_CODEX_APPROVAL_AXIS_PERSONAS"] as const;
+  const keep = ["NODE_OPTIONS", "AO563_CAPTURE", ...names].map(name => [name, process.env[name]] as const);
+  const capture = join(scratch, "capture.cjs");
+  writeFileSync(capture, `const fs = require('node:fs');
+const path = require('node:path');
+const seen = {};
+for (const [key, value] of Object.entries(process.env)) if (key.startsWith('KAOIRO_')) seen[key] = value;
+fs.writeFileSync(path.join(process.env.AO563_CAPTURE, path.basename(process.argv[2]) + '.env'), JSON.stringify(seen));
+process.exit(0);`);
+  try {
+    for (const name of names) process.env[name] = name.endsWith("PERSONAS") ? "P" : "1";
+    process.env.NODE_OPTIONS = `--require=${capture}`;
+    process.env.AO563_CAPTURE = scratch;
+    const captured = captureDeliveryEnvironment(process.env);
+    const launch = makeLauncher(captured);
+    for (const engine of ["codex", "claude-code"] as const) {
+      const id = `ao563-${engine}`;
+      await new Promise<void>((resolve, reject) => {
+        const child = launch(id, { agent_id: id } as never, scratch, undefined, undefined, engine);
+        child.on("exit", resolve);
+        setTimeout(() => reject(new Error(`${engine} did not exit`)), 10_000).unref();
+      });
+      const dump = join(scratch, `${id}-${engine === "codex" ? 0 : 1}.json.env`);
+      const child = JSON.parse(readFileSync(dump, "utf8")) as Record<string, string>;
+      expect(child, engine).not.toHaveProperty("KAOIRO_CODEX_OPERATOR_STEER");
+      expect(child, engine).not.toHaveProperty("KAOIRO_CODEX_OPERATOR_STEER_PERSONAS");
+      for (const name of names.slice(2)) expect(child[name], `${engine} ${name}`).toBe(name.endsWith("PERSONAS") ? "P" : "1");
+    }
+    expect(process.env.KAOIRO_CODEX_OPERATOR_STEER).toBe("1");
+    expect(process.env.KAOIRO_CODEX_OPERATOR_STEER_PERSONAS).toBe("P");
+    expect(captured.KAOIRO_CODEX_OPERATOR_STEER).toBe("1");
+    expect(captured.KAOIRO_CODEX_OPERATOR_STEER_PERSONAS).toBe("P");
+  } finally {
+    for (const [name, value] of keep) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
     rmSync(scratch, { recursive: true, force: true });
   }
 });

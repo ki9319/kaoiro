@@ -47,7 +47,7 @@ it.each(["operator", "peer"] as const)("enforces policy for %s at native CLI com
   await writeFile(join(root, "config.toml"), `model = "gpt-6-luna"\nmodel_provider = "local"\n[model_providers.local]\nname = "Native delivery policy"\nbase_url = "http://127.0.0.1:${address.port}/v1"\nwire_api = "responses"\n[features]\nshell_snapshot = false\nplugins = false\n[analytics]\nenabled = false\n`);
   const configPath = join(root, "kaoiro.json");
   await writeFile(configPath, JSON.stringify({ agent_id: "fuji560.native.codex", persona: { id: "p", name: "P", sprite_set: "p" },
-    display_name: "P", server_url: wire.url, model: "gpt-6-luna", operator_steer: true, codex_backend: "app-server",
+    display_name: "P", server_url: wire.url, model: "gpt-6-luna", codex_backend: "app-server",
     sandbox: "danger-full-access", network_access: true, approval: "never" }));
   const cli = join(dirname(fileURLToPath(import.meta.url)), "../dist/cli.js");
   const rpcModule = join(dirname(fileURLToPath(import.meta.url)), "../dist/app_server_rpc.js");
@@ -75,6 +75,8 @@ it.each(["operator", "peer"] as const)("enforces policy for %s at native CLI com
   try {
     await check(() => expect(wire.joins).toBe(1));
     expect(wire.received.find(item => item.event === "phx_join")?.payload.delivery_policy).toBe("v1");
+    expect(wire.received.find(item => item.event === "phx_join")?.payload.operator_input_modes).toEqual({ version: "v1", early: "steer" });
+    expect(output).not.toContain("codex: warn - ");
     await policy(1, "on"); wire.push("permission_sync", { version: "0", control: null, next: null });
     wire.push("persona_prompt", { version: "0", prompt: "Native policy test." });
     await check(() => expect(wire.received.some(item => item.event === "envelope" && item.payload.type === "state_change")).toBe(true));

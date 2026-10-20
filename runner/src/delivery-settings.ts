@@ -1,6 +1,7 @@
 import {
   captureDeliveryEnvironment, DELIVERY_ENGINE_SETTINGS, DELIVERY_ENV_KEYS,
-  deliveryPersonaList, resolveDelivery,
+  deliveryPersonaList, resolveDelivery, RETIRED_CODEX_OPERATOR_STEER_ENV,
+  retiredCodexOperatorSteerInputs, retiredCodexOperatorSteerMessage,
   type DeliveryEnvironment, type DeliveryInputs,
 } from "@kaoiro/agent-common";
 import type { EngineCatalogEntry, EngineKind, LaunchDeliveryPolicyMetadata, RunnerRegister } from "@kaoiro/protocol";
@@ -20,7 +21,6 @@ export function createDeliverySnapshot(config: RunnerConfig, env: Readonly<Recor
     default: config.in_flight_delivery?.[row.engine]?.default ?? row.default,
     codexBackend: config.codex?.backend ?? "exec",
     phase2Delivery: config.claude_code?.phase2_delivery,
-    operatorSteer: config.codex?.operator_steer,
     env: captured,
   })])) as Record<EngineKind, DeliveryInputs & { ceiling: boolean; default: boolean }>;
   return Object.freeze({ env: captured, engines: Object.freeze(engines) });
@@ -35,11 +35,32 @@ export function deliveryEnvironment(base: NodeJS.ProcessEnv, captured: DeliveryE
   return env;
 }
 
+/** The environment a wrapper child gets: the retired Codex inputs are
+ *  removed, so a managed wrapper cannot warn a second time for what the
+ *  runner already reported. */
+export function withoutRetiredDeliveryInputs(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const result = { ...env };
+  for (const key of RETIRED_CODEX_OPERATOR_STEER_ENV) delete result[key];
+  return result;
+}
+
+/** One line per retired Codex operator-steer input not yet in `seen`, adding
+ *  it. `file` is the parsed file config (not the server-url override). */
+export function retiredDeliveryWarnings(file: RunnerConfig, env: DeliveryEnvironment, seen: Set<string>): string[] {
+  if (!(file.capabilities?.includes("codex") ?? true)) return [];
+  const lines: string[] = [];
+  for (const input of retiredCodexOperatorSteerInputs({ env, fileKey: file.codex?.operator_steer })) {
+    if (seen.has(input)) continue;
+    seen.add(input);
+    lines.push(`runner: warn - ${retiredCodexOperatorSteerMessage(input, "runner")}\n`);
+  }
+  return lines;
+}
+
 export function buildLaunchDeliveryMetadata(snapshot: AppliedDeliverySnapshot, engine: EngineKind): LaunchDeliveryPolicyMetadata {
   const inputs = snapshot.engines[engine];
   const mechanisms = resolveDelivery(inputs).mechanisms;
-  const list = engine === "claude-code" ? snapshot.env.KAOIRO_CLAUDE_PHASE2_DELIVERY_PERSONAS
-    : engine === "codex" ? snapshot.env.KAOIRO_CODEX_OPERATOR_STEER_PERSONAS : undefined;
+  const list = engine === "claude-code" ? snapshot.env.KAOIRO_CLAUDE_PHASE2_DELIVERY_PERSONAS : undefined;
   const overrides: NonNullable<LaunchDeliveryPolicyMetadata["persona_overrides"]> = Object.create(null);
   const personas = deliveryPersonaList(list);
   const first = personas[0];

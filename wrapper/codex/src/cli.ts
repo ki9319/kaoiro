@@ -1,4 +1,4 @@
-import { resolveDelivery } from "@kaoiro/agent-common";
+import { resolveDelivery, retiredCodexOperatorSteerInputs, retiredCodexOperatorSteerMessage } from "@kaoiro/agent-common";
 // Codex wrapper CLI — the composition root of the codex engine: loads the
 // config, connects the ServerLink, waits fail-closed for the server-pushed
 // personality (ADR-0029 F3), then drives a CodexHost. Mirrors the Claude
@@ -189,11 +189,13 @@ export async function runCodexCli(dependencies: CodexCliDependencies = {}): Prom
   writeRedactedStderr(`codex: home=${codexHome()}\n`);
   const resolvedDelivery = resolveDelivery({
     engine: "codex", personaId: config.persona.id, codexBackend: backend,
-    ceiling: config.in_flight_delivery_enabled, operatorSteer: config.operator_steer,
-    env: process.env,
+    ceiling: config.in_flight_delivery_enabled, env: {},
   });
   const operatorSteer = resolvedDelivery.mechanisms.operator_early === "steer";
   writeRedactedStderr(`codex: operator_steer=${operatorSteer ? "on" : "off"}\n`);
+  for (const input of retiredCodexOperatorSteerInputs({ env: process.env, fileKey: config.operator_steer })) {
+    writeRedactedStderr(`codex: warn - ${retiredCodexOperatorSteerMessage(input, "wrapper")}\n`);
+  }
   const approvalAxis = backend === "app-server" && personaOptInSource(
     config.persona.id,
     flagArgument(process.env.KAOIRO_CODEX_APPROVAL_AXIS, config.approval_axis),

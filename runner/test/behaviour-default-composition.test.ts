@@ -282,7 +282,6 @@ describe("default composition (issue #469)", () => {
               auth_mode: "chatgpt",
               chatgpt_plan: "pro",
               backend: "app-server",
-              operator_steer: true,
               approval_axis: true,
               turn_watchdog_inactivity_ms: 90_000,
               turn_watchdog_abort_grace_ms: 3000,

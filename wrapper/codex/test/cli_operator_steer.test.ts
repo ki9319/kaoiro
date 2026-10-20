@@ -10,18 +10,24 @@ const config: WrapperConfig = {
 };
 
 const saved = { ...process.env };
+const flag = "KAOIRO_CODEX_OPERATOR_STEER", list = "KAOIRO_CODEX_OPERATOR_STEER_PERSONAS";
 afterEach(() => {
-  delete process.env.KAOIRO_CODEX_OPERATOR_STEER;
-  delete process.env.KAOIRO_CODEX_OPERATOR_STEER_PERSONAS;
+  delete process.env[flag];
+  delete process.env[list];
   Object.assign(process.env, saved);
+  vi.restoreAllMocks();
 });
 
-async function compose(backend: "exec" | "app-server", optIn: boolean | "flag", echoed: unknown = null,
+interface Legacy { flag?: string; list?: string; fileKey?: boolean; ceiling?: boolean }
+
+async function compose(backend: "exec" | "app-server", legacy: Legacy = {}, echoed: unknown = null,
   during: (linkOptions: Record<string, any>) => void = () => {}) {
-  delete process.env.KAOIRO_CODEX_OPERATOR_STEER;
-  delete process.env.KAOIRO_CODEX_OPERATOR_STEER_PERSONAS;
-  if (optIn === "flag") process.env.KAOIRO_CODEX_OPERATOR_STEER = "1";
-  else if (optIn) process.env.KAOIRO_CODEX_OPERATOR_STEER_PERSONAS = "other, p";
+  delete process.env[flag];
+  delete process.env[list];
+  if (legacy.flag !== undefined) process.env[flag] = legacy.flag;
+  if (legacy.list !== undefined) process.env[list] = legacy.list;
+  const stderr: string[] = [];
+  vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => { stderr.push(String(chunk)); return true; });
   let linkOptions!: Record<string, any>;
   let hostOptions!: Record<string, any>;
   const sent: Envelope[] = [];
@@ -37,7 +43,9 @@ async function compose(backend: "exec" | "app-server", optIn: boolean | "flag", 
   await runCodexCli({
     backend,
     parseCliArgs: () => ({ configPath: "test", prompt: undefined, resume: undefined }),
-    loadConfig: () => ({ ...config }),
+    loadConfig: () => ({ ...config,
+      ...(legacy.ceiling === undefined ? {} : { in_flight_delivery_enabled: legacy.ceiling }),
+      ...(legacy.fileKey === undefined ? {} : { operator_steer: legacy.fileKey }) }),
     createServerLink: (_url, _agentId, options) => {
       linkOptions = options as unknown as Record<string, any>;
       options.deliveryPolicy?.acceptJoin({}, options.deliveryPolicy.beginJoin());
@@ -47,17 +55,13 @@ async function compose(backend: "exec" | "app-server", optIn: boolean | "flag", 
     createHost: (_config, options) => { hostOptions = options as unknown as Record<string, any>; return host as never; },
     prepareStartup: async () => {},
   });
-  return { linkOptions, hostOptions, send, sent };
+  const warnings = stderr.join("").split("\n").filter(line => line.startsWith("codex: warn - "));
+  return { linkOptions, hostOptions, send, sent, warnings, stderr: stderr.join("") };
 }
 
-describe("operator steer opt-in", () => {
-  it("reads the global flag from KAOIRO_CODEX_OPERATOR_STEER", async () => {
-    const on = await compose("app-server", "flag", { version: "v1", early: "steer" });
-    expect(on.linkOptions.operatorInputModes).toEqual({ version: "v1", early: "steer" });
-  });
-
-  it("declares operator_input_modes and wires the host only for an opted-in app-server persona", async () => {
-    const on = await compose("app-server", true, { version: "v1", early: "steer" });
+describe("operator steer without an opt-in", () => {
+  it("declares operator_input_modes and wires the host for an app-server persona with no legacy input", async () => {
+    const on = await compose("app-server", {}, { version: "v1", early: "steer" });
     expect(on.linkOptions.operatorInputModes).toEqual({ version: "v1", early: "steer" });
     expect(on.linkOptions.interAgentDeliveryModes).toEqual({ version: "v1", early: "steer", yield: "none", stage_reports: true });
     expect(on.hostOptions).toHaveProperty("interAgentSteer");
@@ -68,10 +72,20 @@ describe("operator steer opt-in", () => {
       ["STEER ME", undefined, undefined, undefined, { source: "operator", intent: "early" }],
       ["QUEUE ME", undefined, undefined, undefined, { source: "operator", intent: "normal" }],
     ]);
+    expect(on.stderr).toContain("codex: operator_steer=on\n");
+    expect(on.warnings).toEqual([]);
+  });
+
+  it("is not changed by a retired input: a set zero, a list that omits the persona, a false key", async () => {
+    for (const legacy of [{ flag: "0" }, { list: "other" }, { fileKey: false }, { flag: "0", list: "other", fileKey: false }]) {
+      const on = await compose("app-server", legacy, { version: "v1", early: "steer" });
+      expect(on.linkOptions.operatorInputModes, JSON.stringify(legacy)).toEqual({ version: "v1", early: "steer" });
+      expect(on.hostOptions.operatorSteer.available(), JSON.stringify(legacy)).toBe(true);
+    }
   });
 
   it("reports unavailability on a join without the echo", async () => {
-    const on = await compose("app-server", true, null, options => {
+    const on = await compose("app-server", {}, null, options => {
       options.onOperatorInputModes(false);
       options.onOperatorInputModes(true);
     });
@@ -81,24 +95,49 @@ describe("operator steer opt-in", () => {
     expect(lines).toEqual(["Operator steering is unavailable: the server did not acknowledge operator_input_modes."]);
   });
 
-  it("declares early none and keeps IA steering on app-server when operator steering is opted out", async () => {
-    for (const [backend, optIn] of [["exec", true], ["app-server", false], ["exec", false]] as const) {
+  it("declares early none and no steering host options under a false ceiling or on exec, whatever the legacy inputs", async () => {
+    for (const [backend, legacy] of [
+      ["app-server", { ceiling: false }], ["app-server", { ceiling: false, flag: "1", list: "p", fileKey: true }],
+      ["exec", {}], ["exec", { flag: "1", list: "p", fileKey: true }],
+    ] as const) {
       // The echo is present here: an acknowledged `none` must not wire steering.
-      const off = await compose(backend, optIn, { version: "v1", early: "none" });
-      expect(off.linkOptions.operatorInputModes, `${backend}/${optIn}`).toEqual({ version: "v1", early: "none" });
-      expect(off.linkOptions).not.toHaveProperty("onOperatorInputModes");
-      expect(off.hostOptions).not.toHaveProperty("operatorSteer");
-      if (backend === "app-server") {
-        expect(off.linkOptions.interAgentDeliveryModes.early).toBe("steer");
-        expect(off.hostOptions).toHaveProperty("interAgentSteer");
-        expect(off.hostOptions).toHaveProperty("permissionSyncPending");
-        expect(off.hostOptions).toHaveProperty("liveInputBlocked");
-      } else {
-        expect(off.linkOptions.interAgentDeliveryModes.early).toBe("none");
-        expect(off.hostOptions).not.toHaveProperty("interAgentSteer");
-        expect(off.hostOptions).not.toHaveProperty("permissionSyncPending");
-        expect(off.hostOptions).not.toHaveProperty("liveInputBlocked");
-      }
+      const off = await compose(backend, legacy, { version: "v1", early: "none" });
+      const label = `${backend}/${JSON.stringify(legacy)}`;
+      expect(off.linkOptions.operatorInputModes, label).toEqual({ version: "v1", early: "none" });
+      expect(off.linkOptions, label).not.toHaveProperty("onOperatorInputModes");
+      expect(off.hostOptions, label).not.toHaveProperty("operatorSteer");
+      expect(off.linkOptions.interAgentDeliveryModes.early, label).toBe("none");
+      expect(off.hostOptions, label).not.toHaveProperty("interAgentSteer");
+      expect(off.hostOptions, label).not.toHaveProperty("permissionSyncPending");
+      expect(off.hostOptions, label).not.toHaveProperty("liveInputBlocked");
     }
+  });
+});
+
+describe("retirement warnings of a directly launched wrapper", () => {
+  const secret = "secret-persona-id";
+  it.each([
+    ["the flag variable", { flag: "0" }, [flag]],
+    ["the persona-list variable", { list: secret }, [list]],
+    ["a true file key", { fileKey: true }, ["operator_steer"]],
+    ["a false file key", { fileKey: false }, ["operator_steer"]],
+    ["all three", { flag: "1", list: secret, fileKey: true }, [flag, list, "operator_steer"]],
+  ] as const)("prints one line per present input: %s", async (_name, legacy, names) => {
+    const on = await compose("app-server", legacy, { version: "v1", early: "steer" });
+    expect(on.warnings).toHaveLength(names.length);
+    names.forEach((name, index) => {
+      expect(on.warnings[index]).toContain(name === "operator_steer" ? "operator_steer in the wrapper config" : `${name} is retired`);
+      expect(on.warnings[index]).toContain("in_flight_delivery.codex.enabled");
+    });
+    expect(on.stderr).not.toContain(secret);
+  });
+
+  it("prints nothing for an absent or empty input", async () => {
+    expect((await compose("app-server")).warnings).toEqual([]);
+    expect((await compose("app-server", { flag: "", list: "" })).warnings).toEqual([]);
+  });
+
+  it("warns on exec too, where the inputs never mattered", async () => {
+    expect((await compose("exec", { flag: "1" })).warnings).toHaveLength(1);
   });
 });

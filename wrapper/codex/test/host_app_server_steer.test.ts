@@ -26,6 +26,7 @@ function fixture(optIn = true, extra: Partial<CodexHostOptions> = {}) {
   const stdout = new PassThrough(), stderr = new PassThrough(), sent: RpcObject[] = [];
   let number = 0;
   let holdStart: (() => void) | null = null, holdStarts = false;
+  let heldInterrupt: (() => void) | null = null, holdInterrupts = false;
   let onSteer: SteerReply = (request, reply) => reply({ turnId: (request.params as { expectedTurnId: string }).expectedTurnId });
   const send = (value: unknown) => stdout.write(JSON.stringify(value) + "\n");
   const stdin = new Writable({ write(chunk, _encoding, cb) {
@@ -43,7 +44,10 @@ function fixture(optIn = true, extra: Partial<CodexHostOptions> = {}) {
     }
     if (request.method === "turn/steer") onSteer(request, reply, (code, message, data) =>
       send({ id: request.id, error: { code, message, ...(data === undefined ? {} : { data }) } }));
-    if (request.method === "turn/interrupt") { reply({});send({ method: "turn/completed", params: { threadId: "thread", turn: { id: `turn-${number}`, status: "interrupted" } } }); }
+    if (request.method === "turn/interrupt") {
+      const finish = () => { reply({});send({ method: "turn/completed", params: { threadId: "thread", turn: { id: `turn-${number}`, status: "interrupted" } } }); };
+      if (holdInterrupts) heldInterrupt = finish; else finish();
+    }
     cb();
   } });
   Object.assign(child, { stdin, stdout, stderr, exitCode: null, signalCode: null });
@@ -76,6 +80,8 @@ function fixture(optIn = true, extra: Partial<CodexHostOptions> = {}) {
     get number() { return number; },
     set onSteer(fn: SteerReply) { onSteer = fn; },
     set holdStarts(value: boolean) { holdStarts = value; },
+    set holdInterrupts(value: boolean) { holdInterrupts = value; },
+    releaseInterrupt() { const release = heldInterrupt;heldInterrupt = null;release?.(); },
     releaseStart() { const release = holdStart;holdStart = null;release?.(); },
     set available(value: boolean) { available = value; }, set syncPending(value: boolean) { syncPending = value; },
     set blocked(value: boolean) { blocked = value; } };
@@ -581,4 +587,22 @@ it("a conflicting IA item after precondition rejection releases its placeholder"
   await vi.waitFor(() => expect(conflict).toBe(true));
   await vi.waitFor(() => expect(f.byMethod("turn/start")).toHaveLength(2));
   expect(f.texts("turn/start")).toEqual(["BASE", "LATER ROOT"]);
+});
+
+it("G-a: an operator input arriving while an interrupt is in flight is queued as turn_ending, not steered", async () => {
+  const f = fixture();
+  await running(f);
+  await f.operator("BARRIER");
+  expect(f.byMethod("turn/steer")).toHaveLength(1);
+  f.inputItem(f.clientId(0));
+  f.holdInterrupts = true;
+  const interrupted = f.host.interrupt();
+  await vi.waitFor(() => expect(f.byMethod("turn/interrupt")).toHaveLength(1));
+  await f.operator("AFTER INTERRUPT");
+  expect(f.byMethod("turn/steer")).toHaveLength(1);
+  expect(f.system()).toContain("Operator input queued for the next turn (turn_ending).");
+  f.releaseInterrupt();
+  await interrupted;
+  await vi.waitFor(() => expect(f.byMethod("turn/start")).toHaveLength(2));
+  expect(f.texts("turn/start")).toEqual(["BASE", "AFTER INTERRUPT"]);
 });

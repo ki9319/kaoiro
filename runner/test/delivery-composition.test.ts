@@ -118,8 +118,34 @@ describe("built runner and wrapper delivery composition", () => {
       const claude = declaration(await h.wrapper("claude", "claude-code"));
       const codex = declaration(await h.wrapper("codex", "codex"));
       expect(claude).toEqual(metadata(h.registers[0]!, "claude-code").mechanisms); expect(claude.inter_agent_early).toBe("fold");
-      expect(codex).toEqual(metadata(h.registers[0]!, "codex").mechanisms); expect(codex.operator_early).toBe("none");
+      expect(codex).toEqual(metadata(h.registers[0]!, "codex").mechanisms); expect(codex.operator_early).toBe("steer");
       expect(codex.inter_agent_early).toBe("steer");
+    } finally { await h.stop(); }
+  }, 40_000);
+  it("declares Codex operator steering by default on app-server and none on exec, with no opt-in", async () => {
+    const on = await start({});
+    try {
+      const actual = declaration(await on.wrapper("codex", "codex"));
+      expect(actual).toEqual({ operator_early: "steer", inter_agent_early: "steer", inter_agent_yield: "none" });
+      expect(metadata(on.registers[0]!, "codex").mechanisms).toEqual(actual);
+    } finally { await on.stop(); }
+    const exec = await start({ codex: { backend: "exec", auth_mode: "chatgpt", chatgpt_plan: "plus" } });
+    try {
+      const actual = declaration(await exec.wrapper("codex", "codex"));
+      expect(actual).toEqual({ operator_early: "none", inter_agent_early: "none", inter_agent_yield: "none" });
+      expect(metadata(exec.registers[0]!, "codex").mechanisms).toEqual(actual);
+    } finally { await exec.stop(); }
+  }, 60_000);
+  it("reports each retired Codex variable once at the runner and not again at the managed wrapper", async () => {
+    const h = await start({}, { KAOIRO_CODEX_OPERATOR_STEER: "0", KAOIRO_CODEX_OPERATOR_STEER_PERSONAS: "secret-persona-id" });
+    try {
+      const declared = declaration(await h.wrapper("codex", "codex"));
+      expect(declared.operator_early).toBe("steer");
+      const lines = h.output().split("\n");
+      expect(lines.filter(line => line.startsWith("runner: warn - KAOIRO_CODEX_OPERATOR_STEER is retired"))).toHaveLength(1);
+      expect(lines.filter(line => line.startsWith("runner: warn - KAOIRO_CODEX_OPERATOR_STEER_PERSONAS is retired"))).toHaveLength(1);
+      expect(lines.filter(line => line.startsWith("codex: warn - "))).toEqual([]);
+      expect(h.output()).not.toContain("secret-persona-id");
     } finally { await h.stop(); }
   }, 40_000);
 });

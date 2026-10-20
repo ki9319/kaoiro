@@ -461,8 +461,9 @@ export interface CodexHostOptions {
   appendSystemPrompt: string;
   /** instruction_rejected sink (file-upload spec). */
   onInstructionRejected?: (envelope: Envelope) => void;
-  /** Present only when operator steering is opted in for this persona;
-   * `available` reads whether the current join echoed operator_input_modes. */
+  /** Present when the wrapper declares the operator-steer mechanism (app-server
+   * backend, host ceiling not off); `available` reads whether the current join
+   * echoed operator_input_modes. */
   operatorSteer?: { available: () => boolean };
   interAgentSteer?: { available: () => boolean };
   /** Present only when the app-server approval axis is opted in for this
@@ -1514,7 +1515,7 @@ export class CodexHost implements EngineAdapter {
 
   get historyBackend(): "exec" | "app-server" { return this.#options.backend ?? "exec"; }
 
-  /** Whether this host was built with the operator-steer opt-in. */
+  /** Whether this host was built with the operator-steer mechanism. */
   get operatorSteerEnabled(): boolean { return this.#options.operatorSteer !== undefined; }
 
   /** What the approval axis acts on, or null when it is off. */

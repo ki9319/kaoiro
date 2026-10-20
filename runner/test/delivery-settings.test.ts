@@ -4,7 +4,7 @@ import { buildRegister, parseRunnerConfig } from "../src/config.js";
 import { changedFields } from "../src/config-diff.js";
 import { HOST_DELIVERY_ROWS } from "../src/behaviour-settings.js";
 import { buildLaunchDeliveryMetadata, createDeliverySnapshot, deliveryJsonBytes, preflightDeliveryRegister,
-  registerSizeEstimate } from "../src/delivery-settings.js";
+  registerSizeEstimate, retiredDeliveryWarnings, withoutRetiredDeliveryInputs } from "../src/delivery-settings.js";
 
 const raw = { host_id: "delivery-test", server_url: "ws://localhost/runner", cwd_allowlist: ["/tmp"], codex: { backend: "app-server", auth_mode: "chatgpt", chatgpt_plan: "plus" } };
 const none = { operator_early: "none", inter_agent_early: "none", inter_agent_yield: "none" } as const;
@@ -40,16 +40,33 @@ describe("host delivery settings", () => {
     expect(changed.engines?.every(e => Object.values(e.launch_delivery_policy!.mechanisms).every(mode => mode === "none"))).toBe(true);
     expect(changedFields(base, { ...base, in_flight_delivery: { codex: { default: false } } })).toEqual(["in_flight_delivery"]);
   });
-  it("captures immutable inputs, projects complete exact persona overrides and preserves independent operator modes", () => {
-    const config = parseRunnerConfig(raw); const env = { KAOIRO_CODEX_OPERATOR_STEER_PERSONAS: "P,__proto__" };
+  it("captures immutable inputs and projects complete exact Claude persona overrides, but none for the retired Codex list", () => {
+    const config = parseRunnerConfig(raw);
+    const env = { KAOIRO_CLAUDE_PHASE2_DELIVERY_PERSONAS: "P,__proto__", KAOIRO_CODEX_OPERATOR_STEER_PERSONAS: "P,__proto__" };
     const snapshot = createDeliverySnapshot(config, env);
-    env.KAOIRO_CODEX_OPERATOR_STEER_PERSONAS = "other"; config.codex!.backend = "exec";
-    const metadata = buildLaunchDeliveryMetadata(snapshot, "codex");
+    env.KAOIRO_CLAUDE_PHASE2_DELIVERY_PERSONAS = "other"; env.KAOIRO_CODEX_OPERATOR_STEER_PERSONAS = "other"; config.codex!.backend = "exec";
+    const codex = buildLaunchDeliveryMetadata(snapshot, "codex");
+    const claude = buildLaunchDeliveryMetadata(snapshot, "claude-code");
+    const fold = { operator_early: "fold", inter_agent_early: "fold", inter_agent_yield: "tool_boundary" };
     expect(Object.isFrozen(snapshot)).toBe(true); expect(Object.isFrozen(snapshot.engines.codex)).toBe(true);
-    expect(metadata.mechanisms).toEqual({ ...none, inter_agent_early: "steer" });
-    expect(metadata.persona_overrides).toEqual({ P: { ...none, operator_early: "steer", inter_agent_early: "steer" },
-      ["__proto__"]: { ...none, operator_early: "steer", inter_agent_early: "steer" } });
-    expect(metadata.persona_overrides).not.toHaveProperty("p");
+    expect(codex.mechanisms).toEqual({ ...none, operator_early: "steer", inter_agent_early: "steer" });
+    expect(codex).not.toHaveProperty("persona_overrides");
+    expect(claude.mechanisms).toEqual(none);
+    expect(claude.persona_overrides).toEqual({ P: fold, ["__proto__"]: fold });
+    expect(claude.persona_overrides).not.toHaveProperty("p");
+  });
+  it("projects the Codex mechanisms from the ceiling and the backend alone", () => {
+    const steer = { ...none, operator_early: "steer", inter_agent_early: "steer" };
+    const metadata = (codex: Record<string, unknown>) => buildLaunchDeliveryMetadata(
+      createDeliverySnapshot(parseRunnerConfig({ ...raw, codex: { ...raw.codex, ...codex } }), {}), "codex");
+    expect(metadata({}).mechanisms).toEqual(steer);
+    expect(metadata({ operator_steer: false }).mechanisms).toEqual(steer);
+    expect(metadata({ backend: "exec" })).toMatchObject({ ceiling: true, mechanisms: none });
+    expect(metadata({ backend: "exec", operator_steer: true }).mechanisms).toEqual(none);
+    const closed = buildLaunchDeliveryMetadata(createDeliverySnapshot(
+      parseRunnerConfig({ ...raw, in_flight_delivery: { codex: { enabled: false } } }),
+      { KAOIRO_CODEX_OPERATOR_STEER: "1", KAOIRO_CODEX_OPERATOR_STEER_PERSONAS: "P" }), "codex");
+    expect(closed).toMatchObject({ ceiling: false, mechanisms: none });
   });
   it("omits whole metadata at either independent bound and preserves defaults with a size-only warning", () => {
     const metadata = boundedMetadata(); const warn = vi.fn();
@@ -90,13 +107,58 @@ describe("host delivery settings", () => {
     buildRegister(config, undefined, "chatgpt", undefined, undefined, undefined, createDeliverySnapshot(config, {}));
     expect(warn).not.toHaveBeenCalled();
     const personas = Array.from({ length: 4000 }, (_, i) => `private-persona-${i}`).join(",");
-    const register = buildRegister(config, undefined, "chatgpt", undefined, undefined, undefined,
+    const retired = buildRegister(config, undefined, "chatgpt", undefined, undefined, undefined,
       createDeliverySnapshot(config, { KAOIRO_CODEX_OPERATOR_STEER_PERSONAS: personas }));
-    expect(register.engines!.find(e => e.id === "codex")).not.toHaveProperty("launch_delivery_policy");
-    expect(register.in_flight_defaults?.codex).toBe(true);
+    expect(retired.engines!.find(e => e.id === "codex")).toHaveProperty("launch_delivery_policy");
+    expect(warn).not.toHaveBeenCalled();
+    const register = buildRegister(config, undefined, "chatgpt", undefined, undefined, undefined,
+      createDeliverySnapshot(config, { KAOIRO_CLAUDE_PHASE2_DELIVERY_PERSONAS: personas }));
+    expect(register.engines!.find(e => e.id === "claude-code")).not.toHaveProperty("launch_delivery_policy");
+    expect(register.engines!.find(e => e.id === "codex")).toHaveProperty("launch_delivery_policy");
+    expect(register.in_flight_defaults?.["claude-code"]).toBe(true);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]![0])).toContain('"reason":"override_count"');
     expect(String(warn.mock.calls[0]![0])).toContain('"size":4000');
     expect(String(warn.mock.calls[0]![0])).not.toContain("private-persona");
+  });
+});
+
+describe("retired Codex operator-steer inputs in the runner", () => {
+  const flag = "KAOIRO_CODEX_OPERATOR_STEER", list = "KAOIRO_CODEX_OPERATOR_STEER_PERSONAS";
+  const config = (extra: Record<string, unknown> = {}) => parseRunnerConfig({ ...raw, ...extra });
+  it("prints one runner line per present input, once per process, and none for an absent input", () => {
+    const seen = new Set<string>();
+    const file = config({ codex: { ...raw.codex, operator_steer: false } });
+    const first = retiredDeliveryWarnings(file, { [flag]: "0", [list]: "secret-persona-id" }, seen);
+    expect(first).toHaveLength(3);
+    expect(first[0]).toMatch(new RegExp(`^runner: warn - ${flag} is retired and has no effect`));
+    expect(first[1]).toMatch(new RegExp(`^runner: warn - ${list} is retired and has no effect`));
+    expect(first[2]).toContain('"codex.operator_steer" in runner.config.json is retired');
+    expect(first.join("")).not.toContain("secret-persona-id");
+    expect(first.every(line => line.endsWith("\n"))).toBe(true);
+    expect(retiredDeliveryWarnings(file, { [flag]: "0", [list]: "secret-persona-id" }, seen)).toEqual([]);
+    expect(retiredDeliveryWarnings(config(), {}, new Set())).toEqual([]);
+    expect(retiredDeliveryWarnings(config(), { [flag]: "", [list]: "" }, new Set())).toEqual([]);
+  });
+  it("adds a line only for an input that is new since the last call sharing the same seen set", () => {
+    const seen = new Set<string>();
+    expect(retiredDeliveryWarnings(config(), { [flag]: "1" }, seen)).toHaveLength(1);
+    const withKey = config({ codex: { ...raw.codex, operator_steer: true } });
+    const next = retiredDeliveryWarnings(withKey, { [flag]: "1" }, seen);
+    expect(next).toHaveLength(1);
+    expect(next[0]).toContain('"codex.operator_steer"');
+  });
+  it("does not warn for a host that does not enable Codex", () => {
+    const file = { ...config({ capabilities: ["claude-code"], codex: undefined }), codex: { operator_steer: true } };
+    expect(retiredDeliveryWarnings(file, { [flag]: "1", [list]: "P" }, new Set())).toEqual([]);
+    expect(retiredDeliveryWarnings({ ...file, capabilities: ["claude-code", "codex"] }, { [flag]: "1" }, new Set())).toHaveLength(2);
+  });
+  it("removes exactly the two retired variables from a child environment", () => {
+    const base = { [flag]: "1", [list]: "P", KAOIRO_CLAUDE_PHASE2_DELIVERY: "1", KAOIRO_CLAUDE_PHASE2_DELIVERY_PERSONAS: "P",
+      KAOIRO_CODEX_APPROVAL_AXIS: "1", KAOIRO_CODEX_APPROVAL_AXIS_PERSONAS: "P", PATH: "/bin" };
+    const child = withoutRetiredDeliveryInputs(base);
+    expect(child).toEqual({ KAOIRO_CLAUDE_PHASE2_DELIVERY: "1", KAOIRO_CLAUDE_PHASE2_DELIVERY_PERSONAS: "P",
+      KAOIRO_CODEX_APPROVAL_AXIS: "1", KAOIRO_CODEX_APPROVAL_AXIS_PERSONAS: "P", PATH: "/bin" });
+    expect(base[flag]).toBe("1");
   });
 });
