@@ -1784,10 +1784,13 @@ function heldLockSteps(backupRoot, serverDir, repo, flags) {
       note: "if no process holds it (docs/operations/server-update-and-rollback.md 4.4 (0a)), remove that directory" });
   }
   let authority = null;
+  let authorityError = null;
   try {
     authority = readReleaseAuthority(serverDir, { role: "server" });
-  } catch {
-    // An unreadable descriptor is reported by the release gate itself.
+  } catch (err) {
+    // The release lock cannot be located without the descriptor; say so
+    // instead of reporting an empty lock list.
+    authorityError = err.message;
   }
   if (authority?.status === "enrolled") {
     const releaseLock = join(authority.descriptor.root, ".lock.server");
@@ -1802,10 +1805,11 @@ function heldLockSteps(backupRoot, serverDir, repo, flags) {
   }
   const status = [...cli, "status", "--repo", repo, ...config];
   const text = [
+    ...(authorityError === null ? [] : [`note: the release authority descriptor is unreadable, so a held release lock cannot be listed: ${authorityError}`]),
     ...locks.flatMap((l) => [`note: ${l.kind} lock ${l.path} is held: ${l.note}`, ...l.next.map((a) => `next: ${a.map(quote).join(" ")}`)]),
     `next: ${status.map(quote).join(" ")}`,
   ].join("\n");
-  return { locks, status, text };
+  return { locks, authorityError, status, text };
 }
 
 /** Both locks every mutator takes. A held lock may be left by a killed
@@ -3423,6 +3427,7 @@ export function runStatus(flags, config) {
     docker: overridden ? "fake" : "docker",
     container: containerState,
     locks: lockSteps.locks,
+    lockAuthorityError: lockSteps.authorityError,
     health,
     unfinishedTransaction:
       unfinishedError !== null

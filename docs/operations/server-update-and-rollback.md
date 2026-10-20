@@ -640,7 +640,8 @@ Every refusal and failure that leaves a transaction open ends with `next:`
 lines naming the exact commands for the phase the journal actually reached,
 and `status` returns the same commands as `unfinishedTransaction.recovery`.
 After a killed run nothing is printed; the next invocation is refused by the
-lock, names it, and points at `status`. The design is
+lock and names every held server lock with its own `note:` / `next:` lines (see
+(0a)), then points at `status`, which lists the same locks under `locks`. The design is
 [docs/plans/issue-695-transaction-state-table.md](../plans/issue-695-transaction-state-table.md).
 
 What each command does at each persisted phase (generated from
@@ -716,6 +717,13 @@ one of the three is genuinely in flight against the same deployment right
 now. Wait for it to finish (check `status`), or — only after confirming no
 process actually holds it (a killed run leaves the lock directory behind) —
 remove the named directory manually.
+
+On an enrolled installation a killed run can also leave the release
+layer's `<authority_root>/.lock.server`. The refusal and `status` name it with
+two printed steps: `scripts/production-release-lifecycle.mjs inspect-residue`
+to read its observed digest, then `recover-lock` with that digest and a
+reason. A named live owner refuses
+([build-identity-and-release-tags.md](build-identity-and-release-tags.md)).
 
 **(1) The commit step failed before reaching `done`** (4.3 step 5 / step 5-c)
 

@@ -35,10 +35,10 @@ into measurements; a unit corrects this page where a measurement disagrees.
   `recover` switches no code. Two conditions apply and are tested (5.4, 7.2):
   it writes no link and no release tree, and it starts only the recorded,
   unchanged source.
-- Pending operator decision (R2): whether `recover` deletes the
-  transaction-owned staging residue or moves it to private storage. The
-  recommendation is to delete exactly `tx.staging` and record its path and
-  size. Only step 4 of `recover` depends on the answer.
+- Operator decision (R2, 2026-10-20): `recover` deletes the
+  transaction-owned staging residue, at exactly the recorded `tx.staging`
+  only, and records its path and size in the abandonment record. It is not
+  moved to private storage.
 - Three late review findings are in the scope of L2 and are checked in L2's
   implementation review: the R7 path-reuse guards, the `active-mismatch`
   refusal, and the proof that `next` writes nothing (all in 5.4).
@@ -204,7 +204,7 @@ section 5.
 | snapshot directory partly removed, ref retired, transaction `completed` | `retire` `rmSync` (`codex-state.mjs:442-445`) | `completed` after a kill during `retire` | nobody (a rerun fails `verifySnapshot`) — R7 | `retire` rerun finishes the removal of exactly `ref.snapshot` when the ref already carries this retirement's evidence digest; `next` renders `retire` |
 | `current.tmp.<pid>` / `previous.tmp.<pid>` | `kaoiro_symlink_swap` (`kaoiro-runner-common.sh:303-309`) | after SIGKILL between `symlinkSync` and `renameSync` | nobody | non-blocking; `recover` and the next update remove a tmp sibling whose name matches exactly and whose pid is not alive, else list it |
 | server `<authority_root>/.lock.server` (+ `owner.json`), enrolled installations only | `acquireServerReleaseActivity` (`kaoiro-release-reconciliation.mjs:148-155`, `production-release-files.mjs:201-220`), right after the deploy lock (`kaoiro-server-deploy.mjs:1951-1955`, `:2758-2761`) | any phase after SIGKILL of `update` or `rollback` | the release layer's owner-checked `inspect-residue` then `recover-lock` (`docs/operations/build-identity-and-release-tags.md:354-361`); a named live owner refuses | unchanged mechanism; the server's lock message and `status` name both locks and render both `next:` steps; covered by the enrolled kill/replay case |
-| `.staging.codex-<uuid>` | `snapshot()` `codex-snapshot.mjs:163` | `stopped` (R2, [issue #531](https://github.com/sakuraiyuta/kaoiro/issues/531)) | nobody | removed by `snapshot()` on an ordinary failure; crash residue disposed by `recover` step 4 (delete or move, pending R2) |
+| `.staging.codex-<uuid>` | `snapshot()` `codex-snapshot.mjs:163` | `stopped` (R2, [issue #531](https://github.com/sakuraiyuta/kaoiro/issues/531)) | nobody | removed by `snapshot()` on an ordinary failure; crash residue deleted by `recover` step 4 (R2 decision) |
 | snapshot directory (operator-supplied path) + backup ref | `:169`, `:289` | `stopped` … | `retire` (`:442-445`) | `recover` (never-switched forward): ref retired first; a complete snapshot without a ref is kept as **operator-owned evidence** (nothing collects it: `retire` needs a ref), its path printed |
 | `.restore.codex-<uuid>` | `prepareRestore` | `restore-prepared` … `promote-intent` | nobody | `deferred(L3)` |
 | `.failed.codex-<uuid>` (quarantined old home) | `promoteRestore` `:199` | `quarantined` and later, also after success | nobody; the runbook says retain | `deferred(L3)`; after a successful restore it stays as operator-owned evidence (unchanged) |
@@ -465,14 +465,14 @@ Steps (each re-run safe):
 1. V1-V5.
 2. Write `tx.recovery = {version, started, owner: {pid, start}, disposition}`
    where `disposition` is the planned action on `tx.staging`
-   (`{kind: "delete" | "move", from, to, size}`, or `{kind: "none"}` when absent).
-   It is written **before** acting, so a kill after a move keeps the destination.
+   (`{kind: "delete", path, size}`, or `{kind: "none"}` when absent). It is
+   written **before** acting, so a kill during the deletion is resumed.
 3. Backup ref of `tx.uuid`, if present: `retired: true`,
    `retirementReason: "recover"` (ref first; a retired transaction with a live
    ref would leave a reference no helper settles — see 7.2 oracle).
 4. Residue at `tx.staging`: absent → no-op; present and `lstat` shows a
-   directory, uid-owned, mode 0700, at exactly the recorded path → delete or
-   move per the pending R2 decision; a symlink, another owner, another mode or
+   directory, uid-owned, mode 0700, at exactly the recorded path → delete it
+   (R2 decision); a symlink, another owner, another mode or
    any other entry → refuse (no change). A complete snapshot at `tx.snapshot`
    (manifest uuid = `tx.uuid`) is left in place and printed.
 5. `tx.phase = "retired"`, `abandonment = {version, phase, ownerStatus,
@@ -525,8 +525,8 @@ retirement decision is durable. A rerun removes exactly `ref.snapshot` (no
 symlink traversal, owned by uid) without `verifySnapshot`, then retires the
 transaction. With a different evidence digest it refuses, and its `next:` text says the same evidence file must be supplied. Two further guards (L2): refuse if any other backup record names the same `snapshot` path, and, if `manifest.json` exists at the path, refuse unless its `uuid` equals `ref.uuid`. A reused-path fixture is a negative control.
 
-R2 (pending operator decision): recommendation unchanged (delete exactly
-`tx.staging`, record path and size). Step 4 is the only place that differs.
+R2 (operator decision, 2026-10-20): delete exactly `tx.staging` and record its
+path and size in the abandonment record.
 
 R4: `deferred(L3)`.
 
@@ -793,5 +793,4 @@ Each unit gets its own issue when it starts; L1 first.
 
 ## 11. Open decisions
 
-1. R2: delete vs move the transaction-owned staging residue (operator; pending).
-   Section 5.4 step 4 is the only place that changes.
+None. R2 was decided by the operator on 2026-10-20 (see Decisions).
