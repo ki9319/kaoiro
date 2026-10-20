@@ -97,8 +97,11 @@ function makeWorld(t, { fleet = { schema: 1, hosts: [], wrappers: [] }, override
   tagLanding(source, oldSha, 1);
   const bare = join(root, "bare.git");
   const work = join(root, "work");
-  execFileSync("git", ["clone", "--bare", "-q", source, bare]);
-  execFileSync("git", ["clone", "-q", bare, work]);
+  // --no-local: a local-path clone hardlinks or copies objects/ as files and
+  // races with a concurrent writer there (git refuses a hardlink whose source
+  // changed); the regular transport reads complete objects only.
+  execFileSync("git", ["clone", "--bare", "--no-local", "-q", source, bare]);
+  execFileSync("git", ["clone", "--no-local", "-q", bare, work]);
   writeFileSync(join(source, "README"), "target\n");
   git(source, "add", "README");
   git(source, "commit", "-q", "-m", "target");

@@ -42,9 +42,12 @@ function fixture(commitCount = 2) {
     git(seed, ["commit", "--quiet", "-m", `commit ${index}`]);
     targets.push(git(seed, ["rev-parse", "HEAD"]));
   }
-  git(root, ["clone", "--quiet", "--bare", seed, remote]);
-  git(root, ["clone", "--quiet", remote, first]);
-  git(root, ["clone", "--quiet", remote, second]);
+  // --no-local: a local-path clone hardlinks or copies objects/ as files and
+  // races with a concurrent writer there (git refuses a hardlink whose source
+  // changed); the regular transport reads complete objects only.
+  git(root, ["clone", "--quiet", "--bare", "--no-local", seed, remote]);
+  git(root, ["clone", "--quiet", "--no-local", remote, first]);
+  git(root, ["clone", "--quiet", "--no-local", remote, second]);
   return { root, seed, remote, first, second, targets };
 }
 

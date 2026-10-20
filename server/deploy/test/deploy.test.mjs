@@ -826,8 +826,11 @@ beforeEach(() => {
   bareDir = join(root, "bare.git");
   workDir = join(root, "work");
   headSha = initRepo(sourceDir);
-  execFileSync("git", ["clone", "--bare", "-q", sourceDir, bareDir]);
-  execFileSync("git", ["clone", "-q", bareDir, workDir]);
+  // --no-local: a local-path clone hardlinks or copies objects/ as files and
+  // races with a concurrent writer there (git refuses a hardlink whose source
+  // changed); the regular transport reads complete objects only.
+  execFileSync("git", ["clone", "--bare", "--no-local", "-q", sourceDir, bareDir]);
+  execFileSync("git", ["clone", "--no-local", "-q", bareDir, workDir]);
 
   bin = join(root, "fake-docker.sh");
   writeFileSync(bin, FAKE_DOCKER);
@@ -1487,7 +1490,7 @@ test("runUpdate --dry-run reports the plan", () => {
 // would go red if the fetch call were reinstated.
 test("runUpdate --dry-run does not fetch from origin — succeeds even when origin is unreachable", () => {
   const brokenOriginDir = join(root, "work-broken-origin");
-  execFileSync("git", ["clone", "-q", bareDir, brokenOriginDir]);
+  execFileSync("git", ["clone", "--no-local", "-q", bareDir, brokenOriginDir]);
   execFileSync("git", [
     "-C",
     brokenOriginDir,

@@ -281,7 +281,10 @@ function remote() {
     `refs/tags/identity/landing/${revision}`,
     git(source, "rev-parse", "refs/tags/v2026.10.09.1"),
   );
-  git(root, "clone", "--bare", "-q", source, bare);
+  // --no-local: a local-path clone hardlinks or copies objects/ as files and
+  // races with a concurrent writer there (git refuses a hardlink whose source
+  // changed); the regular transport reads complete objects only.
+  git(root, "clone", "--bare", "--no-local", "-q", source, bare);
   git(source, "remote", "add", "origin", bare);
   return { root, source, bare, revision, git };
 }

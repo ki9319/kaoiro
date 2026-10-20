@@ -76,7 +76,10 @@ describe("exact landing identity", () => {
   });
   it("production refuses an untagged tip and shallow inventory before building", () => {
     const remote = join(dir, "origin.git");
-    git(["clone", "-q", "--bare", repo, remote], dir);
+    // --no-local: a local-path clone hardlinks or copies objects/ as files and
+    // races with a concurrent writer there (git refuses a hardlink whose source
+    // changed); the regular transport reads complete objects only.
+    git(["clone", "-q", "--bare", "--no-local", repo, remote], dir);
     git(["remote", "add", "origin", remote]);
     expect(() => requireTaggedIdentity(repo, { target: revision, timeoutMs: 1000 })).toThrow(/completed exact landing/);
     publish(); git(["push", "-q", "origin", "--tags"]);
@@ -87,7 +90,7 @@ describe("exact landing identity", () => {
   });
   it.each(["both", "public", "claim"])("production rejects a local-only landing %s ref", (missing) => {
     const remote = join(dir, "origin.git");
-    git(["clone", "-q", "--bare", repo, remote], dir);
+    git(["clone", "-q", "--bare", "--no-local", repo, remote], dir);
     git(["remote", "add", "origin", remote]);
     publish();
     if (missing === "public") git(["push", "-q", "origin", `refs/tags/identity/landing/${revision}`]);
@@ -97,7 +100,7 @@ describe("exact landing identity", () => {
   });
   it("production rejects an unpublished local pair even when the selected HEAD pair is remote", () => {
     const remote = join(dir, "origin.git");
-    git(["clone", "-q", "--bare", repo, remote], dir);
+    git(["clone", "-q", "--bare", "--no-local", repo, remote], dir);
     git(["remote", "add", "origin", remote]);
     const selected = publish(); git(["push", "-q", "origin", "--tags"]);
     const other = git(["commit-tree", "HEAD^{tree}", "-p", revision, "-m", "other"]);
@@ -109,7 +112,7 @@ describe("exact landing identity", () => {
   });
   it("production re-reads the selected remote pair after the inventory observation", () => {
     const remote = join(dir, "origin.git");
-    git(["clone", "-q", "--bare", repo, remote], dir);
+    git(["clone", "-q", "--bare", "--no-local", repo, remote], dir);
     git(["remote", "add", "origin", remote]);
     publish(); git(["push", "-q", "origin", "--tags"]);
     const original = git(["rev-parse", "refs/tags/v2026.10.09.1"]);
