@@ -298,8 +298,9 @@ const RECIPES = [
   { name: "preflight: killed after the rollback tag", phase: PHASE.PREFLIGHT, args: [],
     faults: [{ match: "^tag \\S+ kaoiro-server:rollback-", kind: "kill-after" }],
     residual: (w) => assert.equal(w.locks().length, 1), via: ["rollback"], oracle: "record-close" },
-  { name: "old_image_saved: build fails (latest restored)", phase: PHASE.OLD_IMAGE_SAVED, args: [],
-    faults: [{ match: "^compose build", kind: "fail" }],
+  // Fails after `compose build` moved `latest`, so only the restore puts it back.
+  { name: "old_image_saved: failure after the build moved latest (latest restored)", phase: PHASE.OLD_IMAGE_SAVED, args: [],
+    faults: [{ match: "^tag kaoiro-server:latest kaoiro-server:", kind: "fail" }],
     residual: (w, r) => { assert.equal(w.latest(), OLD_IMAGE); assert.match(r.stderr, /confirmed by read-back/); },
     via: ["rollback", "update"], oracle: "non-destructive", clearFaults: true },
   { name: "old_image_saved: killed after the build (latest moved)", phase: PHASE.OLD_IMAGE_SAVED, args: [],
