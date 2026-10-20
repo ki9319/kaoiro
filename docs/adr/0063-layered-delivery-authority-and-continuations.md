@@ -511,3 +511,25 @@ passes, and 0 fail does not mean every expectation was measured natively.
   reaches the child within run1 and the reply is admitted. The refusal is not
   an evidence failure, so it does not close native continuations; that was read
   from the code of this build, not re-run on it.
+
+## Amendment (2026-10-10, measured engine delivery semantics)
+
+Operator decision 1 of 2026-10-10, recorded in
+[issue #585](https://github.com/sakuraiyuta/kaoiro/issues/585): the proposal
+to make engine delivery semantics a measured contract was adopted as
+proposed.
+
+- **Capability matrix.** The capability matrix per engine is a measured
+  artifact under `docs/evidence/`. It is re-measured with a fixed set of
+  loopback probes on every SDK bump.
+- **SDK bumps.** An SDK bump is a release-class change and is gated by that
+  probe set.
+- **Unsupported semantics.** A semantic an engine does not guarantee is not
+  emulated in the wrapper. The delivery policy declares it unsupported, and
+  the server downgrades it.
+- **Default-on in-flight delivery
+  ([issue #463](https://github.com/sakuraiyuta/kaoiro/issues/463)).** Claude
+  and Codex stay default-on. Antigravity
+  ([issue #567](https://github.com/sakuraiyuta/kaoiro/issues/567)) is
+  default-on only for what the probes guarantee. This narrows the end state
+  of the 2026-10-01 Amendment for Antigravity.
