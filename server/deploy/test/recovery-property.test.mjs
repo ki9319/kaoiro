@@ -47,6 +47,8 @@ function git(dir, ...args) {
   return execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
 }
 
+// The record's values only need to satisfy requireTaggedIdentity's shape
+// (build-identity.mjs); they name no real repository or release.
 function tagLanding(dir, revision, number) {
   const version = `2026.10.20.${number}`;
   const record = { schema: 1, kind: "landing", repository_id: 1343265983, revision,
@@ -86,7 +88,8 @@ function makeWorld(t, { fleet = { schema: 1, hosts: [], wrappers: [] }, override
   git(source, "config", "user.email", "test@example.com");
   git(source, "config", "user.name", "Test");
   writeFileSync(join(source, "server", "docker-compose.yaml"), "# fixture\n");
-  writeFileSync(join(source, ".gitignore"), ".env\n");
+  // As in the real repository, the release authority descriptor is ignored.
+  writeFileSync(join(source, ".gitignore"), ".env\n/server/.kaoiro-release-authority.json\n");
   copyCode(source);
   git(source, "add", "-A");
   git(source, "commit", "-q", "-m", "old");
@@ -616,6 +619,65 @@ test("recovery property: an enrolled server killed mid-rollback leaves both lock
   assert.equal(result.phase, PHASE.ROLLED_BACK);
   assert.deepEqual(world.locks(), []);
   assert.equal(world.serviceContainer().status, "running");
+});
+
+// Design NC8: an enrolled transaction prepared under a release attempt is
+// resumed by the printed `update` line, which carries the release context.
+// The exporter is a fake that echoes the context; the refusal of a resume
+// without it is the deploy CLI's own (assertServerResumeContext).
+test("recovery property: an enrolled update resume runs as printed with its release context, and is refused without it", (t) => {
+  const world = makeWorld(t);
+  mkdirSync(join(world.root, "history"), { mode: 0o700 });
+  const history = realpathSync(join(world.root, "history"));
+  const serverDir = realpathSync(join(world.work, "server"));
+  chmodSync(serverDir, 0o755);
+  const exporter = join(world.root, "bin", "release-exporter.mjs");
+  copyFileSync(join(here, "../test-support/fake-release-exporter.mjs"), exporter);
+  const descriptor = JSON.stringify({
+    schema: 1, install_root: serverDir, transport: "local", recording_hostname: hostname(),
+    root: history, tool_sha256: "a".repeat(64), exporter_path: exporter,
+    node_major: Number(process.versions.node.split(".")[0]), node_path: process.execPath,
+  });
+  writeFileSync(join(serverDir, ".kaoiro-release-authority.json"), descriptor, { mode: 0o600 });
+  const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+  const attempt = "11111111-2222-4333-8444-555555555555";
+  const plan = JSON.stringify({ authority: { server: { sha256: sha256(descriptor), root: serverDir } } });
+  mkdirSync(join(history, attempt), { mode: 0o700 });
+  writeFileSync(join(history, attempt, "attempt.json"), plan, { mode: 0o600 });
+  const context = ["--release-attempt", attempt, "--release-plan-sha256", sha256(plan)];
+
+  world.faults([{ match: "^compose build", kind: "fail" }]);
+  const failed = world.update(...context);
+  assert.notEqual(failed.status, 0);
+  assert.equal(world.journal().phase, PHASE.OLD_IMAGE_SAVED);
+  assert.deepEqual(world.journal().release_context, { attempt_uuid: attempt, plan_sha256: sha256(plan) });
+  world.faults([]);
+  const printed = parseNext(failed.stderr).find((c) => c.command === "update");
+  assert.ok(printed, failed.stderr);
+  assert.deepEqual(printed.argv.slice(printed.argv.indexOf("--release-attempt")), context);
+  assertAgrees(world, parseNext(failed.stderr));
+
+  // Control: the printed command without its release context is refused by
+  // the audit before any Docker call or phase change.
+  const contextFlags = new Set(["--release-attempt", "--release-plan-sha256"]);
+  const stripped = printed.argv.filter((w, i, a) => !contextFlags.has(w) && !contextFlags.has(a[i - 1]));
+  assert.equal(stripped.length, printed.argv.length - 4);
+  const before = world.calls();
+  const refused = world.exec([...stripped, ...UPDATE_APPROVED]);
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /resume cannot change or omit its authoritative release attempt/);
+  assert.equal(world.calls(), before);
+  assert.equal(world.journal().phase, PHASE.OLD_IMAGE_SAVED);
+  assert.deepEqual(world.locks(), []);
+
+  const result = followHints(world, [printed], "update");
+  assert.equal(result.phase, PHASE.DONE);
+  assert.ok(result.steps[0].argv.includes("--release-attempt"));
+  assert.equal(world.serviceContainer().image === OLD_IMAGE, false);
+  assert.deepEqual(world.locks(), []);
+  assert.equal(existsSync(join(history, ".lock.server")), false);
+  const bound = JSON.parse(readFileSync(join(history, attempt, "server-audit.json"), "utf8"));
+  assert.equal(bound.transaction_dir, realpathSync(join(world.backupRoot, world.txId())));
 });
 
 test("recovery property: a non-destructive rollback refuses when the recorded container was replaced, even under the same name", (t) => {

@@ -1812,6 +1812,10 @@ function heldLockSteps(backupRoot, serverDir, repo, flags) {
   return { locks, authorityError, status, text };
 }
 
+/** How scripts/production-release-files.mjs reports a held release lock
+ *  (it throws a plain Error); a test pins this against that module. */
+export const RELEASE_LOCK_HELD_RE = /release lock held/;
+
 /** Both locks every mutator takes. A held lock may be left by a killed
  *  run; the refusal names every held lock with its own step. */
 function acquireDeploymentLocks(backupRoot, serverDir, repo, flags) {
@@ -1827,7 +1831,7 @@ function acquireDeploymentLocks(backupRoot, serverDir, repo, flags) {
     releaseActivityLock = acquireServerReleaseActivity(serverDir);
   } catch (err) {
     releaseLock(lockPath);
-    if (/release lock held/.test(err.message)) err.message += `\n${heldLockSteps(backupRoot, serverDir, repo, flags).text}`;
+    if (RELEASE_LOCK_HELD_RE.test(err.message)) err.message += `\n${heldLockSteps(backupRoot, serverDir, repo, flags).text}`;
     throw err;
   }
   return { lockPath, releaseActivityLock };
@@ -2076,7 +2080,10 @@ export function runUpdate(flags, config) {
       capacity,
       wouldRun:
         unfinished !== null
-          ? [`resume transaction ${unfinished.id} (phase: ${unfinished.journal.phase})`]
+          ? [
+              `refuse: transaction ${unfinished.id} is unfinished (phase: ${unfinished.journal.phase})`,
+              ...recoveryText(unfinished.id, unfinished.journal).split("\n").filter((line) => line !== ""),
+            ]
           : [
               "git fetch origin",
               `git merge --ff-only ${target}`,

@@ -1,6 +1,7 @@
 import "../../../scripts/test/fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -18,7 +19,8 @@ import {
   renderRecovery,
   selectEntry,
 } from "../kaoiro-deploy-recovery.mjs";
-import { ROLLBACK_ELIGIBLE_PHASES, UNRESUMABLE_PHASES } from "../kaoiro-server-deploy.mjs";
+import { RELEASE_LOCK_HELD_RE, ROLLBACK_ELIGIBLE_PHASES, UNRESUMABLE_PHASES } from "../kaoiro-server-deploy.mjs";
+import { acquireReleaseLock, releaseReleaseLock } from "../../../scripts/production-release-files.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SHA = "a".repeat(40);
@@ -164,4 +166,20 @@ test("a malformed recorded target or invocation is refused, never tolerated as a
   assert.equal(isValidJournalShape({ ...base, invocation: { repo: "relative", config: null, release_authority: null } }), false);
   assert.equal(isValidJournalShape({ ...base, invocation: { repo: "/srv/kaoiro", config: "deploy.json", release_authority: null } }), false);
   assert.equal(isValidJournalShape({ ...base, invocation: { repo: "/srv/kaoiro", config: null, release_authority: "authority.json" } }), false);
+});
+
+// The lock refusal recognizes a held release lock by the release module's
+// message text; rewording that message would silently drop the lock steps.
+test("the release module's held-lock message is the one the lock refusal reads", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "kaoiro-release-lock-")));
+  try {
+    const lock = acquireReleaseLock(dir, "server", "root");
+    try {
+      assert.throws(() => acquireReleaseLock(dir, "server", "root"), (err) => RELEASE_LOCK_HELD_RE.test(err.message));
+    } finally {
+      releaseReleaseLock(lock);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

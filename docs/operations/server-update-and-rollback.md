@@ -718,6 +718,11 @@ now. Wait for it to finish (check `status`), or — only after confirming no
 process actually holds it (a killed run leaves the lock directory behind) —
 remove the named directory manually.
 
+`status` lists the deploy lock under `locks` whenever the directory exists:
+the lock records no owner, so `status` cannot tell a run that is still in
+flight from one that was killed, and it lists the lock the same way during a
+healthy `update`. The owner check above is mandatory before removing it.
+
 On an enrolled installation a killed run can also leave the release
 layer's `<authority_root>/.lock.server`. The refusal and `status` name it with
 two printed steps: `scripts/production-release-lifecycle.mjs inspect-residue`

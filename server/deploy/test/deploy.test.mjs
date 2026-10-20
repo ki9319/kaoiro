@@ -20,10 +20,12 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, test } from "node:test";
 
 import { DEFAULT_CONFIG } from "../kaoiro-deploy-config.mjs";
-import { readJournal } from "../kaoiro-deploy-journal.mjs";
+import { readJournal, writeJournal } from "../kaoiro-deploy-journal.mjs";
 import { LockError } from "../kaoiro-deploy-lock.mjs";
 import { readManifest } from "../kaoiro-deploy-manifest.mjs";
 import { PHASE, TRANSITIONS } from "../kaoiro-deploy-phase.mjs";
+import { formatRecovery, renderRecovery } from "../kaoiro-deploy-recovery.mjs";
+import { newTransactionId } from "../kaoiro-deploy-transaction.mjs";
 import { POLICY_ENV, PLACEMENT_FILE } from "../kaoiro-delivery-policy-placement.mjs";
 import {
   DeployError,
@@ -1510,6 +1512,25 @@ test("runUpdate --dry-run reports targetKnownLocally: false for a target this re
   assert.equal(result.targetKnownLocally, false);
 });
 
+// issue #695 S3: the preview of an update over an unfinished transaction
+// is the real run's refusal plus the commands the recovery table renders.
+test("runUpdate --dry-run over an unfinished transaction previews the table's next commands", () => {
+  assert.throws(
+    () => withScenario("running", () => runUpdate({ repo: workDir, target: headSha }, configWithOverride())),
+    DeployError,
+  );
+  const backupRoot = join(root, "kaoiro-deploy");
+  const [id] = readdirSyncNonHidden(backupRoot);
+  const journal = readJournal(join(backupRoot, id));
+  const result = withScenario("running", () =>
+    runUpdate({ repo: workDir, target: headSha, dryRun: true }, configWithOverride()),
+  );
+  assert.equal(result.unfinishedTransactionId, id);
+  assert.equal(result.wouldRun[0], `refuse: transaction ${id} is unfinished (phase: ${journal.phase})`);
+  assert.deepEqual(result.wouldRun.slice(1), formatRecovery(renderRecovery(id, journal)).split("\n"));
+  assert.ok(result.wouldRun.some((line) => /^next: .* update .*--transaction /.test(line)));
+});
+
 test("runUpdate --dry-run refuses --transaction", () => {
   assert.throws(
     () =>
@@ -1609,6 +1630,41 @@ test("runUpdate stops at the maintenance gate without --maintenance-approved, bu
   // approval gate too (still no-downtime) — "prepare progress" now
   // extends one phase further than build alone.
   assert.equal(journal.phase, "env_consistency_checked");
+});
+
+// issue #695: a fresh update whose id collides with an existing (done)
+// transaction fails on mkdir, and the failure must not carry that other
+// transaction's recovery hints. Every id in a window past "now" is taken,
+// so the run collides unless preflight outlasts the window; a run that
+// still found a free id is inconclusive and retried, at most 3 times.
+test("runUpdate does not borrow a colliding transaction's recovery hint", () => {
+  const backupRoot = join(root, "kaoiro-deploy");
+  const WINDOW_S = 15;
+  let caught;
+  let taken;
+  for (let attempt = 0; attempt < 3 && caught?.code !== "EEXIST"; attempt++) {
+    if (existsSync(backupRoot)) {
+      for (const name of readdirSyncNonHidden(backupRoot)) rmSync(join(backupRoot, name), { recursive: true });
+    }
+    const start = Date.now();
+    taken = new Map();
+    for (let s = 0; s < WINDOW_S; s++) {
+      const id = newTransactionId(new Date(start + s * 1000));
+      mkdirSync(join(backupRoot, id), { recursive: true });
+      writeJournal(join(backupRoot, id), { schema_version: 1, transaction_id: id, phase: "done", history: [] });
+      taken.set(id, readFileSync(join(backupRoot, id, "journal.json"), "utf8"));
+    }
+    caught = undefined;
+    try {
+      withScenario("running", () => runUpdate({ repo: workDir, target: headSha }, configWithOverride()));
+    } catch (err) {
+      caught = err;
+    }
+  }
+  assert.equal(caught?.code, "EEXIST", `no collision in 3 attempts (inconclusive): ${caught?.message}`);
+  assert.doesNotMatch(caught.message, /^(next|note):/m, "the colliding transaction's hint was appended");
+  assert.deepEqual(readdirSyncNonHidden(backupRoot).sort(), [...taken.keys()].sort());
+  for (const [id, bytes] of taken) assert.equal(readFileSync(join(backupRoot, id, "journal.json"), "utf8"), bytes);
 });
 
 // --- issue #220 absorption -----------------------------------------------
