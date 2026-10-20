@@ -34,7 +34,8 @@ import {
 import { advancePhase, readJournal, writeJournal } from "./kaoiro-deploy-journal.mjs";
 import { readManifest, writeManifest } from "./kaoiro-deploy-manifest.mjs";
 import { PHASE, TRANSITIONS, validateJournalAgainstStateMachine } from "./kaoiro-deploy-phase.mjs";
-import { acquireLock, releaseLock } from "./kaoiro-deploy-lock.mjs";
+import { acquireLock, LockError, releaseLock } from "./kaoiro-deploy-lock.mjs";
+import { entryActs, formatRecovery, OPERATION, recoveryFacts, renderRecovery, selectEntry } from "./kaoiro-deploy-recovery.mjs";
 import { findUnfinishedTransaction, newTransactionId } from "./kaoiro-deploy-transaction.mjs";
 import { requireFleetCompatibility } from "./kaoiro-build-compatibility.mjs";
 import { preparePolicyPlacement } from "./kaoiro-delivery-policy-placement.mjs";
@@ -1502,6 +1503,45 @@ function buildUnderLock({ repo, target }, config) {
   };
 }
 
+/** Builds the target and records BUILD_PREPARED (issue #695: shared by a
+ *  fresh update and a resume from OLD_IMAGE_SAVED). `compose build`
+ *  repoints `kaoiro-server:latest` at the new image, so any failure from
+ *  here on attempts to point it back at the old image and says whether
+ *  that was confirmed by read-back. */
+function prepareTarget({ bin, repo, serverDir, target, config, dir, journal, oldImageId, recoveryPlan }) {
+  let buildResult;
+  let targetPlan;
+  try {
+    buildResult = buildUnderLock({ repo, target }, config);
+    targetPlan = composePlan(bin, serverDir);
+    requirePlanIdentityMatch(recoveryPlan, targetPlan);
+  } catch (err) {
+    try {
+      runDocker(bin, ["tag", oldImageId, "kaoiro-server:latest"]);
+      const revertedId = dockerInspect(bin, "kaoiro-server:latest", "{{.Id}}");
+      err.message += revertedId === oldImageId
+        ? ` (kaoiro-server:latest restored to the old image ${oldImageId}, confirmed by read-back)`
+        : ` (also: could not restore kaoiro-server:latest to the old image ${oldImageId} — now ${revertedId})`;
+    } catch (restoreErr) {
+      err.message += ` (also: restoring kaoiro-server:latest to the old image failed: ${restoreErr.message})`;
+    }
+    throw err;
+  }
+  const next = advancePhase(
+    dir,
+    journal,
+    PHASE.BUILD_PREPARED,
+    {
+      image_id: buildResult.imageId,
+      image_tag: buildResult.imageTag,
+      target_sha: target,
+      target_plan: targetPlan,
+    },
+    validateJournalAgainstStateMachine,
+  );
+  return { journal: next, buildResult, targetPlan };
+}
+
 export function runBuild(flags, config) {
   const { repo, target, dryRun } = normalizeBuildFlags(flags);
   const { overridden } = resolveDockerBin(config);
@@ -1692,6 +1732,72 @@ export function reachablePhases(from, transitions) {
 // findUnfinishedTransaction's own TERMINAL_PHASES check before this is
 // ever consulted, but correct on its own regardless.
 export const UNRESUMABLE_PHASES = reachablePhases(PHASE.STOPPING, TRANSITIONS);
+
+// --- issue #695: recovery hints ------------------------------------------
+// Every refusal and failure that leaves a transaction open ends with the
+// next commands rendered from kaoiro-deploy-recovery.mjs, re-read from the
+// journal on disk so the hint names the phase that was actually persisted.
+
+function recoveryText(transactionId, journal) {
+  return formatRecovery(renderRecovery(transactionId, journal));
+}
+
+function appendRecoveryHint(err, dir, transactionId) {
+  if (err.recoveryHinted || dir === undefined) return err;
+  let journal;
+  try {
+    journal = readJournal(dir);
+  } catch {
+    return err;
+  }
+  const text = recoveryText(transactionId, journal);
+  if (text !== "") err.message += `\n${text}`;
+  err.recoveryHinted = true;
+  return err;
+}
+
+function invocationOf(flags, repo) {
+  return {
+    repo: realpathSync(repo),
+    config: flags.config === undefined ? null : realpathSync(flags.config),
+    release_authority: flags.releaseAuthority ?? null,
+  };
+}
+
+/** Both locks every mutator takes. A held lock may be left by a killed
+ *  run; the message names the owner check and the read path for the
+ *  transaction's own next commands. */
+function acquireDeploymentLocks(backupRoot, serverDir, repo) {
+  const statusArgv = `node ${join(repo, "server/deploy/kaoiro-server-deploy.mjs")} status --repo ${repo}`;
+  let lockPath;
+  try {
+    lockPath = acquireLock(backupRoot, deploymentLockKey(serverDir));
+  } catch (err) {
+    if (err instanceof LockError) {
+      err.message += `\nnote: if no process holds it (docs/operations/server-update-and-rollback.md 4.4 (0a)), remove that directory\nnext: ${statusArgv}`;
+    }
+    throw err;
+  }
+  let releaseActivityLock;
+  try {
+    releaseActivityLock = acquireServerReleaseActivity(serverDir);
+  } catch (err) {
+    releaseLock(lockPath);
+    const held = /release lock held; inspect\/recover-lock (\S+)/.exec(err.message);
+    if (held !== null) {
+      const tool = `node ${join(repo, "scripts/production-release-lifecycle.mjs")}`;
+      const selector = `--root ${dirname(held[1])} --entry ${basename(held[1])}`;
+      err.message += `\nnext: ${tool} inspect-residue ${selector}\nnext: ${tool} recover-lock ${selector} --observed-digest <observed_sha256-from-inspect-residue> --reason <reason> (a named live owner refuses; see docs/operations/build-identity-and-release-tags.md)\nnext: ${statusArgv}`;
+    }
+    throw err;
+  }
+  return { lockPath, releaseActivityLock };
+}
+
+function releaseDeploymentLocks({ lockPath, releaseActivityLock }) {
+  try { releaseServerReleaseActivity(releaseActivityLock); }
+  finally { releaseLock(lockPath); }
+}
 
 // --- #303 capacity preflight ----------------------------------------------
 // クロエ manual round-1 review M1: `capacity_multiplier` has existed in the
@@ -1948,14 +2054,15 @@ export function runUpdate(flags, config) {
     };
   }
 
-  const lockPath = acquireLock(backupRoot, deploymentLockKey(serverDir));
-  let releaseActivityLock;
+  const locks = acquireDeploymentLocks(backupRoot, serverDir, repo);
+  let transactionId;
+  let dir;
+  // Set only once `dir` holds this run's own journal: a failed mkdir of a
+  // colliding id must not borrow another transaction's hint.
+  let hintDir;
   try {
-    releaseActivityLock = acquireServerReleaseActivity(serverDir);
     const releaseAudit = auditServerRelease(flags, serverDir, repo);
     const unfinished = findUnfinishedTransaction(backupRoot);
-    let transactionId;
-    let dir;
     let journal;
     let oldImageId;
     let oldSha;
@@ -1975,22 +2082,18 @@ export function runUpdate(flags, config) {
         );
       }
       ({ id: transactionId, dir, journal } = unfinished);
+      hintDir = dir;
+      // issue #695: eligibility comes from the recovery table, before any
+      // write or Docker call. A commit-half phase used to pass this point
+      // and fail later on an illegal transition back to the gate.
+      if (!entryActs(selectEntry(journal.phase, "update", recoveryFacts(journal)))) {
+        fail(`transaction ${transactionId} cannot be resumed by update (phase: ${journal.phase})`);
+      }
       assertServerResumeContext(journal, releaseAudit);
       bindServerReleaseAudit(releaseAudit, dir);
       journal.release_reconciliation = releaseAudit;
       writeJournal(dir, journal, validateJournalAgainstStateMachine);
       const oldEntry = journal.history.find((e) => e.phase === PHASE.OLD_IMAGE_SAVED);
-      const buildEntry = journal.history.find((e) => e.phase === PHASE.BUILD_PREPARED);
-      if (oldEntry === undefined || buildEntry === undefined) {
-        fail(
-          `transaction ${transactionId} has not completed prepare (phase: ${journal.phase}); rerun update with --transaction ${transactionId} and no --maintenance-approved to retry prepare`,
-        );
-      }
-      if (buildEntry.observation.target_sha !== target) {
-        fail(
-          `--target ${target} does not match transaction ${transactionId}'s prepared target ${buildEntry.observation.target_sha}`,
-        );
-      }
       oldImageId = oldEntry.observation.old_image_id;
       oldSha = oldEntry.observation.old_sha;
       oldContainerId = oldEntry.observation.old_container_id;
@@ -2003,28 +2106,64 @@ export function runUpdate(flags, config) {
       composeArtifact = oldEntry.observation.compose_artifact;
       recoveryComposeFile = recoveryComposePath(dir);
       recoveryPlan = oldEntry.observation.recovery_plan;
-      targetPlan = buildEntry.observation.target_plan;
-      if (recoveryPlan === undefined || targetPlan === undefined) {
+      if (recoveryPlan === undefined) {
         fail(
           `transaction ${transactionId} predates effective compose-plan recording; do not resume it automatically — recover it through the deployment runbook`,
         );
       }
-      buildResult = {
-        imageId: buildEntry.observation.image_id,
-        imageTag: buildEntry.observation.image_tag,
-        target,
-      };
       // Re-verify: prepare ran against a running container, and resume
       // may happen an arbitrary time later — nothing here should trust
       // that it still is.
       container = requireRunningContainer(bin, serverDir, SERVICE);
+      if (journal.phase === PHASE.OLD_IMAGE_SAVED) {
+        // issue #695: the build is retried only from the exact recorded
+        // starting point; every recorded fact is compared with a live
+        // reading before the first mutation.
+        if (oldEntry.observation.target_sha !== target) {
+          fail(
+            `--target ${target} does not match transaction ${transactionId}'s recorded target ${oldEntry.observation.target_sha}`,
+          );
+        }
+        const liveId = dockerInspect(bin, container, "{{.Id}}");
+        if (liveId !== oldContainerId) {
+          fail(`the running container is ${liveId}, not the recorded ${oldContainerId} — refusing to retry the build`);
+        }
+        const liveImage = dockerInspect(bin, oldContainerId, "{{.Image}}");
+        if (liveImage !== oldImageId) {
+          fail(`container ${oldContainerId} now runs ${liveImage}, not the recorded ${oldImageId} — refusing to retry the build`);
+        }
+        const tagId = dockerInspect(bin, rollbackTag, "{{.Id}}");
+        if (tagId !== oldImageId) {
+          fail(`rollback tag ${rollbackTag} points at ${tagId}, not the recorded ${oldImageId} — refusing to retry the build`);
+        }
+        requirePlanMatch(recoveryPlan, recoveryPlanAt(bin, repo, serverDir, oldSha, recoveryComposeFile), "recovery");
+        ({ journal, buildResult, targetPlan } = prepareTarget({ bin, repo, serverDir, target, config, dir, journal, oldImageId, recoveryPlan }));
+      } else {
+        const buildEntry = journal.history.find((e) => e.phase === PHASE.BUILD_PREPARED);
+        if (buildEntry.observation.target_sha !== target) {
+          fail(
+            `--target ${target} does not match transaction ${transactionId}'s prepared target ${buildEntry.observation.target_sha}`,
+          );
+        }
+        targetPlan = buildEntry.observation.target_plan;
+        if (targetPlan === undefined) {
+          fail(
+            `transaction ${transactionId} predates effective compose-plan recording; do not resume it automatically — recover it through the deployment runbook`,
+          );
+        }
+        buildResult = {
+          imageId: buildEntry.observation.image_id,
+          imageTag: buildEntry.observation.image_tag,
+          target,
+        };
+      }
     } else {
       if (unfinished !== null) {
-        fail(
-          UNRESUMABLE_PHASES.has(unfinished.journal.phase)
-            ? `transaction ${unfinished.id} is unfinished (phase: ${unfinished.journal.phase}); the commit half has no resume support yet ((c3)) — follow docs/operations/server-update-and-rollback.md 4.4 to recover manually, or investigate ${unfinished.dir}`
-            : `transaction ${unfinished.id} is unfinished (phase: ${unfinished.journal.phase}); resume it with --transaction ${unfinished.id}, or investigate ${unfinished.dir} before starting a new one`,
+        const err = new DeployError(
+          `transaction ${unfinished.id} is unfinished (phase: ${unfinished.journal.phase}); finish or close it before starting a new one, or investigate ${unfinished.dir}\n${recoveryText(unfinished.id, unfinished.journal)}`,
         );
+        err.recoveryHinted = true;
+        throw err;
       }
 
       container = requireRunningContainer(bin, serverDir, SERVICE);
@@ -2070,6 +2209,7 @@ export function runUpdate(flags, config) {
         release_context: releaseAudit.release_context ?? null,
         release_reconciliation: releaseAudit,
         transaction_id: transactionId,
+        invocation: invocationOf(flags, repo),
         phase: PHASE.PREFLIGHT,
         history: [
           {
@@ -2080,6 +2220,7 @@ export function runUpdate(flags, config) {
         ],
       };
       writeJournal(dir, journal, validateJournalAgainstStateMachine);
+      hintDir = dir;
       bindServerReleaseAudit(releaseAudit, dir);
 
       // クロエ round 1 review MF-2: retagged from the RUNNING container's
@@ -2110,25 +2251,12 @@ export function runUpdate(flags, config) {
           compose_artifact: composeArtifact,
           recovery_plan: recoveryPlan,
           rollback_tag: rollbackTag,
+          target_sha: target,
         },
         validateJournalAgainstStateMachine,
       );
 
-      buildResult = buildUnderLock({ repo, target }, config);
-      targetPlan = composePlan(bin, serverDir);
-      requirePlanIdentityMatch(recoveryPlan, targetPlan);
-      journal = advancePhase(
-        dir,
-        journal,
-        PHASE.BUILD_PREPARED,
-        {
-          image_id: buildResult.imageId,
-          image_tag: buildResult.imageTag,
-          target_sha: target,
-          target_plan: targetPlan,
-        },
-        validateJournalAgainstStateMachine,
-      );
+      ({ journal, buildResult, targetPlan } = prepareTarget({ bin, repo, serverDir, target, config, dir, journal, oldImageId, recoveryPlan }));
     }
 
     // issue #220 absorption (director ruling 2026-09-06, turn 13): right
@@ -2273,7 +2401,7 @@ export function runUpdate(flags, config) {
 
     if (flags.maintenanceApproved !== true) {
       fail(
-        `update requires --maintenance-approved before the stop window opens (no-downtime steps are complete); resume with --transaction ${transactionId} --target ${target} --maintenance-approved once the operator has approved the maintenance window`,
+        `update requires --maintenance-approved before the stop window opens (no-downtime steps are complete); resume once the operator has approved the maintenance window`,
         64,
       );
     }
@@ -2349,7 +2477,7 @@ export function runUpdate(flags, config) {
       // start`, never `docker compose up`, while `latest` still points
       // at the new (not-yet-live) image built earlier in this run.
       fail(
-        `stop was not clean (exit=${stopExitCode}, oom=${stopOomKilled}; expected exit=${config.expected_clean_stop_exit_code}, expected oom=${config.expected_clean_stop_oom_killed}) — the server is stopped but archiving/restarting requires manual recovery (docs/operations/server-update-and-rollback.md 4.3 step 5): use 'docker start ${container}' to recover the OLD container, never 'docker compose up' while latest points at the new image; investigate before retrying`,
+        `stop was not clean (exit=${stopExitCode}, oom=${stopOomKilled}; expected exit=${config.expected_clean_stop_exit_code}, expected oom=${config.expected_clean_stop_oom_killed}) — the server is stopped; never run 'docker compose up' while latest points at the new image. Investigate the stop, then roll back, which restarts the old container (docs/operations/server-update-and-rollback.md 4.4 (1))`,
       );
     }
 
@@ -2607,9 +2735,10 @@ export function runUpdate(flags, config) {
       pruneSkipped,
       pruneError,
     };
+  } catch (err) {
+    throw appendRecoveryHint(err, hintDir, transactionId);
   } finally {
-    try { releaseServerReleaseActivity(releaseActivityLock); }
-    finally { releaseLock(lockPath); }
+    releaseDeploymentLocks(locks);
   }
 }
 
@@ -2690,16 +2819,21 @@ function readRollbackDecision(dir, transactionId) {
   } catch (err) {
     fail(`transaction ${transactionId}'s journal is internally inconsistent: ${err.message}`);
   }
-  if (!ROLLBACK_ELIGIBLE_PHASES.has(journal.phase)) {
-    fail(
-      `transaction ${transactionId} is at phase ${journal.phase}, not eligible for rollback (must have reached at least old_image_saved, and must not already be rolled back or mid-rollback) — investigate ${dir} manually`,
-    );
+  // issue #695: the recovery table decides what `rollback` does at this
+  // phase; the record-only close of PREFLIGHT branches here, before the
+  // OLD_IMAGE_SAVED entry it lacks is read.
+  const entry = selectEntry(journal.phase, "rollback", recoveryFacts(journal));
+  if (!entryActs(entry)) {
+    fail(`transaction ${transactionId} cannot be rolled back at phase ${journal.phase}: ${entry.note}`);
+  }
+  if (entry.operation === OPERATION.RECORD_CLOSE) {
+    return { journal, operation: entry.operation, destructive: false };
   }
   const oldEntry = journal.history.find((e) => e.phase === PHASE.OLD_IMAGE_SAVED);
-  const { old_image_id: oldImageId, old_sha: oldSha } = oldEntry.observation;
+  const { old_image_id: oldImageId, old_sha: oldSha, old_container_id: oldContainerId } = oldEntry.observation;
   const preflightContainer = journal.history.find((e) => e.phase === PHASE.PREFLIGHT).observation.container;
-  const destructive = TRANSITIONS[journal.phase]?.includes(PHASE.ROLLBACK_STOPPED) ?? false;
-  return { journal, oldImageId, oldSha, preflightContainer, destructive };
+  const destructive = entry.operation === OPERATION.DESTRUCTIVE;
+  return { journal, operation: entry.operation, oldImageId, oldSha, oldContainerId, preflightContainer, destructive };
 }
 
 export function runRollback(flags, config) {
@@ -2719,31 +2853,37 @@ export function runRollback(flags, config) {
     // no lock). A concurrent real run can make this stale between the
     // read and whenever an operator next acts on it; that staleness is
     // inherent to "preview" and is not the race issue #322 M1 closes.
-    const { journal, oldImageId, oldSha, preflightContainer, destructive } = readRollbackDecision(
-      dir,
-      flags.transaction,
-    );
+    let decision;
+    try {
+      decision = readRollbackDecision(dir, flags.transaction);
+    } catch (err) {
+      throw appendRecoveryHint(err, dir, flags.transaction);
+    }
+    const { journal, operation, oldImageId, oldSha, oldContainerId, preflightContainer, destructive } = decision;
     return {
       command: "rollback",
       dryRun: true,
       docker: overridden ? "fake" : "docker",
       transactionId: flags.transaction,
       phase: journal.phase,
+      operation,
       destructive,
-      oldImageId,
-      oldSha,
-      wouldRun: destructive
-        ? [
-            "stop whatever is currently running for the service (if anything)",
-            "forensic-archive the current volume state",
-            "re-verify the pre-deploy archive's sha256",
-            "wipe the volume and restore from the pre-deploy archive",
-            "verify the restored volume against the recorded required_entries",
-            `docker tag ${oldImageId} kaoiro-server:latest`,
-            "docker compose up -d --no-build --force-recreate",
-            `poll health for build_revision=${oldSha}`,
-          ]
-        : [`docker tag ${oldImageId} kaoiro-server:latest`, `docker start ${preflightContainer}`],
+      oldImageId: oldImageId ?? null,
+      oldSha: oldSha ?? null,
+      wouldRun: operation === OPERATION.RECORD_CLOSE
+        ? ["record the transaction as rolled_back (no Docker call)"]
+        : destructive
+          ? [
+              "stop whatever is currently running for the service (if anything)",
+              "forensic-archive the current volume state",
+              "re-verify the pre-deploy archive's sha256",
+              "wipe the volume and restore from the pre-deploy archive",
+              "verify the restored volume against the recorded required_entries",
+              `docker tag ${oldImageId} kaoiro-server:latest`,
+              "docker compose up -d --no-build --force-recreate",
+              `poll health for build_revision=${oldSha}`,
+            ]
+          : [`docker tag ${oldImageId} kaoiro-server:latest`, `docker start ${oldContainerId ?? preflightContainer}`],
     };
   }
 
@@ -2755,27 +2895,39 @@ export function runRollback(flags, config) {
   // still-eligible journal, both decide "proceed", and both wipe the
   // volume (measured: a deterministic injection at the mkdir call this
   // acquireLock makes reproduced exactly that — 2 wipes for 1 transaction).
-  const lockPath = acquireLock(backupRoot, deploymentLockKey(serverDir));
-  let releaseActivityLock;
+  const locks = acquireDeploymentLocks(backupRoot, serverDir, repo);
   try {
-    releaseActivityLock = acquireServerReleaseActivity(serverDir);
     const decision = readRollbackDecision(dir, flags.transaction);
     let journal = decision.journal;
-    const { oldImageId, oldSha, preflightContainer, destructive } = decision;
+    const { operation, oldImageId, oldSha, oldContainerId, preflightContainer, destructive } = decision;
 
     if (flags.confirmRestore !== true) {
       fail(
-        `rollback requires --confirm-restore to actually restore transaction ${flags.transaction} (phase: ${journal.phase}, ${destructive ? "destructive" : "non-destructive"} path); rerun with --dry-run to preview without confirming`,
+        `rollback requires --confirm-restore to actually restore transaction ${flags.transaction} (phase: ${journal.phase}, ${operation} path); rerun with --dry-run to preview without confirming`,
         64,
       );
     }
 
-    const liveContainers = flags.fleetStopped === true ? [] : dockerComposeContainerIds(bin, serverDir, SERVICE);
-    if (liveContainers.length > 1) fail("build identity guard requires one live server container", 78);
-    const fleetCompatibility = compatibleFleet({ bin, targetImageId: oldImageId,
-      targetRevision: oldSha, containerId: liveContainers[0], fleetStopped: flags.fleetStopped === true });
+    if (operation === OPERATION.RECORD_CLOSE) {
+      journal = advancePhase(dir, journal, PHASE.ROLLED_BACK, { record_close: true }, validateJournalAgainstStateMachine);
+      return { command: "rollback", phase: "rolled_back", transactionId: flags.transaction, operation, destructive: false };
+    }
 
     if (!destructive) {
+      // issue #695 (#584): no fleet RPC here. This path starts the very
+      // container that ran before the transaction, on the same image,
+      // verified below; runners that changed identity in the meantime are
+      // checked by the next update's gate, not by this rollback.
+      const target = typeof oldContainerId === "string" && oldContainerId !== "" ? oldContainerId : preflightContainer;
+      let liveImage;
+      try {
+        liveImage = dockerInspect(bin, target, "{{.Image}}");
+      } catch (err) {
+        fail(`cannot read the image of container ${target}: ${err.message} — refusing to start it`);
+      }
+      if (liveImage !== oldImageId) {
+        fail(`container ${target} runs ${liveImage}, not the recorded old image ${oldImageId} — refusing to start it`);
+      }
       runDocker(bin, ["tag", oldImageId, "kaoiro-server:latest"]);
       const revertedId = dockerInspect(bin, "kaoiro-server:latest", "{{.Id}}");
       if (revertedId !== oldImageId) {
@@ -2789,17 +2941,23 @@ export function runRollback(flags, config) {
       // both "never stopped" (OLD_IMAGE_SAVED..MAINTENANCE_GATE_PASSED)
       // and "genuinely stopped" (STOPPING..ARCHIVED), and this call is
       // correct either way without needing to distinguish them.
-      runDocker(bin, ["start", preflightContainer]);
-      journal = advancePhase(dir, journal, PHASE.ROLLED_BACK, { fleet_compatibility: fleetCompatibility }, validateJournalAgainstStateMachine);
+      runDocker(bin, ["start", target]);
+      journal = advancePhase(dir, journal, PHASE.ROLLED_BACK, { fleet_guard: "skipped", container: target }, validateJournalAgainstStateMachine);
       return {
         command: "rollback",
         phase: "rolled_back",
         transactionId: flags.transaction,
+        operation,
         destructive: false,
         restoredImageId: oldImageId,
-        container: preflightContainer,
+        container: target,
       };
     }
+
+    const liveContainers = flags.fleetStopped === true ? [] : dockerComposeContainerIds(bin, serverDir, SERVICE);
+    if (liveContainers.length > 1) fail("build identity guard requires one live server container", 78);
+    compatibleFleet({ bin, targetImageId: oldImageId,
+      targetRevision: oldSha, containerId: liveContainers[0], fleetStopped: flags.fleetStopped === true });
 
     // --- destructive path ---
     const manifest = readManifest(dir);
@@ -3099,9 +3257,10 @@ export function runRollback(flags, config) {
       stoppedContainer: resolvedIds.length === 0 ? null : resolvedIds.join(","),
       health,
     };
+  } catch (err) {
+    throw appendRecoveryHint(err, dir, flags.transaction);
   } finally {
-    try { releaseServerReleaseActivity(releaseActivityLock); }
-    finally { releaseLock(lockPath); }
+    releaseDeploymentLocks(locks);
   }
 }
 
@@ -3234,7 +3393,12 @@ export function runStatus(flags, config) {
         ? unfinishedError
         : unfinished === null
           ? null
-          : { id: unfinished.id, phase: unfinished.journal.phase, envConsistency: unfinishedEnvConsistency },
+          : {
+              id: unfinished.id,
+              phase: unfinished.journal.phase,
+              envConsistency: unfinishedEnvConsistency,
+              recovery: renderRecovery(unfinished.id, unfinished.journal),
+            },
     doneTransactions: listDoneTransactionSummaries(backupRoot),
     scopeNote:
       "status returns: container state (running, or the diagnosed A/B/D branch), health provenance " +

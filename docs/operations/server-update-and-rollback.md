@@ -2,7 +2,7 @@
 title: Server update and rollback
 description: Updating an existing server deployment through the deploy CLI (kaoiro-server-deploy.mjs), preconditions, failure handling, and operational-success verification.
 status: accepted
-last_updated: 2026-10-09
+last_updated: 2026-10-20
 related: [deployment]
 ---
 
@@ -636,19 +636,56 @@ For the `status` command's output fields, the transaction phase table, and the c
 
 ### 4.4 Failure handling
 
-Most failure modes now stop `kaoiro-server-deploy.mjs` itself with a non-zero
-exit and a message naming the exact next command — read it first. The
-subsections below cover the cases a message says to investigate manually, and
-what `rollback` does once a transaction has reached a point it can act on.
+Every refusal and failure that leaves a transaction open ends with `next:`
+lines naming the exact commands for the phase the journal actually reached,
+and `status` returns the same commands as `unfinishedTransaction.recovery`.
+After a killed run nothing is printed; the next invocation is refused by the
+lock, names it, and points at `status`. The design is
+[docs/plans/issue-695-transaction-state-table.md](../plans/issue-695-transaction-state-table.md).
+
+What each command does at each persisted phase (generated from
+`server/deploy/kaoiro-deploy-recovery.mjs`; a test keeps this table equal to
+it):
+
+<!-- recovery-table:begin -->
+| Phase | `update` | `rollback` |
+|---|---|---|
+| preflight | refuse | record-close |
+| old_image_saved | resume, if journal-has-target; refuse, if journal-lacks-target | non-destructive, if container-id-recorded; non-destructive, if legacy-no-container-id |
+| build_prepared | resume | non-destructive, if container-id-recorded; non-destructive, if legacy-no-container-id |
+| env_consistency_checked | resume | non-destructive, if container-id-recorded; non-destructive, if legacy-no-container-id |
+| maintenance_gate_passed | resume | non-destructive, if container-id-recorded; non-destructive, if legacy-no-container-id |
+| stopping | refuse | non-destructive, if container-id-recorded; non-destructive, if legacy-no-container-id |
+| stopped | refuse | non-destructive, if container-id-recorded; non-destructive, if legacy-no-container-id |
+| mount_resolved | refuse | non-destructive, if container-id-recorded; non-destructive, if legacy-no-container-id |
+| archived | refuse | non-destructive, if container-id-recorded; non-destructive, if legacy-no-container-id |
+| starting | refuse | destructive |
+| up | refuse | destructive |
+| healthy | refuse | destructive |
+| done | refuse | destructive |
+| rollback_stopped | refuse | destructive-resume, deferred(L1b) |
+| rollback_forensic_archived | refuse | destructive-resume, deferred(L1b) |
+| rollback_restoring | refuse | destructive-resume, deferred(L1b) |
+| rollback_restored | refuse | destructive-resume, deferred(L1b) |
+| rolled_back | refuse | refuse |
+<!-- recovery-table:end -->
+
+`record-close` writes `rolled_back` without any Docker call. A
+`non-destructive` rollback starts the container recorded at
+`old_image_saved` (by id, after checking it still runs the old image) and
+makes no fleet RPC, because it restores the server that ran before the
+transaction. Runners or wrappers that changed identity in the meantime are
+checked only by the next update's gate. `deferred(L1b)` rows are not
+automated yet; see (3a).
 
 **(0) A prepare-phase abort left `latest` pointing at the wrong image**
 
-`update`'s own env_consistency-mismatch check retags `latest` back to the old
-image automatically, verified by read-back (4.3 (2)) — no action needed for
-that specific case. For any OTHER failure between "`docker compose build`
-succeeds" (which retags `latest` to the new image as its own side effect,
-inside 4.3 (2)) and the transaction reaching `maintenance_gate_passed`,
-confirm manually:
+Every ordinary failure between "`docker compose build` succeeds" (which
+retags `latest` to the new image as its own side effect, inside 4.3 (2)) and
+the transaction reaching `maintenance_gate_passed` attempts to retag `latest`
+back to the old image and says in its message whether the read-back confirmed
+it. Any `rollback` of the transaction does the same. Only when the message
+reports a failed restore, or the run was killed, confirm manually:
 
 ```sh
 docker image inspect kaoiro-server:latest --format '{{.Id}}'
@@ -689,13 +726,15 @@ got — read the failing command's own error message, which names the phase.
 
 - **Stop was not clean**, or **the archive failed or was refused** (empty
   volume, `tar` verification failed): the container is stopped and nothing
-  past it has run. `docker start <container>` to recover the OLD container —
-  never `docker compose up`, since `latest` still points at the new image
-  (compose would start it). Inspect `docker logs --tail 50 <container>` for
-  the actual reason; once understood, a fresh `update` (a new transaction)
-  can retry. **Do not use `--force-recreate`** here — the original container
-  (and, for a first-application migration, the fallback-path ledger inside
-  it) still exists; recreating it would destroy the migration source.
+  past it has run. Never run `docker compose up` here, since `latest` still
+  points at the new image (compose would start it). Inspect
+  `docker logs --tail 50 <container>` for the actual reason, then run the
+  printed non-destructive `rollback`: it restores `latest`, starts the
+  original container and closes the transaction, after which a fresh
+  `update` (a new transaction) can retry. **Do not use `--force-recreate`**
+  here — the original container (and, for a first-application migration, the
+  fallback-path ledger inside it) still exists; recreating it would destroy
+  the migration source.
 - **`compose up` / health / stability failed after the archive succeeded**: a
   manifest now exists for this transaction (written in 4.3 (5-c), before
   `starting`), so **(3)** below — `rollback --transaction <transaction-id>
@@ -713,11 +752,10 @@ node server/deploy/kaoiro-server-deploy.mjs rollback \
 
 (`--dry-run` first to preview without confirming.) `rollback` re-reads and
 re-validates the transaction's journal before trusting anything in it, and
-refuses a transaction that never reached `old_image_saved`, or one already
-mid-rollback or fully rolled back — **do not leave “did the new server open
-state?” to human judgment**; the eligible-phase check and the
-destructive/non-destructive split below are both derived from the same phase
-graph `update` itself advances through.
+closes a transaction that stopped at `preflight` by record alone, and refuses
+one already mid-rollback (see (3a)) or fully rolled back — **do not leave “did
+the new server open state?” to human judgment**; what `rollback` does at each
+phase comes from the recovery table above.
 
 - **Non-destructive** (transaction reached anywhere from `old_image_saved`
   through `archived` — `docker compose up -d` never ran, so no DETS restore is
@@ -748,6 +786,23 @@ of an already-`rolled_back` transaction is refused; investigate manually if it
 needs to be redone. **The backup restored must correspond to the image
 started**: `rollback` always restores the pair together, from the same
 transaction's manifest, never “old image only” or “backup only”.
+
+**(3a) A rollback stopped part-way** (`rollback_stopped`,
+`rollback_forensic_archived`, `rollback_restoring`, `rollback_restored`)
+
+Neither `update` nor `rollback` acts on these phases yet (landing unit L1b of
+[issue #695](https://github.com/sakuraiyuta/kaoiro/issues/695)). Recover by
+hand from what the phase proves:
+
+- `rollback_stopped` / `rollback_forensic_archived`: the volume has not been
+  touched. Keep the service stopped and keep `rollback-forensic.tar.gz` if it
+  exists.
+- `rollback_restoring`: the wipe may have begun; the volume can be anywhere
+  from intact to restored. Do not take a new archive over
+  `rollback-forensic.tar.gz`.
+- `rollback_restored`: the volume matched the recorded entries; a failure
+  after this point happened at the retag, `compose up` or the health poll, and
+  an old-image container may already be running.
 
 **(4) Runner does not restart** (4.3 step 7)
 

@@ -80,7 +80,9 @@ export const PHASE = Object.freeze({
 // rather than hand-enumerating a second copy that a new phase can be
 // forgotten from.
 export const TRANSITIONS = {
-  [PHASE.PREFLIGHT]: [PHASE.OLD_IMAGE_SAVED],
+  // issue #695: a transaction that stopped at PREFLIGHT changed nothing but
+  // a possible rollback tag, so `rollback` closes it by record alone.
+  [PHASE.PREFLIGHT]: [PHASE.OLD_IMAGE_SAVED, PHASE.ROLLED_BACK],
   // director ruling 2026-09-06, B-4: rollback accepts any transaction at
   // OLD_IMAGE_SAVED or later (B-1) — every phase from here through
   // ARCHIVED can ALSO go straight to ROLLED_BACK (the non-destructive
@@ -156,7 +158,10 @@ const OBSERVATION_SCHEMAS = {
     isPathSha(obs.compose_artifact) &&
     typeof obs.rollback_tag === "string" &&
     ROLLBACK_TAG_RE.test(obs.rollback_tag) &&
-    obs.rollback_tag === `kaoiro-server:rollback-${obs.old_sha}`,
+    obs.rollback_tag === `kaoiro-server:rollback-${obs.old_sha}` &&
+    // issue #695: the target is what a resume from this phase compares
+    // `--target` with; absent only in journals written before it existed.
+    (obs.target_sha === undefined || (typeof obs.target_sha === "string" && SHA_RE.test(obs.target_sha))),
   [PHASE.BUILD_PREPARED]: (obs) =>
     typeof obs.image_id === "string" &&
     IMAGE_ID_RE.test(obs.image_id) &&

@@ -9,6 +9,7 @@ import { join } from "node:path";
 
 import { writeFileDurably } from "./kaoiro-deploy-atomic-write.mjs";
 import { isPlacementReference, isPolicyRegistrationObservation, readPlacementReference } from "./kaoiro-delivery-policy-placement.mjs";
+import { isInvocation } from "./kaoiro-deploy-recovery.mjs";
 
 export class JournalError extends Error {}
 
@@ -31,6 +32,7 @@ export function isValidJournalShape(value) {
   if (typeof value.phase !== "string" || value.phase === "") return false;
   if (Object.hasOwn(value, "policy_store_placement") && !isPlacementReference(value.policy_store_placement)) return false;
   if (Object.hasOwn(value, "policy_store_registration") && !isPolicyRegistrationObservation(value.policy_store_registration)) return false;
+  if (Object.hasOwn(value, "invocation") && !isInvocation(value.invocation)) return false;
   if (!Array.isArray(value.history)) return false;
   for (const entry of value.history) {
     if (

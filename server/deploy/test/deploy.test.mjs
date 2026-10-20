@@ -2512,7 +2512,8 @@ test("an env_consistency refusal names the exact resume command, which a fresh u
   );
   const fresh = attemptUpdate("running", () =>
     withNewWorkStore({}, () => runUpdate(workStoreFlags(), configWithOverride())));
-  assert.ok(fresh.caught.message.includes("resume it with --transaction"));
+  assert.ok(fresh.caught.message.includes(`transaction ${transactionId} is unfinished`));
+  assert.match(fresh.caught.message, new RegExp(`^next: \\S+ \\S+ update .*--transaction ${transactionId} `, "m"));
   assert.equal(readdirSyncNonHidden(backupRoot).length, 1);
 });
 
@@ -4174,8 +4175,11 @@ test("runUpdate refuses a second transaction while one is unfinished, and create
   // own requireRunningContainer re-check could never succeed. The
   // message must say so rather than send the operator into a guaranteed
   // second failure.
-  assert.ok(!caught.message.includes("resume it with --transaction"));
-  assert.ok(caught.message.includes("no resume support yet"));
+  // issue #695: the hint comes from the recovery table — update is a
+  // refusal note here, and the only command is the non-destructive rollback.
+  assert.doesNotMatch(caught.message, /^next: \S+ \S+ update /m);
+  assert.match(caught.message, /^note: update: the commit half has no resume/m);
+  assert.match(caught.message, /^next: \S+ \S+ rollback .*--confirm-restore$/m);
   // The count check is what actually pins the guard: without it, a
   // mutated guard that lets a second run through still ends up throwing
   // DeployError at its OWN maintenance gate, so `assert.throws` alone
@@ -4206,8 +4210,8 @@ test("runUpdate's unfinished-transaction guidance still offers --transaction bef
     caught = err;
   }
   assert.ok(caught instanceof DeployError);
-  assert.ok(caught.message.includes("resume it with --transaction"));
-  assert.ok(!caught.message.includes("no resume support yet"));
+  assert.match(caught.message, /^next: \S+ \S+ update .*--transaction /m);
+  assert.doesNotMatch(caught.message, /^note: update:/m);
 });
 
 // クロエ round 3 review MF-2: STARTING was missing from the old
@@ -4272,8 +4276,9 @@ test("runUpdate's unfinished-transaction guidance for a transaction parked at ST
   // a raw PhaseError from findUnfinishedTransaction's own validation
   // instead of reaching this guidance message at all.
   assert.ok(caught instanceof DeployError);
-  assert.ok(caught.message.includes("no resume support yet"));
-  assert.ok(!caught.message.includes("resume it with --transaction"));
+  assert.match(caught.message, /^note: update: a new container may have opened state/m);
+  assert.doesNotMatch(caught.message, /^next: \S+ \S+ update /m);
+  assert.match(caught.message, /^next: \S+ \S+ rollback .*\(replace <repo> with /m);
 });
 
 // クロエ round 5 review SF-6 applies to this test too (the same class,
@@ -4688,7 +4693,7 @@ test("runRollback refuses when the directory's journal claims a different transa
   );
 });
 
-test("runRollback refuses a transaction still at PREFLIGHT (not yet eligible)", () => {
+test("runRollback closes a transaction still at PREFLIGHT by record alone, without any Docker call", () => {
   const backupRoot = join(root, "kaoiro-deploy");
   const id = "20200101T000000Z";
   const dir = join(backupRoot, id);
@@ -4709,16 +4714,17 @@ test("runRollback refuses a transaction still at PREFLIGHT (not yet eligible)", 
       ],
     }),
   );
-  // --confirm-restore: true — see the already-rolled-back test's own
-  // comment for why this matters for a clean pin.
-  let caught;
+  const log = join(root, "preflight-close.log");
+  process.env.KAOIRO_TEST_CALL_LOG = log;
+  let result;
   try {
-    runRollback({ repo: workDir, transaction: id, confirmRestore: true }, configWithOverride());
-  } catch (err) {
-    caught = err;
+    result = withOverrideEnv(() => runRollback({ repo: workDir, transaction: id, confirmRestore: true }, configWithOverride()));
+  } finally {
+    delete process.env.KAOIRO_TEST_CALL_LOG;
   }
-  assert.ok(caught instanceof DeployError);
-  assert.ok(caught.message.includes("not eligible for rollback"));
+  assert.equal(result.operation, "record-close");
+  assert.equal(readJournal(dir).phase, "rolled_back");
+  assert.equal(existsSync(log), false, "record-close must not call docker");
 });
 
 test("runRollback refuses an already-rolled-back transaction", () => {
@@ -4758,7 +4764,7 @@ test("runRollback refuses an already-rolled-back transaction", () => {
     caught = err;
   }
   assert.ok(caught instanceof DeployError);
-  assert.ok(caught.message.includes("not eligible for rollback"));
+  assert.ok(caught.message.includes("cannot be rolled back at phase rolled_back"));
 });
 
 test("runRollback --dry-run previews the non-destructive plan without mutating anything", () => {
@@ -5986,7 +5992,7 @@ test("update refuses a pre-bridge target before STOPPING and releases its deploy
 });
 
 for (const destructive of [false, true]) {
-  test(`rollback refuses a pre-bridge image before any rollback mutation (destructive=${destructive})`, () => {
+  test(`a pre-bridge fleet refuses only the destructive rollback, before any mutation (destructive=${destructive})`, () => {
     let transactionId;
     if (destructive) {
       transactionId = withScenario("running-clean-stop", () =>
@@ -5998,6 +6004,15 @@ for (const destructive of [false, true]) {
     }
     const log = join(root, "rollback-fleet-calls.log");
     withFleetEnv({ KAOIRO_TEST_FLEET_JSON: modernFleet, KAOIRO_TEST_CALL_LOG: log }, () => {
+      if (!destructive) {
+        // issue #695 (#584): the non-destructive path restarts the server
+        // that ran before the transaction and makes no fleet RPC at all.
+        const result = withScenario("running-clean-stop", () =>
+          runRollback({ repo: workDir, transaction: transactionId, confirmRestore: true }, configWithCleanStopMeasured()));
+        assert.equal(result.phase, "rolled_back");
+        assert.ok(!readCallLog(log).some(line => / rpc /.test(line)));
+        return;
+      }
       assert.throws(() => withScenario("running-clean-stop", () =>
         runRollback({ repo: workDir, transaction: transactionId, confirmRestore: true }, configWithCleanStopMeasured())),
         /does not support the registered identity/);
