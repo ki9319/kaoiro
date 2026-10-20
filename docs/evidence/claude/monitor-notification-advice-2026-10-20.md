@@ -181,6 +181,21 @@ the two test environment inputs; the gate's emission condition also remains
 grounded in the inspected bundled CLI. Cache seeding by itself is not a
 network-independent control.
 
+At test commit `30bdeea7e05e384358f4435cebeac50a570ae404`, all six native
+cases passed with network available, each recording one admitted send.
+Removing only `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` from that committed
+fixture made `gate-absent` fail `assertMonitorAdvicePosition`, with the
+unexpected advice after `</event>`. Restoring the exact test bytes made the
+case pass. This negative control tests the new environment wiring without
+changing the parser or the notification builder.
+
+The same test commit passed the full Claude package (1203 passed, four
+existing opt-in tests skipped), typecheck and wrapper build in the offline
+test environment. Run
+`fuji-30bdeea-697cifix-1020221226-ae77.1fc0cf53aa126f5e`: helper `pass`,
+exit 0. Its offline result complements the network-enabled native run;
+it does not by itself establish deterministic behavior with network access.
+
 On every SDK bump, rerun the notification-shape and send-admission probes as
 part of the release-class gate required by ADR-0063's 2026-10-10 Amendment.
 A changed sentence is not silently accepted.
