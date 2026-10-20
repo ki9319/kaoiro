@@ -72,12 +72,14 @@ matches the design extraction (SHA-256
 `0a9f2c23232e5bb7a09a35cfb4850491a9f55b1244bb6af0a9c3d87def3a2250`).
 
 The committed `monitor_notification_advice_native.test.ts` launches the built
-CLI with its default constructors. Its only replacements are external
-loopback provider/Phoenix endpoints. Every case omits `settingSources` and
-uses fresh throwaway HOME/config/cwd/TMPDIR. The cache seeds the Monitor gate
-and, except in its contrast, the push gate. No real credentials or peer
-messages are used. An owned HTTP barrier keeps the command from producing
-its event before the root ends; no notification text is injected.
+CLI with its default constructors and external loopback provider/Phoenix
+fixtures. Every case omits `settingSources` and uses fresh throwaway
+HOME/config/cwd/TMPDIR. The cache seeds the Monitor gate and, except in its
+contrast, the push gate. The child environment disables remote feature
+fetching while retaining cache reads, as described below. No real
+credentials or peer messages are used. An owned HTTP barrier keeps the
+command from producing its event before the root ends; no notification text
+is injected.
 
 The positional assertion is retained in `test/fixtures/monitor_notifications.ts`
 and called on the actual native blocks. Its test rejects changed/misplaced
@@ -105,6 +107,8 @@ trailers. Native observations cover:
   This distinguishes preservation from incorrectly replacing the current
   owner's basis with the older Monitor basis. The CLI's delivery lifecycle
   logs only wrapper starts, so it is not used to count native owners.
+  This is an existing-owner preservation control, not a detector of the
+  terminal-advice parser change.
 
 All native cases reach the recording Phoenix transport once, with no unbound
 result. The default-configuration focused run also passes typecheck and the
@@ -142,6 +146,40 @@ Native cases emit the SDK's `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning for the
 explicitly allowed fixture tools; PreToolUse hooks and the wrapper's send
 proof remain active. Synthetic host rigs emit their existing
 `supportedModels()` retry warning. These runs report no unhandled errors.
+
+### Deterministic feature inputs with network access
+
+The initial native results above were obtained without network access.
+[CI run 39425272327](https://github.com/sakuraiyuta/kaoiro/actions/runs/39425272327)
+at `dcf92e82e466e82104fcc2f68cf9c6791ac8cdaf` exposed an invalid test
+assumption: omitting the push gate from the disk cache does not force it off.
+The pinned CLI prefers a fetched GrowthBook feature payload over its disk
+cache. With network access, the unmodified `gate-absent` test reproduced
+the CI positional assertion failure: a genuine notification contained the
+advice. A separate fresh-config observation showed the previously absent
+gate become `true` in the CLI's saved cache.
+
+The native fixture now sets both of these child-only environment values:
+
+```text
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF=1
+```
+
+In SDK 0.3.293 / CLI 2.1.293, the first stops remote feature fetching; the
+second permits disk feature reads while that traffic is disabled in the
+fixture's first-party provider mode. Disabling fetching alone also disables
+the seeded Monitor gate, so both values are needed. This changes test inputs,
+not production configuration or notification text. The optional
+`gate-absent` contrast is retained rather than dropped.
+
+Fresh-config probes with network available measured the advice absent with
+the push gate omitted, present with the push gate seeded `true`, and absent
+with the user setting omitted despite a seeded `true` gate. Each checks the
+actual line's terminal position after `</event>`. These observations support
+the two test environment inputs; the gate's emission condition also remains
+grounded in the inspected bundled CLI. Cache seeding by itself is not a
+network-independent control.
 
 On every SDK bump, rerun the notification-shape and send-admission probes as
 part of the release-class gate required by ADR-0063's 2026-10-10 Amendment.

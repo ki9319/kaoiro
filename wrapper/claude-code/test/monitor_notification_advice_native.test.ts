@@ -108,6 +108,8 @@ it.each(["completion-response", "event-inform", "setting-absent", "gate-absent",
     const child = spawn(process.execPath, [cli, file], { cwd, stdio: ["ignore", "pipe", "pipe"], env: {
       PATH: process.env.PATH ?? "", HOME: root, TMPDIR: root, CLAUDE_CONFIG_DIR: cfg, LANG: "C.UTF-8",
       ANTHROPIC_API_KEY: "placeholder", ANTHROPIC_BASE_URL: `http://127.0.0.1:${address.port}`,
+      // Remote feature payloads override the seeded gates; disable fetching while retaining disk reads.
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF: "1",
     } });
     let output = ""; child.stdout.on("data", chunk => { output += chunk; }); child.stderr.on("data", chunk => { output += chunk; });
     const closed = new Promise<void>(resolve => child.once("close", () => resolve()));
