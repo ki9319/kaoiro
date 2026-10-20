@@ -20,15 +20,16 @@ async function startup(env: Record<string, string>, extra: Record<string, unknow
   let output = "";
   child.stdout.on("data", chunk => { output += chunk; });
   child.stderr.on("data", chunk => { output += chunk; });
-  const exited = new Promise<void>(resolve => child.once("exit", () => resolve()));
+  const closed = new Promise<void>(resolve => child.once("close", () => resolve()));
   try {
-    await vi.waitFor(() => expect(output).toContain("codex: operator_steer="), { timeout: 20_000, interval: 20 });
-    return output;
+    // cli.ts writes this line after the retirement warnings, so its complete line ends the startup block.
+    await vi.waitFor(() => expect(output).toMatch(/codex: approval_axis=(on|off)\n/), { timeout: 20_000, interval: 20 });
   } finally {
-    if (child.exitCode === null) child.kill("SIGTERM");
-    await exited;
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    await closed;
     await rm(root, { recursive: true, force: true });
   }
+  return output;
 }
 
 it("a direct launch with every retired input prints one line per input and never a persona id", async () => {
