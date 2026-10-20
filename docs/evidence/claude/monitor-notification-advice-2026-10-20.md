@@ -1,6 +1,6 @@
 ---
 title: Claude Monitor notification advice
-status: implementation-validation-pending
+status: measured
 last_updated: 2026-10-20
 ---
 
@@ -66,10 +66,82 @@ fixed-wrapper runtime observations are recorded separately below.
 
 ## Implementation validation
 
-The implementation validation records will name the code commit, native
-send/refusal observations, isolated guard mutations and restored package
-gates. Until those measurements are recorded, this document claims only the
-pre-implementation generation observation above.
+Code and test commit: `0730142eb01f7ac115b26e27a5c818d06b6e6dc1`.
+Only `continuation_markers.ts` changes production behavior. The fixture
+matches the design extraction (SHA-256
+`0a9f2c23232e5bb7a09a35cfb4850491a9f55b1244bb6af0a9c3d87def3a2250`).
+
+The committed `monitor_notification_advice_native.test.ts` launches the built
+CLI with its default constructors. Its only replacements are external
+loopback provider/Phoenix endpoints. Every case omits `settingSources` and
+uses fresh throwaway HOME/config/cwd/TMPDIR. The cache seeds the Monitor gate
+and, except in its contrast, the push gate. No real credentials or peer
+messages are used. An owned HTTP barrier keeps the command from producing
+its event before the root ends; no notification text is injected.
+
+The positional assertion is retained in `test/fixtures/monitor_notifications.ts`
+and called on the actual native blocks. Its test rejects changed/misplaced
+trailers. Native observations cover:
+
+- A completion-with-event notification with the exact terminal line, followed
+  by an existing-conversation response using the launch's original reply
+  number. Its genuine user/system transcript opener has a different prompt
+  id from the completed root.
+- A command Monitor requested with `persistent: true`, whose event-only
+  notification arrives while the command remains alive. The genuine opener
+  has no status/completion fields, carries the exact line and permits a
+  fresh-conversation inform. Thus the event-only shape is measured, not
+  inferred solely from the shared body builder. This does not claim that
+  the CLI honors an unlimited lifetime; the probe ends its own session.
+- The same default composition with the user setting absent, and separately
+  with the push gate absent but the user setting present. Both genuine
+  notifications omit the line and both retain send admission.
+- A background Bash completion control that retains admission.
+- A Monitor launched under reply number 1, followed by a new confirmed root
+  under reply number 3. Its event folds into that live owner while a
+  foreground Bash remains active (and is later promoted by its timeout).
+  The real provider request contains the native notification in a tool
+  result, without a new user transcript row; the send retains number 3.
+  This distinguishes preservation from incorrectly replacing the current
+  owner's basis with the older Monitor basis. The CLI's delivery lifecycle
+  logs only wrapper starts, so it is not used to count native owners.
+
+All native cases reach the recording Phoenix transport once, with no unbound
+result. The default-configuration focused run also passes typecheck and the
+parser/proof/host suites. Run
+`fuji-0730142-697focus-1020212813-3a0e.ad86efdcc3f64bed`: helper `pass`, exit 0.
+This measures wrapper acceptance at the transport boundary, not production
+server acceptance or peer delivery.
+
+### Isolated mutations
+
+The source and verifier were committed before mutation. Each change was
+applied alone to the real parser in an isolated run; the compiled native
+wrapper was rebuilt for the native controls. Neither a build failure nor an
+unrelated refusal counts as a red.
+
+| Mutation | Corresponding failing assertions | Result |
+| --- | --- | --- |
+| M1: remove the terminal-advice branch | Captured positive parser/proof cases; native completion response expects a send and observes none | red, exit 1 |
+| M2: remove only the preceding-event condition | No-event terminal advice must be malformed, in both captured shapes through parser and proof | red, exit 1 |
+| M3: replace whole-remainder equality with prefix matching | Duplicate advice and extra suffix must be malformed; marker/extra tagged-element controls also fail | red, exit 1 |
+
+On M1's rebuilt native wrapper, the explicit refusal control confirms
+`native_notification_malformed`, an `unbound_tool_call` result and no
+outgoing send. The default positive fails its send-count assertion on that
+same mutation. Restoring the exact parser bytes returns the unit control and
+rebuilt native positive to green. M2's before-event input is not claimed as
+its detector: whole-remainder equality still refuses that case independently.
+
+Mutation/control run:
+`fuji-0730142-697mut-1020213016-9b79.57309dcf293ecfa2`, helper `pass`, exit 0
+(the expected-red child commands individually exit 1). The unchanged source
+SHA-256 before and after is
+`1e951e26e4c130ddd7683a33c35f35d3211db40d1546a668f21766c3453e010b`.
+Native cases emit the SDK's `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning for the
+explicitly allowed fixture tools; PreToolUse hooks and the wrapper's send
+proof remain active. Synthetic host rigs emit their existing
+`supportedModels()` retry warning. These runs report no unhandled errors.
 
 On every SDK bump, rerun the notification-shape and send-admission probes as
 part of the release-class gate required by ADR-0063's 2026-10-10 Amendment.

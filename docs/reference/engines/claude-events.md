@@ -644,8 +644,9 @@ result-index and ownership conflicts keep their own fail-stops.
 Agent completion and Monitor event/completion blocks are parsed structurally, before scalar
 comparison. Escaped tag-looking payload remains data. Monitor blocks may contain
 the exact fixed PushNotification advice only immediately after `event`
-and last inside its block, with the existing surrounding whitespace rules;
-unknown untagged text remains malformed (see [the measured advice contract](../../evidence/claude/monitor-notification-advice-2026-10-20.md)). One prompt may contain
+and last inside the block, with the existing surrounding whitespace rules;
+unknown untagged text remains malformed (see the [measured advice contract](../../evidence/claude/monitor-notification-advice-2026-10-20.md)).
+One prompt may contain
 1–16 complete independently proved blocks; invalid siblings and incompatible
 reply snapshots refuse the whole batch without partial consumption. Workflow
 metadata is allowed only for Workflow; ordinary Bash still requires its exact
