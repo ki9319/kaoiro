@@ -42,6 +42,8 @@ it("a direct launch with every retired input prints one line per input and never
   expect(lines[2]).toContain("operator_steer in the wrapper config is retired");
   expect(output).not.toContain(secret);
   expect(output).toContain("codex: operator_steer=on");
+  // startup() stops at the approval_axis line, so the block is only complete if the warnings precede it.
+  expect(output.lastIndexOf("codex: warn - ")).toBeLessThan(output.indexOf("codex: approval_axis="));
 }, 40_000);
 
 it("a direct launch with no retired input prints no retirement line", async () => {
