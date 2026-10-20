@@ -2,7 +2,7 @@
 title: Default-on in-flight delivery with a per-agent opt-out
 description: Design for making in-flight delivery the default on every engine, with a revisioned per-agent opt-out stored on the server and switchable from the dashboard at launch and live.
 status: approved
-last_updated: 2026-10-10
+last_updated: 2026-10-20
 ---
 
 # Default-on in-flight delivery with a per-agent opt-out
@@ -46,6 +46,18 @@ backend default remain in place. Bounded launch metadata uses the shared pure
 resolver and a required cross-client JSON contract fixture. Integration evidence
 must cover the producer through real server register to the dashboard decoder
 and UI; independent implementation review remains required before landing.
+
+## C4A implementation boundary
+
+[Issue #563](https://github.com/sakuraiyuta/kaoiro/issues/563) retires the
+Codex operator-steer gates. On the app-server backend, with the host ceiling not
+`false`, the wrapper declares operator `steer`; `KAOIRO_CODEX_OPERATOR_STEER`,
+`KAOIRO_CODEX_OPERATOR_STEER_PERSONAS` and `codex.operator_steer` gate nothing and
+are read only to warn (the runner once per process, a directly launched wrapper at
+startup). The runner removes the two variables from every wrapper's environment and
+does not relay the key. The readers are removed by C5 after one released version
+with these warnings. The omitted-setting Codex backend stays with C4B, and the
+Claude opt-ins with C4C.
 
 ## Current state (develop `0bfede23`, re-checked at `867696cb`; production decision E3)
 

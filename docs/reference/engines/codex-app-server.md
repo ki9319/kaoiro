@@ -47,9 +47,9 @@ gate; a successful RPC alone does not establish the tool environment.
 
 ## Operator steering (ADR-0058 Stage 2)
 
-An opted-in Codex persona on the app-server backend may deliver an operator
+A Codex persona on the app-server backend delivers an operator
 instruction into the running turn with `turn/steer` instead of queueing it
-(opt-in: [wrapper configuration](../configuration/wrapper.md#codex-operator-steer-controls);
+when its stored policy is on (no opt-in: [wrapper configuration](../configuration/wrapper.md#codex-operator-steer-controls);
 capability: [`operator_input_modes`](../protocol/channels.md#adr-0063-capability-and-event-contract)).
 Only operator text whose delivered intent is `early` is eligible. Work notices,
 session-reset notices and inputs with attachments queue. Inter-agent early

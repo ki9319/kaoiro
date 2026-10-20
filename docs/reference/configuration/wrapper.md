@@ -67,8 +67,9 @@ Codex process keeps its separate `CODEX_HOME` for auth, sessions and resume.
 
 - `in_flight_delivery_enabled?: boolean` — the runner resolves the host ceiling
   for this engine and relays it explicitly. `false` disables all declared
-  in-flight modes after backend/legacy opt-ins; per-agent policy cannot widen it.
-  Direct Claude/Codex launches without this key preserve legacy behavior.
+  in-flight modes after the backend (and, for Claude, its legacy opt-ins);
+  per-agent policy cannot widen it. Direct Claude/Codex launches without this
+  key resolve as if the ceiling were `true`.
   Antigravity still omits delivery declarations. Changes apply to later wrapper
   lifetimes; the live per-agent policy remains a separate gate.
 
@@ -110,25 +111,42 @@ Codex process keeps its separate `CODEX_HOME` for auth, sessions and resume.
 
 ## Codex operator steer controls
 
-`KAOIRO_CODEX_OPERATOR_STEER=1` in the Codex wrapper process environment
-enables operator steering for every Codex peer on the app-server backend.
-`KAOIRO_CODEX_OPERATOR_STEER_PERSONAS=momo,other` instead enables only the
-listed `persona.id` values, with the same list rules as the Claude controls
-below; both wrappers use one parser, `personaOptInSource` in agent-common. Only the exact value `1` enables the global flag; any other value,
-including `true`, leaves it off and defers to the persona list. `codex.operator_steer: true` in
-`runner.config.json` is the same global opt-in (`false` is the same as absent); a set
-`KAOIRO_CODEX_OPERATOR_STEER` wins over it, so `0` turns that opt-in off (see
-[Runner configuration](runner.md#behaviour-settings)). An enabled wrapper declares `operator_input_modes: {version: "v1",
-early: "steer"}` at join and steers only while the server echoes it; the exec
-backend ignores both variables. Every other Codex wrapper declares
-`early: "none"`, so the server stamps operator input `normal` instead of
-deriving the default from the inter-agent declaration. The wrapper logs `codex: operator_steer=on|off`
-at startup. See [Codex app-server transport](../engines/codex-app-server.md#operator-steering-adr-0058-stage-2).
+On the app-server backend a Codex wrapper declares `operator_input_modes:
+{version: "v1", early: "steer"}` at join and steers an operator instruction into
+the running turn only while the server echoes it. No opt-in is needed. The host
+ceiling (`in_flight_delivery_enabled`, relayed from `in_flight_delivery.codex.enabled`;
+`false` declares `early: "none"`) and the stored per-agent policy decide the
+rest, so an operator turns it off per agent from the dashboard or for the host
+through the runner configuration (see [Runner configuration](runner.md#host-delivery-ceilings-and-defaults)).
+The exec backend and a false ceiling declare `early: "none"`, so the server stamps
+operator input `normal` instead of deriving the default from the inter-agent
+declaration. The wrapper logs `codex: operator_steer=on|off` at startup. See
+[Codex app-server transport](../engines/codex-app-server.md#operator-steering-adr-0058-stage-2).
+
+Three inputs used to open this gate and are retired. They are still read, but only
+to warn; none changes the declared mode, and a stored `off` or a false ceiling is
+never reopened by any of them:
+
+| Retired input | What it did | Now |
+|---|---|---|
+| `KAOIRO_CODEX_OPERATOR_STEER` | `1` enabled steering for every persona; `0` beat a file `true` (it did not disable a persona-list entry) | no effect |
+| `KAOIRO_CODEX_OPERATOR_STEER_PERSONAS` | a listed `persona.id` enabled steering for that persona; a list that omitted a persona did not disable a global `1` | no effect |
+| `codex.operator_steer` in `runner.config.json`, and the wrapper config field `operator_steer` | `true` was the same as the variable `1` (`false` was the same as absent) | no effect; not relayed |
+
+Replacements: `in_flight_delivery.codex.enabled: false` stops the mechanism for
+every agent of the host at the next spawn, `in_flight_delivery.codex.default: false`
+makes new agents start with it off, and the per-agent switch changes a running
+agent. Each retired input that is present produces one warning line (the input's
+name only, never a persona id or list content): the runner prints it once per
+process on `stderr` and removes the two variables from the environment of every
+wrapper it launches; a directly launched wrapper prints its own `codex: warn -`
+line at startup. Removing the readers is a later change, after one released
+version with these warnings.
 
 ## Codex inter-agent early delivery
 
 The app-server backend advertises inter-agent `early: "steer"` and
-`yield: "none"` independently of `KAOIRO_CODEX_OPERATOR_STEER`. It uses the
+`yield: "none"` independently of operator steering. It uses the
 early path only after the server echoes delivery modes and
 `notice_attribution: "v1"`, and grants the message early intent. The exec
 backend advertises no early mechanism. There is no phase-3 environment

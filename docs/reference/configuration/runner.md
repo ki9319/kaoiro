@@ -99,8 +99,8 @@ keys. Omitted keys resolve independently:
 
 `enabled: false` is a launch ceiling: it disables every in-flight mechanism
 for that engine, even when a legacy flag or persona list enables it. `true`
-still requires the existing backend and legacy gates (`claude_code.phase2_delivery`,
-`codex.operator_steer` and their environment overrides). Antigravity has no
+still requires the backend (Codex: app-server) and, for Claude, the existing legacy
+gate (`claude_code.phase2_delivery` and its environment override). Antigravity has no
 in-flight mechanism even with an explicit true ceiling. `default` seeds a new
 server policy row when launch has no explicit choice; it never rewrites a stored
 row and cannot enable a mechanism beyond the ceiling.
@@ -116,9 +116,17 @@ The runner captures `KAOIRO_CLAUDE_PHASE2_DELIVERY`,
 `KAOIRO_CLAUDE_PHASE2_DELIVERY_PERSONAS`, `KAOIRO_CODEX_OPERATOR_STEER` and
 `KAOIRO_CODEX_OPERATOR_STEER_PERSONAS` at startup. Reload and spawned children
 use these captured values, including absence; restart the runner to change them.
-An empty flag falls back to the file, exactly `1` enables globally, and other
-set values defer to the persona list. One malformed persona ID invalidates the
-whole list; matching is case-sensitive. No new environment variable is added.
+The two Codex variables are retired: they are captured only to warn, and are
+removed from every child environment. For the Claude pair, an empty flag falls
+back to the file, exactly `1` enables globally, and other set values defer to the
+persona list. One malformed persona ID invalidates the whole list; matching is
+case-sensitive. No new environment variable is added.
+
+Each retired Codex input that is present (the two variables, and `codex.operator_steer`
+in the file, `false` included) produces one `runner: warn -` line, once per
+process, at startup and after a reload that introduces it. The text names the
+input and the replacements and never prints a persona id or a list. See
+[Codex operator steer controls](wrapper.md#codex-operator-steer-controls).
 
 The runner explicitly registers every advertised engine's resolved default and
 bounded [launch metadata](../protocol/runner-control.md#launch-delivery-metadata).
@@ -167,7 +175,7 @@ hidden by a variable.
 | `KAOIRO_ANTIGRAVITY_TOOL_TIMEOUT_MS` | `antigravity.tool_timeout_ms` | integer | 1000..2147483647 | 600000 | Antigravity wrapper (`resolveTurnWatchdogSettings`) | variable > file > default |
 | `KAOIRO_ANTIGRAVITY_EPOCH_IDLE_MS` | `antigravity.epoch_idle_ms` | integer | 1000..2147483647 | 1800000 | Antigravity wrapper (`resolveEpochIdleMs`) | variable > file > default |
 | `KAOIRO_WRAPPER_PERMISSION_TIMEOUT_MS` | `permission_timeout_ms` | integer | 1..2147483647 | none (wait for the operator) | every wrapper (`parseConfig`) | variable > file > default |
-| `KAOIRO_CODEX_OPERATOR_STEER` | `codex.operator_steer` | boolean | `true` / `false` (variable: exactly `1` is on) | `false` | Codex wrapper (`flagArgument`) | variable > file > persona list |
+| `KAOIRO_CODEX_OPERATOR_STEER` | `codex.operator_steer` | boolean | `true` / `false` (variable: exactly `1` is on) | retired: no effect | none (the runner warns and does not relay or pass it) | not applicable |
 | `KAOIRO_CODEX_APPROVAL_AXIS` | `codex.approval_axis` | boolean | `true` / `false` (variable: exactly `1` is on) | `false` | Codex wrapper (`flagArgument`) | variable > file > persona list |
 | `KAOIRO_CLAUDE_PHASE2_DELIVERY` | `claude_code.phase2_delivery` | boolean | `true` / `false` (variable: exactly `1` is on) | `false` | Claude wrapper (`flagArgument`) | variable > file > persona list |
 | `KAOIRO_RUNNER_SERVER_URL` | `server_url` | string | `ws://` or `wss://` URL | required in the file | the runner (`applyServerUrlOverride`) | variable > file |
