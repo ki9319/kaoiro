@@ -2470,12 +2470,9 @@ export function runUpdate(flags, config) {
       agrees(stopExitCode, config.expected_clean_stop_exit_code) &&
       agrees(stopOomKilled, config.expected_clean_stop_oom_killed);
     if (!cleanStop) {
-      // クロエ round 1 review N-1: names the exact runbook essentials
-      // (docs/operations/server-update-and-rollback.md 4.3 step 5) an operator
-      // investigating an abnormal
-      // stop needs immediately — recover the container with `docker
-      // start`, never `docker compose up`, while `latest` still points
-      // at the new (not-yet-live) image built earlier in this run.
+      // Never `docker compose up` here: `latest` still points at the new
+      // (not-yet-live) image. The non-destructive rollback in the appended
+      // next commands restores `latest` and restarts the old container.
       fail(
         `stop was not clean (exit=${stopExitCode}, oom=${stopOomKilled}; expected exit=${config.expected_clean_stop_exit_code}, expected oom=${config.expected_clean_stop_oom_killed}) — the server is stopped; never run 'docker compose up' while latest points at the new image. Investigate the stop, then roll back, which restarts the old container (docs/operations/server-update-and-rollback.md 4.4 (1))`,
       );
