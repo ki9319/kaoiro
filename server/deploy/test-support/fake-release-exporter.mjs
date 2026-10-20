@@ -4,7 +4,9 @@
 // deploy CLI's own checks (auditServerRelease, assertServerResumeContext,
 // bindServerReleaseAudit) decide. It runs with an empty environment
 // (the "authority" child profile), so it reads everything from argv and the
-// descriptor next to --install-root.
+// descriptor next to --install-root. It never fails: the real exporter's
+// own checks (authority digest, plan digest against attempt.json) are not
+// covered by the tests that use it.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
