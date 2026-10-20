@@ -430,7 +430,7 @@ test("recovery property: done is closed by an explicit destructive rollback", (t
   assertNextUpdateAdmitted(world);
 });
 
-for (const change of ["container", "image", "target"]) {
+for (const change of ["container", "image", "target", "rollback-tag", "recovery-plan"]) {
   test(`recovery property: old_image_saved resume refuses a changed ${change} before any Docker mutation`, (t) => {
     const world = makeWorld(t);
     world.faults([{ match: "^compose build", kind: "fail" }]);
@@ -441,7 +441,12 @@ for (const change of ["container", "image", "target"]) {
       s.counters = {};
       if (change === "container") s.containers[0].id = "d".repeat(64);
       if (change === "image") s.containers[0].image = `sha256:${"0".repeat(63)}2`;
+      if (change === "rollback-tag") s.tags[`kaoiro-server:rollback-${world.oldSha}`] = `sha256:${"0".repeat(63)}2`;
     });
+    if (change === "recovery-plan") {
+      const file = join(world.backupRoot, world.txId(), "recovery-compose.yaml");
+      writeFileSync(file, `${readFileSync(file, "utf8")}# edited\n`);
+    }
     const before = world.state().calls.length;
     const target = change === "target" ? world.oldSha : world.target;
     const r = world.cliRun("update", "--transaction", world.txId(), "--target", target, ...UPDATE_APPROVED);
@@ -572,4 +577,17 @@ test("recovery property: an enrolled server killed mid-rollback leaves both lock
   assert.equal(result.phase, PHASE.ROLLED_BACK);
   assert.deepEqual(world.locks(), []);
   assert.equal(world.serviceContainer().status, "running");
+});
+
+test("recovery property: a non-destructive rollback refuses when the recorded container was replaced, even under the same name", (t) => {
+  const world = makeWorld(t);
+  world.faults([{ match: "^compose build", kind: "fail" }]);
+  world.update();
+  world.edit((s) => { s.containers[0].id = "d".repeat(64); s.containers[0].status = "exited"; });
+  const before = world.state().calls.length;
+  const r = world.cliRun("rollback", "--transaction", world.txId(), "--confirm-restore");
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /cannot read the image of container c{64}/);
+  assert.deepEqual(world.state().calls.slice(before).filter((c) => /^(tag|start) /.test(c)), []);
+  assert.equal(world.serviceContainer().status, "exited");
 });

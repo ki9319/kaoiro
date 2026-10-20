@@ -5,7 +5,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-import { PHASE, TRANSITIONS } from "../kaoiro-deploy-phase.mjs";
+import { PHASE, PhaseError, TRANSITIONS, validateJournalAgainstStateMachine } from "../kaoiro-deploy-phase.mjs";
+import { isValidJournalShape } from "../kaoiro-deploy-journal.mjs";
 import {
   CONDITION,
   entryActs,
@@ -143,4 +144,23 @@ test("the runbook table equals the generated table", () => {
   const match = /<!-- recovery-table:begin -->\n([\s\S]*?)\n<!-- recovery-table:end -->/.exec(runbook);
   assert.ok(match, "runbook markers missing");
   assert.equal(match[1], recoveryTableMarkdown());
+});
+
+test("a malformed recorded target or invocation is refused, never tolerated as an extra field", () => {
+  const old = {
+    old_image_id: `sha256:${"0".repeat(64)}`, old_sha: OLD, old_container_id: "c".repeat(64),
+    compose_artifact: { path: "/x/docker-compose.yaml", sha256: "e".repeat(64) },
+    rollback_tag: `kaoiro-server:rollback-${OLD}`,
+  };
+  const pre = { container: "kaoiro-c1", free_bytes: 1, volume_bytes: 1, threshold_bytes: 1 };
+  const journal = (target) => ({ schema_version: 1, transaction_id: TX, phase: PHASE.OLD_IMAGE_SAVED,
+    history: [{ phase: PHASE.PREFLIGHT, at: "t", observation: pre },
+      { phase: PHASE.OLD_IMAGE_SAVED, at: "t", observation: { ...old, ...target } }] });
+  assert.doesNotThrow(() => validateJournalAgainstStateMachine(journal({})));
+  assert.doesNotThrow(() => validateJournalAgainstStateMachine(journal({ target_sha: SHA })));
+  assert.throws(() => validateJournalAgainstStateMachine(journal({ target_sha: "main" })), PhaseError);
+  const base = { schema_version: 1, transaction_id: TX, phase: PHASE.PREFLIGHT, history: [] };
+  assert.equal(isValidJournalShape({ ...base, invocation: { repo: "/srv/kaoiro", config: null, release_authority: null } }), true);
+  assert.equal(isValidJournalShape({ ...base, invocation: { repo: "relative", config: null, release_authority: null } }), false);
+  assert.equal(isValidJournalShape({ ...base, invocation: { repo: "/srv/kaoiro", config: "deploy.json", release_authority: null } }), false);
 });
