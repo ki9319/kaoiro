@@ -5,6 +5,7 @@ import { ContinuationRegistry } from "../src/continuation_registry.js";
 import { ContinuationProofs } from "../src/continuation_proof.js";
 import { marker, escapeNativeScalar } from "../src/continuation_markers.js";
 import type { NativeAnchor } from "../src/native_transcript.js";
+import { malformedMonitorAdvice, monitorNotification, monitorNotifications } from "./fixtures/monitor_notifications.js";
 
 function rig() {
   const basis = new ReplyBasis(); basis.begin("root", []);
@@ -48,6 +49,65 @@ function rig() {
   const agentOrigin = (id: string) => ({ kind: "task-notification", producer: "session-task", runId: "run-" + id });
   return { basis, registry, proofs, snapshot, launch, event, completion, prove, agentCompletion, agentOrigin };
 }
+
+function capturedMonitor(r: ReturnType<typeof rig>, shape: string): string {
+  r.launch("m", "Monitor");
+  if (shape === "completion-event") r.completion("m");
+  return monitorNotification(shape, { "task-id": "m", "tool-use-id": "m", "output-file": "/tmp/output",
+    summary: shape === "completion-event" ? "finished" : escapeNativeScalar(`Monitor event: "${r.registry.byTask("m")!.effective.description}"`) });
+}
+
+describe("captured Monitor advice through native proof and fold reservation", () => {
+  it.each(monitorNotifications)("proves and commits $shape with or without the captured advice", fixture => {
+    for (const advice of [true, false]) {
+      const r = rig(); const prompt = capturedMonitor(r, fixture.shape);
+      const result = r.prove(advice ? prompt : prompt.replace(fixture.advice + "\n", ""));
+      expect(result).toHaveProperty("proof");
+      if ("proof" in result) expect(result.proof.commit()).toBe(true);
+    }
+  });
+  it.each(monitorNotifications.flatMap(fixture => malformedMonitorAdvice(fixture.prompt, fixture.advice)
+    .map(([name], index) => [fixture.shape, name, index, fixture.advice] as const)))("refuses malformed %s %s before touching its valid claim", (shape, _name, index, advice) => {
+    const r = rig(); const valid = capturedMonitor(r, shape);
+    expect(r.prove(malformedMonitorAdvice(valid, advice)[index]![1])).toEqual({ reason: "native_notification_malformed" });
+    const retry = r.prove(valid); expect(retry).toHaveProperty("proof");
+    if ("proof" in retry) expect(retry.proof.commit()).toBe(true);
+  });
+  it.each(["Bash", "Workflow"] as const)("does not admit event plus advice on an otherwise valid %s completion", source => {
+    const r = rig(); r.launch("m", source); r.completion("m");
+    const prompt = monitorNotification("completion-event", { "task-id": "m", "tool-use-id": "m", "output-file": "/tmp/output", summary: "finished" });
+    expect(r.prove(prompt)).toEqual({ reason: "native_completion_source_mismatch" });
+  });
+  it.each(["wrong-description", "stopped", "expired", "replacement-run"])("keeps Monitor advice subject to %s checks", fault => {
+    const r = rig(); let prompt = capturedMonitor(r, "event-only");
+    if (fault === "wrong-description") prompt = prompt.replace("Monitor event:", "Wrong event:");
+    if (fault === "stopped") r.registry.stopTask("m");
+    if (fault === "expired") {
+      r.completion("m"); const now = performance.now(); r.registry.tick(false, now); r.registry.tick(false, now + 10001);
+    }
+    if (fault === "replacement-run") r.registry.observeFrame({ type: "system", subtype: "task_progress", session_id: "s", task_id: "m", run_id: "new-run" });
+    expect(r.prove(prompt)).toHaveProperty("reason");
+  });
+  it("refuses incompatible Monitor maps without consuming either completion", () => {
+    const r = rig(); const one = capturedMonitor(r, "completion-event");
+    r.basis.begin("newer", [{ type: "inter_agent_message", agent_id: "peer", payload: { conversation_id: "c", turn_number: 3 } } as unknown as Envelope]);
+    r.launch("other", "Monitor", r.basis.exportConfirmed({ token: "newer" })!);
+    const other = r.completion("other");
+    expect(r.prove(one + other)).toEqual({ reason: "batch-basis-conflict" });
+    const retry = r.prove(one); expect(retry).toHaveProperty("proof");
+    if ("proof" in retry) expect(retry.proof.commit()).toBe(true);
+  });
+  it.each([false, true])("a Monitor advice sibling controls atomic Agent fold reservation, malformed=%s", malformed => {
+    const r = rig(); const monitor = capturedMonitor(r, "event-only");
+    const a = r.launch("a", "Agent").cap!, other = r.launch("other", "Agent").cap!;
+    const agent = r.agentCompletion("a", "report"), prepared = r.prove(agent, r.snapshot, r.agentOrigin("a"));
+    expect(prepared).toHaveProperty("proof");
+    r.proofs.reserveCompletionFold(agent + (malformed ? monitor.replace(monitorNotifications[0]!.advice, "unknown advice") : monitor), "fold");
+    expect(a.quarantined).toBe(malformed ? undefined : "fold");
+    expect(other.quarantined).toBeUndefined(); expect(r.registry.byTask("m")!.quarantined).toBeUndefined();
+    if ("proof" in prepared) expect(prepared.proof.commit()).toBe(malformed);
+  });
+});
 
 describe("atomic native continuation proof", () => {
   it.each([1, 2, 16])("admits %i independently proved Monitor blocks as one atomic receipt", count => {

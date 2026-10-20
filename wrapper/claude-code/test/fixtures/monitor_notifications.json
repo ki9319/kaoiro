@@ -1,0 +1,14 @@
+[
+  {
+    "shape": "completion-event",
+    "cli_version": "2.1.293",
+    "prompt": "<task-notification>\n<task-id>fixture-monitor</task-id>\n<tool-use-id>fixture-call</tool-use-id>\n<output-file>/tmp/fixture-monitor.output</output-file>\n<status>completed</status>\n<summary>MASKED SUMMARY</summary>\n<event>MASKED EVENT</event>\nIf this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.\n</task-notification>",
+    "advice": "If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one."
+  },
+  {
+    "shape": "event-only",
+    "cli_version": "2.1.293",
+    "prompt": "<task-notification>\n<task-id>fixture-monitor</task-id>\n<summary>MASKED SUMMARY</summary>\n<event>MASKED EVENT</event>\nIf this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.\n</task-notification>",
+    "advice": "If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one."
+  }
+]
