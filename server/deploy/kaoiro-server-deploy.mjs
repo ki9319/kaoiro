@@ -40,6 +40,7 @@ import { findUnfinishedTransaction, newTransactionId } from "./kaoiro-deploy-tra
 import { requireFleetCompatibility } from "./kaoiro-build-compatibility.mjs";
 import { preparePolicyPlacement } from "./kaoiro-delivery-policy-placement.mjs";
 import { auditServerRelease, bindServerReleaseAudit, assertServerResumeContext, acquireServerReleaseActivity, releaseServerReleaseActivity } from "./kaoiro-release-reconciliation.mjs";
+import { readReleaseAuthority } from "../../scripts/production-release-authority.mjs";
 
 // The pre-existing four fsyncExistingPath checkpoints have no isolated
 // integration fault path: tar verification and findUnfinishedTransaction read
@@ -1731,6 +1732,10 @@ export function reachablePhases(from, transitions) {
 // included automatically — already filtered out by
 // findUnfinishedTransaction's own TERMINAL_PHASES check before this is
 // ever consulted, but correct on its own regardless.
+//
+// issue #695: routing now comes from the recovery table
+// (kaoiro-deploy-recovery.mjs); this set and ROLLBACK_ELIGIBLE_PHASES
+// below remain only as graph-derived cross-checks for that table's tests.
 export const UNRESUMABLE_PHASES = reachablePhases(PHASE.STOPPING, TRANSITIONS);
 
 // --- issue #695: recovery hints ------------------------------------------
@@ -1760,22 +1765,57 @@ function invocationOf(flags, repo) {
   return {
     repo: realpathSync(repo),
     config: flags.config === undefined ? null : realpathSync(flags.config),
-    release_authority: flags.releaseAuthority ?? null,
+    release_authority: flags.releaseAuthority === undefined ? null : realpathSync(flags.releaseAuthority),
   };
 }
 
+/** Locks left by a killed run, each with its own next step, and the read
+ *  path (`status`, with the same --config) for the transaction's commands.
+ *  Shared by both lock refusals and by `status`, so all three name both
+ *  server locks (docs/plans/issue-695-transaction-state-table.md 3.3). */
+function heldLockSteps(backupRoot, serverDir, repo, flags) {
+  const quote = (w) => (/^[A-Za-z0-9_./:=@%+-]+$/.test(w) ? w : `'${w.replace(/'/g, "'\\''")}'`);
+  const cli = ["node", join(repo, "server/deploy/kaoiro-server-deploy.mjs")];
+  const config = flags.config === undefined ? [] : ["--config", realpathSync(flags.config)];
+  const locks = [];
+  const deployLock = join(backupRoot, `.lock.${deploymentLockKey(serverDir)}`);
+  if (existsSync(deployLock)) {
+    locks.push({ kind: "deploy", path: deployLock, next: [],
+      note: "if no process holds it (docs/operations/server-update-and-rollback.md 4.4 (0a)), remove that directory" });
+  }
+  let authority = null;
+  try {
+    authority = readReleaseAuthority(serverDir, { role: "server" });
+  } catch {
+    // An unreadable descriptor is reported by the release gate itself.
+  }
+  if (authority?.status === "enrolled") {
+    const releaseLock = join(authority.descriptor.root, ".lock.server");
+    if (existsSync(releaseLock)) {
+      const tool = ["node", join(repo, "scripts/production-release-lifecycle.mjs")];
+      const selector = ["--root", authority.descriptor.root, "--entry", ".lock.server"];
+      locks.push({ kind: "release", path: releaseLock,
+        note: "a named live owner refuses; see docs/operations/build-identity-and-release-tags.md",
+        next: [[...tool, "inspect-residue", ...selector],
+          [...tool, "recover-lock", ...selector, "--observed-digest", "<observed_sha256-from-inspect-residue>", "--reason", "<reason>"]] });
+    }
+  }
+  const status = [...cli, "status", "--repo", repo, ...config];
+  const text = [
+    ...locks.flatMap((l) => [`note: ${l.kind} lock ${l.path} is held: ${l.note}`, ...l.next.map((a) => `next: ${a.map(quote).join(" ")}`)]),
+    `next: ${status.map(quote).join(" ")}`,
+  ].join("\n");
+  return { locks, status, text };
+}
+
 /** Both locks every mutator takes. A held lock may be left by a killed
- *  run; the message names the owner check and the read path for the
- *  transaction's own next commands. */
-function acquireDeploymentLocks(backupRoot, serverDir, repo) {
-  const statusArgv = `node ${join(repo, "server/deploy/kaoiro-server-deploy.mjs")} status --repo ${repo}`;
+ *  run; the refusal names every held lock with its own step. */
+function acquireDeploymentLocks(backupRoot, serverDir, repo, flags) {
   let lockPath;
   try {
     lockPath = acquireLock(backupRoot, deploymentLockKey(serverDir));
   } catch (err) {
-    if (err instanceof LockError) {
-      err.message += `\nnote: if no process holds it (docs/operations/server-update-and-rollback.md 4.4 (0a)), remove that directory\nnext: ${statusArgv}`;
-    }
+    if (err instanceof LockError) err.message += `\n${heldLockSteps(backupRoot, serverDir, repo, flags).text}`;
     throw err;
   }
   let releaseActivityLock;
@@ -1783,12 +1823,7 @@ function acquireDeploymentLocks(backupRoot, serverDir, repo) {
     releaseActivityLock = acquireServerReleaseActivity(serverDir);
   } catch (err) {
     releaseLock(lockPath);
-    const held = /release lock held; inspect\/recover-lock (\S+)/.exec(err.message);
-    if (held !== null) {
-      const tool = `node ${join(repo, "scripts/production-release-lifecycle.mjs")}`;
-      const selector = `--root ${dirname(held[1])} --entry ${basename(held[1])}`;
-      err.message += `\nnext: ${tool} inspect-residue ${selector}\nnext: ${tool} recover-lock ${selector} --observed-digest <observed_sha256-from-inspect-residue> --reason <reason> (a named live owner refuses; see docs/operations/build-identity-and-release-tags.md)\nnext: ${statusArgv}`;
-    }
+    if (/release lock held/.test(err.message)) err.message += `\n${heldLockSteps(backupRoot, serverDir, repo, flags).text}`;
     throw err;
   }
   return { lockPath, releaseActivityLock };
@@ -2054,7 +2089,7 @@ export function runUpdate(flags, config) {
     };
   }
 
-  const locks = acquireDeploymentLocks(backupRoot, serverDir, repo);
+  const locks = acquireDeploymentLocks(backupRoot, serverDir, repo, flags);
   let transactionId;
   let dir;
   // Set only once `dir` holds this run's own journal: a failed mkdir of a
@@ -2764,19 +2799,19 @@ export const ROLLBACK_ELIGIBLE_PHASES = new Set(
  *  B-1..B-5). Never mutates without `--confirm-restore` (or previews
  *  with `--dry-run`, which never touches anything either).
  *
- *  The destructive/non-destructive split is derived from the SAME
- *  TRANSITIONS graph `update` and its own UNRESUMABLE_PHASES read
- *  (`TRANSITIONS[phase]` includes ROLLBACK_STOPPED exactly for
- *  STARTING/UP/HEALTHY/DONE) rather than a second hand-written list —
- *  the same "derive it, do not re-enumerate it" fix as MF-2.
+ *  Which path applies at each phase comes from the recovery table
+ *  (kaoiro-deploy-recovery.mjs, issue #695); its tests check it against
+ *  the TRANSITIONS graph (`TRANSITIONS[phase]` includes ROLLBACK_STOPPED
+ *  exactly for STARTING/UP/HEALTHY/DONE). PREFLIGHT is closed by record
+ *  alone, without any Docker call.
  *
  *  Non-destructive (OLD_IMAGE_SAVED..ARCHIVED): the old container was
  *  never recreated — nothing on the volume has changed since PREFLIGHT.
  *  Retag `latest` back to the old image (undoing `compose build`'s side
- *  effect, verified by read-back) and `docker start` the PREFLIGHT-
- *  recorded container (a harmless no-op if it was never actually
- *  stopped — measured live: `docker start` on an already-running
- *  container exits 0). No manifest needed (B-1) since ARCHIVED and
+ *  effect, verified by read-back), check that the container recorded at
+ *  OLD_IMAGE_SAVED still runs the old image, and `docker start` it (a
+ *  harmless no-op if it was never actually stopped — measured live:
+ *  `docker start` on an already-running container exits 0). No fleet RPC. No manifest needed (B-1) since ARCHIVED and
  *  earlier phases may not have one yet, and even ARCHIVED's own archive
  *  is untouched, so there is nothing to restore FROM.
  *
@@ -2892,7 +2927,7 @@ export function runRollback(flags, config) {
   // still-eligible journal, both decide "proceed", and both wipe the
   // volume (measured: a deterministic injection at the mkdir call this
   // acquireLock makes reproduced exactly that — 2 wipes for 1 transaction).
-  const locks = acquireDeploymentLocks(backupRoot, serverDir, repo);
+  const locks = acquireDeploymentLocks(backupRoot, serverDir, repo, flags);
   try {
     const decision = readRollbackDecision(dir, flags.transaction);
     let journal = decision.journal;
@@ -2915,22 +2950,24 @@ export function runRollback(flags, config) {
       // container that ran before the transaction, on the same image,
       // verified below; runners that changed identity in the meantime are
       // checked by the next update's gate, not by this rollback.
-      const target = typeof oldContainerId === "string" && oldContainerId !== "" ? oldContainerId : preflightContainer;
-      let liveImage;
-      try {
-        liveImage = dockerInspect(bin, target, "{{.Image}}");
-      } catch (err) {
-        fail(`cannot read the image of container ${target}: ${err.message} — refusing to start it`);
-      }
-      if (liveImage !== oldImageId) {
-        fail(`container ${target} runs ${liveImage}, not the recorded old image ${oldImageId} — refusing to start it`);
-      }
+      // `latest` goes back first, so even a refusal below leaves it on the
+      // old image rather than on the unreviewed one a build left there.
       runDocker(bin, ["tag", oldImageId, "kaoiro-server:latest"]);
       const revertedId = dockerInspect(bin, "kaoiro-server:latest", "{{.Id}}");
       if (revertedId !== oldImageId) {
         fail(
           `rollback could not restore kaoiro-server:latest to the old image ${oldImageId} (now ${revertedId}) — investigate before retrying`,
         );
+      }
+      const target = typeof oldContainerId === "string" && oldContainerId !== "" ? oldContainerId : preflightContainer;
+      let liveImage;
+      try {
+        liveImage = dockerInspect(bin, target, "{{.Image}}");
+      } catch (err) {
+        fail(`cannot read the image of container ${target}: ${err.message} — refusing to start it (kaoiro-server:latest is back on the old image)`);
+      }
+      if (liveImage !== oldImageId) {
+        fail(`container ${target} runs ${liveImage}, not the recorded old image ${oldImageId} — refusing to start it (kaoiro-server:latest is back on the old image)`);
       }
       // Harmless no-op if this container was never actually stopped
       // (measured live: `docker start` on an already-running container
@@ -3380,10 +3417,12 @@ export function runStatus(flags, config) {
       ? null
       : (unfinished.journal.history.find((e) => e.phase === PHASE.ENV_CONSISTENCY_CHECKED)?.observation ?? null);
 
+  const lockSteps = heldLockSteps(backupRoot, serverDir, repo, flags);
   return {
     command: "status",
     docker: overridden ? "fake" : "docker",
     container: containerState,
+    locks: lockSteps.locks,
     health,
     unfinishedTransaction:
       unfinishedError !== null

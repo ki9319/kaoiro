@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { PHASE } from "../kaoiro-deploy-phase.mjs";
+import { newTransactionId } from "../kaoiro-deploy-transaction.mjs";
 
 // Property test for the recovery table (issue #695, landing unit L1;
 // docs/plans/issue-695-transaction-state-table.md section 7.1). Each recipe
@@ -213,11 +214,18 @@ function statusRecovery(world) {
 function recoverFromKill(world, args) {
   const again = world.cliRun(...args);
   assert.notEqual(again.status, 0);
-  const held = /another run holds (\S+) /.exec(again.stderr);
+  const held = /^note: deploy lock (\S+) is held: /m.exec(again.stderr);
   assert.ok(held, `lock refusal expected, got: ${again.stderr}`);
-  assert.match(again.stderr, /^next: .* status --repo /m);
+  const status = parseNext(again.stderr).find((c) => c.command === "status");
+  assert.ok(status, again.stderr);
   rmdirSync(held[1]);
-  return statusRecovery(world);
+  // The printed status command, run as printed (it must carry --config).
+  const r = world.exec(status.argv);
+  assert.equal(r.status, 0, r.stderr);
+  const report = JSON.parse(r.stdout);
+  assert.deepEqual(report.locks, []);
+  return report.unfinishedTransaction.recovery.filter((l) => l.argv !== null)
+    .map((l) => ({ argv: l.argv, optional: l.optional.map((o) => o.flag), command: l.command }));
 }
 
 /** Executes printed commands, preferring `prefer`, until a terminal phase.
@@ -255,14 +263,13 @@ function assertAgrees(world, printed) {
 }
 
 // Transaction ids have one-second resolution; a fresh update in the same
-// second as the closed one would reuse its id.
-function nextSecond() {
-  const start = Math.floor(Date.now() / 1000);
-  while (Math.floor(Date.now() / 1000) === start) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+// second as the closed one would reuse its id, so wait only in that case.
+function waitPastId(closed) {
+  while (newTransactionId() === closed) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
 }
 
 function assertNextUpdateAdmitted(world, refusedBy = null) {
-  nextSecond();
+  waitPastId(world.txId());
   const r = world.update();
   if (refusedBy !== null) {
     assert.match(r.stderr, refusedBy);
@@ -311,6 +318,10 @@ const RECIPES = [
   { name: "old_image_saved: override adds a mount, pre-bridge fleet (issues 681, 584)", phase: PHASE.OLD_IMAGE_SAVED, args: [],
     world: { overrideMount: true, fleet: null }, faults: [], nextUpdate: /different project identity/,
     residual: (w) => assert.equal(w.latest(), OLD_IMAGE), via: ["rollback"], oracle: "non-destructive" },
+  { name: "build_prepared: probe fails, killed right after latest is restored", phase: PHASE.BUILD_PREPARED, args: [],
+    faults: [{ match: "PersistencePaths\\.beam", kind: "fail" }, { match: "^tag sha256:\\S+ kaoiro-server:latest", kind: "kill-after" }],
+    residual: (w) => { assert.equal(w.latest(), OLD_IMAGE); assert.equal(w.locks().length, 1); },
+    via: ["rollback", "update"], oracle: "non-destructive", clearFaults: true },
   { name: "env_consistency_checked: stopped at the maintenance gate", phase: PHASE.ENV_CONSISTENCY_CHECKED, args: [],
     faults: [], residual: () => {}, via: ["rollback", "update"], oracle: "non-destructive" },
   { name: "maintenance_gate_passed: pre-bridge fleet refuses the stop", phase: PHASE.MAINTENANCE_GATE_PASSED, args: UPDATE_APPROVED,
@@ -331,6 +342,10 @@ const RECIPES = [
   { name: "archived: latest pin fails", phase: PHASE.ARCHIVED, args: UPDATE_APPROVED,
     faults: [{ match: "^tag sha256:\\S+ kaoiro-server:latest", kind: "fail" }],
     residual: (w) => assert.equal(w.serviceContainer().status, "exited"), via: ["rollback"], oracle: "non-destructive" },
+  { name: "archived: killed after the latest pin", phase: PHASE.ARCHIVED, args: UPDATE_APPROVED,
+    faults: [{ match: "^tag sha256:\\S+ kaoiro-server:latest", kind: "kill-after" }],
+    residual: (w) => { assert.notEqual(w.latest(), OLD_IMAGE); assert.equal(w.serviceContainer().status, "exited"); },
+    via: ["rollback"], oracle: "non-destructive" },
   { name: "starting: compose up fails", phase: PHASE.STARTING, args: UPDATE_APPROVED,
     faults: [{ match: "^compose up -d --no-build$", kind: "fail" }],
     residual: (w) => assert.equal(w.serviceContainer().status, "exited"), via: ["rollback"], oracle: "destructive" },
@@ -398,9 +413,9 @@ test("recovery property: every non-terminal update phase is reached by at least 
   const reached = new Set(RECIPES.map((r) => r.phase));
   const deferred = new Set([PHASE.ROLLBACK_STOPPED, PHASE.ROLLBACK_FORENSIC_ARCHIVED, PHASE.ROLLBACK_RESTORING,
     PHASE.ROLLBACK_RESTORED]);
-  // build_prepared is reached by its own test below; done by the explicit-rollback test.
+  // done is reached by the explicit-rollback test.
   for (const phase of PHASES) {
-    if (phase === PHASE.ROLLED_BACK || phase === PHASE.DONE || phase === PHASE.BUILD_PREPARED) continue;
+    if (phase === PHASE.ROLLED_BACK || phase === PHASE.DONE) continue;
     assert.ok(reached.has(phase) || deferred.has(phase), `no recipe reaches ${phase}`);
   }
 });
@@ -493,9 +508,11 @@ test("recovery property: a legacy journal without the container id starts the na
       assert.notEqual(r.status, 0);
       assert.match(r.stderr, /not the recorded old image/);
       assert.equal(world.serviceContainer().status, "exited");
+      assert.equal(world.latest(), OLD_IMAGE, "a refused rollback still restores latest");
     } else {
       assert.equal(r.status, 0, r.stderr);
       assert.equal(world.journal().phase, PHASE.ROLLED_BACK);
+      assertNextUpdateAdmitted(world);
     }
   }
 });
@@ -563,13 +580,13 @@ test("recovery property: an enrolled server killed mid-rollback leaves both lock
   assert.ok(existsSync(join(realpathSync(history), ".lock.server")));
   world.faults([]);
 
+  // One refusal names both locks, each with its own step.
   const first = rollback();
-  const held = /another run holds (\S+) /.exec(first.stderr);
+  const held = /^note: deploy lock (\S+) is held: /m.exec(first.stderr);
   assert.ok(held, first.stderr);
+  assert.match(first.stderr, /^note: release lock \S+\/\.lock\.server is held: /m);
   rmdirSync(held[1]);
-  const second = rollback();
-  assert.match(second.stderr, /release lock held/);
-  const [inspect, recover, status] = parseNext(second.stderr);
+  const [inspect, recover, status] = parseNext(first.stderr);
   assert.deepEqual([inspect.argv[2], recover.argv[2], status.argv[2]], ["inspect-residue", "recover-lock", "status"]);
   const inspected = world.exec(inspect.argv);
   assert.equal(inspected.status, 0, inspected.stderr);
@@ -580,7 +597,13 @@ test("recovery property: an enrolled server killed mid-rollback leaves both lock
   assert.equal(recovered.status, 0, recovered.stderr);
   assert.equal(existsSync(join(realpathSync(history), ".lock.server")), false);
 
-  const result = followHints(world, statusRecovery(world), "rollback");
+  const printedStatus = world.exec(status.argv);
+  assert.equal(printedStatus.status, 0, printedStatus.stderr);
+  const report = JSON.parse(printedStatus.stdout);
+  assert.deepEqual(report.locks, []);
+  const candidates = report.unfinishedTransaction.recovery.filter((l) => l.argv !== null)
+    .map((l) => ({ argv: l.argv, optional: l.optional.map((o) => o.flag), command: l.command }));
+  const result = followHints(world, candidates, "rollback");
   assert.equal(result.phase, PHASE.ROLLED_BACK);
   assert.deepEqual(world.locks(), []);
   assert.equal(world.serviceContainer().status, "running");
@@ -595,6 +618,25 @@ test("recovery property: a non-destructive rollback refuses when the recorded co
   const r = world.cliRun("rollback", "--transaction", world.txId(), "--confirm-restore");
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /cannot read the image of container c{64}/);
-  assert.deepEqual(world.state().calls.slice(before).filter((c) => /^(tag|start) /.test(c)), []);
+  assert.deepEqual(world.state().calls.slice(before).filter((c) => /^start /.test(c)), []);
   assert.equal(world.serviceContainer().status, "exited");
+  assert.equal(world.latest(), OLD_IMAGE, "a refused rollback still restores latest");
 });
+
+for (const point of ["^tag sha256:\\S+ kaoiro-server:latest", "^start "]) {
+  test(`recovery property: a non-destructive rollback killed at ${point} is completed by the rerun status prints`, (t) => {
+    const world = makeWorld(t);
+    world.faults([{ match: "^tag kaoiro-server:latest kaoiro-server:", kind: "fail" }]);
+    world.update();
+    assert.equal(world.journal().phase, PHASE.OLD_IMAGE_SAVED);
+    world.faults([{ match: point, kind: "kill-after" }]);
+    const args = ["rollback", "--transaction", world.txId(), "--confirm-restore"];
+    assert.equal(world.cliRun(...args).signal, "SIGKILL");
+    assert.equal(world.journal().phase, PHASE.OLD_IMAGE_SAVED);
+    world.faults([]);
+    const volumeBefore = digestDir(world.volumeDir);
+    assert.equal(followHints(world, recoverFromKill(world, args), "rollback").phase, PHASE.ROLLED_BACK);
+    assertNonDestructive(world, volumeBefore);
+    assertNextUpdateAdmitted(world);
+  });
+}

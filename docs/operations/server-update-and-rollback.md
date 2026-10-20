@@ -936,11 +936,14 @@ must follow the new owner's exact ack, not the save reply.
 
 ## Build-format rollback safety
 
-Immediately before STOPPING, and before both rollback paths, deploy reads the
-target image's baked `build_identity_formats` and a fresh bounded snapshot of
-connected runner/wrapper identities. Incompatible or unavailable observations
-refuse before mutation. Docker exec has an outer timeout and both registry
-calls have inner timeouts; refusal releases the deploy lock.
+Immediately before STOPPING, and before a destructive rollback, deploy reads
+the target image's baked `build_identity_formats` and a fresh bounded snapshot
+of connected runner/wrapper identities. Incompatible or unavailable
+observations refuse before mutation. Docker exec has an outer timeout and both
+registry calls have inner timeouts; refusal releases the deploy lock. A
+non-destructive rollback skips this check: it restarts the container that ran
+before the transaction, on the same image, so runner identity is re-checked
+only by the next update's gate.
 
 `--fleet-stopped` is a separate explicit operator declaration that the affected
 fleet is stopped. Maintenance or restore approval does not imply it. Use the

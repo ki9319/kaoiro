@@ -133,7 +133,8 @@ export function isInvocation(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) &&
     typeof value.repo === "string" && value.repo.startsWith("/") &&
     (value.config === null || (typeof value.config === "string" && value.config.startsWith("/"))) &&
-    (value.release_authority === null || typeof value.release_authority === "string");
+    (value.release_authority === null ||
+      (typeof value.release_authority === "string" && value.release_authority.startsWith("/")));
 }
 
 function recordedTarget(journal) {

@@ -163,4 +163,5 @@ test("a malformed recorded target or invocation is refused, never tolerated as a
   assert.equal(isValidJournalShape({ ...base, invocation: { repo: "/srv/kaoiro", config: null, release_authority: null } }), true);
   assert.equal(isValidJournalShape({ ...base, invocation: { repo: "relative", config: null, release_authority: null } }), false);
   assert.equal(isValidJournalShape({ ...base, invocation: { repo: "/srv/kaoiro", config: "deploy.json", release_authority: null } }), false);
+  assert.equal(isValidJournalShape({ ...base, invocation: { repo: "/srv/kaoiro", config: null, release_authority: "authority.json" } }), false);
 });
