@@ -116,9 +116,9 @@ describe("Claude CLI startup probe composition (issue #448)", () => {
     }
   });
 
-  it("publishes the captured 0.3.293 Haiku catalog before a model turn", async () => {
+  it("publishes the captured 0.3.306 Haiku catalog before a model turn", async () => {
     const raw = JSON.parse(readFileSync(new URL(
-      "./fixtures/claude-agent-sdk-0.3.293.models.json", import.meta.url,
+      "./fixtures/claude-agent-sdk-0.3.306.models.json", import.meta.url,
     ), "utf8")) as unknown[];
     const models = raw.map(projectModel);
     const { sent, queryFn, host, running } = await runIdleCli(

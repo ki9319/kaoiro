@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 
-// Extracted from genuine SDK 0.3.293 / CLI 2.1.293 user/system notifications.
+// Extracted from genuine SDK 0.3.306 / CLI 2.1.306 user/system notifications.
 // Only task/call ids, output path, summary and event scalars were replaced.
 export const monitorNotifications = JSON.parse(readFileSync(new URL("./monitor_notifications.json", import.meta.url), "utf8")) as Array<{
   shape: "completion-event" | "event-only"; cli_version: string; prompt: string; advice: string;

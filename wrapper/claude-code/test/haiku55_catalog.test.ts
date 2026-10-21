@@ -6,7 +6,7 @@ import type { WrapperConfig } from "@kaoiro/agent-common";
 import { AgentHost } from "../src/host.js";
 import { projectModel } from "../src/probe.js";
 
-const bytes = readFileSync(new URL("./fixtures/claude-agent-sdk-0.3.293.models.json", import.meta.url));
+const bytes = readFileSync(new URL("./fixtures/claude-agent-sdk-0.3.306.models.json", import.meta.url));
 const sdkModels = JSON.parse(bytes.toString("utf8")) as ModelInfo[];
 const catalog = sdkModels.flatMap(model => {
   const projected = projectModel(model);
@@ -29,10 +29,10 @@ function pinnedHost(model: string): AgentHost {
   });
 }
 
-describe("SDK 0.3.293 captured Haiku catalog", () => {
+describe("SDK 0.3.306 captured Haiku catalog", () => {
   it("preserves the measured alias, legacy row and canonical-only join", () => {
     expect(createHash("sha256").update(bytes).digest("hex")).toBe(
-      "637abfa8a2467d3e39c5eb5284ae0fc52b0b1e02d733d80da956fbc7747f3642",
+      "83de29af21e4ea4a93b65aa9a15a354a66f2eba3f96f150b02207d0a96efda27",
     );
     expect(sdkModels).toHaveLength(13);
     expect(sdkModels.find(model => model.value === "haiku")).toMatchObject({

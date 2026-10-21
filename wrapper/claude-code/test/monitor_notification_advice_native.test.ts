@@ -29,7 +29,7 @@ it.each(["completion-response", "event-inform", "setting-absent", "gate-absent",
   "native Monitor advice: %s", async mode => {
     const sdkPath = dirname(createRequire(import.meta.url).resolve("@anthropic-ai/claude-agent-sdk"));
     const sdk = JSON.parse(await readFile(join(sdkPath, "package.json"), "utf8"));
-    expect([sdk.version, sdk.claudeCodeVersion]).toEqual(["0.3.293", "2.1.293"]);
+    expect([sdk.version, sdk.claudeCodeVersion]).toEqual(["0.3.306", "2.1.306"]);
     const advice = monitorNotifications[0]!.advice;
     const root = await mkdtemp(join(tmpdir(), "kaoiro-monitor-advice-native-"));
     const cfg = join(root, ".claude"), cwd = join(root, "project");
@@ -39,7 +39,7 @@ it.each(["completion-response", "event-inform", "setting-absent", "gate-absent",
       tengu_amber_sentinel: true, ...(mode === "gate-absent" ? {} : { tengu_kairos_push_notifications: true }),
     }, cachedGrowthBookFeaturesAt: Date.now() }));
     const persistent = mode === "event-inform" || mode === "monitor-fold";
-    let taskIssued = false, ownerIssued = false, sendIssued = false, calls = 0, sendCallId = "";
+    let taskIssued = false, ownerIssued = false, sendIssued = false, searched = false, calls = 0, sendCallId = "";
     let taskBarrier: ServerResponse | undefined, ownerBarrier: ServerResponse | undefined;
     const toolResults: unknown[] = [], requests: unknown[] = [];
     const foldedBlocks: string[] = [], rootPromptIds = new Set<string>();
@@ -71,7 +71,9 @@ it.each(["completion-response", "event-inform", "setting-absent", "gate-absent",
       };
       let use: { name: string; input: Record<string, unknown> } | undefined;
       const source = mode === "bash-idle" ? "Bash" : "Monitor";
-      if (!taskIssued && offered(source) && messages.includes("START-697")) {
+      if (!searched && offered("ToolSearch") && (!offered(source) || !offered("mcp__kaoiro__send_to_agent"))) {
+        searched = true; use = { name: "ToolSearch", input: { query: "select:Monitor,mcp__kaoiro__send_to_agent" } };
+      } else if (!taskIssued && offered(source) && messages.includes("START-697")) {
         taskIssued = true;
         use = { name: source, input: { command: command("task", true), description: "fixture monitor",
           ...(source === "Monitor" ? { persistent, timeout_ms: 60000 } : { run_in_background: true }) } };
@@ -83,7 +85,7 @@ it.each(["completion-response", "event-inform", "setting-absent", "gate-absent",
         use = { name: "mcp__kaoiro__send_to_agent", input: { to: "fixture.peer", kind: mode === "event-inform" ? "inform" : "response",
           ...(mode === "event-inform" ? {} : { conversation_id: "fixture-conversation-697" }), body: "fixture notification report", done: true } };
       }
-      requests.push({ call: calls, tool: use?.name ?? "text", notice: messages.includes("<task-notification>") });
+      requests.push({ call: calls, tool: use?.name ?? "text", offered: (payload.tools ?? []).map((t: any) => t.name), notice: messages.includes("<task-notification>") });
       const emit = (event: string, data: unknown) => response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       response.writeHead(200, { "content-type": "text/event-stream" });
       emit("message_start", { type: "message_start", message: { id: `msg_${calls}`, type: "message", role: "assistant", model: payload.model,
@@ -160,7 +162,7 @@ it.each(["completion-response", "event-inform", "setting-absent", "gate-absent",
         for (const { row } of notifications) expect(rootPromptIds.has(row.promptId)).toBe(false);
       }
       for (const { row, block } of notifications) {
-        expect(row.version).toBe("2.1.293");
+        expect(row.version).toBe("2.1.306");
         if (mode !== "bash-idle") {
           assertMonitorAdvicePosition(block, advice, mode !== "setting-absent" && mode !== "gate-absent");
           expect(block.includes("<status>")).toBe(!persistent);
