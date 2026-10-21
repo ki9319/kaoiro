@@ -2,7 +2,7 @@
 title: Claude model catalog
 description: Exact contract for Claude catalog refresh, canonical model identifiers, and two-pass catalog-row matching.
 status: accepted
-last_updated: 2026-10-08
+last_updated: 2026-10-22
 related: [extensions, adapter-contract, protocol]
 ---
 
@@ -203,13 +203,21 @@ The Codex catalog is static and does not distinguish canonical from alias, so it
 is unchanged. A row with absent `resolved_model` behaves as it did before the
 field was added.
 
-## The model list ships inside the bundled CLI, not kaoiro (issue #398; probe updated 2026-10-08)
+## The model list ships inside the bundled CLI, not kaoiro (issue #398; probe updated 2026-10-22)
 
 kaoiro declares no Claude model of its own: the bootstrap floor is the single
 `default` row, and both catalog paths read what the Claude Code CLI bundled with
 `@anthropic-ai/claude-agent-sdk` reports. A new Anthropic model therefore reaches
 kaoiro through an SDK version bump, not a catalog edit — the same conclusion the
 Fable 5.1 rollout reached.
+
+The latest measurement used SDK **0.3.306 / CLI 2.1.306** on 2026-10-22
+(issue #700). The existing compiled production probe returned `ok: true`,
+`source: "init"`, and 13 rows. Its value, resolved-model and effort projection
+matches the 0.3.293 table below. The complete projected rows and compatibility
+review are in the [0.3.306 measurement record](../../evidence/claude/issue-700/sdk-0.3.306-2026-10-22.md).
+No user prompt was yielded; this does not establish model generation or tool
+permission behavior.
 
 The production startup-probe composition was run on this host against SDK
 0.3.293 / CLI 2.1.293 on 2026-10-08. It returned `ok: true`,
