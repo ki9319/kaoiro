@@ -60,12 +60,7 @@ binding and the actual placement before maintenance. The journal phase by
 itself is no evidence of placement for a transaction prepared by an older CLI.
 See [the placement procedure](../../operations/server-update-and-rollback.md#delivery-policy-store-placement).
 
-## See Also
-
-- [Server update and rollback](../../operations/server-update-and-rollback.md).
-- [Server deploy configuration](../configuration/server-deploy.md).
-
-### Bound Compose input files
+## Bound Compose input files
 
 New server transactions store ordered `compose_files` entries (`source`, `path`, `sha256`) in each
 recovery/target plan. The base comes first and an optional selected override follows; the latter is
@@ -74,3 +69,8 @@ server `--project-directory`, including on rollback. Forward additionally checks
 actual Compose default discovery. Legacy plans without the field remain readable and base-only;
 strict new-plan validation does not retroactively tighten their read/scan schema. See the server
 update/rollback runbook's Compose override section for drift exits and retained-secret handling.
+
+## See Also
+
+- [Server update and rollback](../../operations/server-update-and-rollback.md).
+- [Server deploy configuration](../configuration/server-deploy.md).

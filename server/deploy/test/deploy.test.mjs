@@ -198,7 +198,7 @@ case "$1" in
       # resolveHealthUrl's own test relies on, not a gap to fill in.
       port)
         case "$FAKE_DOCKER_SCENARIO" in
-          health-url-derivable) printf '127.0.0.1:9999\\n' ;;
+          health-url-derivable|running-clean-stop) printf '127.0.0.1:9999\\n' ;;
           health-url-port-fails) exit 1 ;;
           # クロエ round 3 review N-1: real \`docker compose port\` reports
           # an IPv6 wildcard binding unbracketed.
@@ -6175,6 +6175,40 @@ function prepareComposeTransaction() {
   return { id, dir: join(backup, id), journal: readJournal(join(backup, id)) };
 }
 
+function assertForwardComposeArgs(calls, dir, override, ambientRenders, recoveryRenders) {
+  const serverDir = join(workDir, "server");
+  const suffix = `${override ? ` -f ${join(dir, `compose-override.${override}`)}` : ""} --project-directory ${serverDir}`;
+  const target = `compose -f ${join(serverDir, "docker-compose.yaml")}${suffix} `;
+  const recovery = `compose -f ${join(dir, "recovery-compose.yaml")}${suffix} `;
+  let ambient = 0;
+  let relocated = 0;
+  const operations = new Set();
+  for (const line of calls.filter(line => line.startsWith("compose "))) {
+    if (line === "compose config --format json") { ambient++; continue; }
+    if (line.startsWith("compose version ")) continue;
+    if (line === `${recovery}config --format json`) { relocated++; continue; }
+    assert.ok(line.startsWith(target), line);
+    operations.add(line.slice(target.length).split(" ")[0]);
+  }
+  assert.equal(ambient, ambientRenders, "only the forward equality checks may use default discovery");
+  assert.equal(relocated, recoveryRenders, "only recovery-plan renders may use R");
+  for (const operation of ["stop", "up", "ps", "port"]) assert.ok(operations.has(operation), operation);
+}
+
+test("Compose inputs: fresh forward binds every transaction Compose call to T or R", () => {
+  writeComposeOverride();
+  let captured = false;
+  const calls = [];
+  const result = observeDockerCalls((args, output) => {
+    if (args[0] === "compose" && args.some(arg => arg.endsWith("/recovery-compose.yaml"))) captured = true;
+    if (captured) calls.push(args.join(" "));
+    return output;
+  }, () => withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha,
+    maintenanceApproved: true }, { ...configWithCleanStopMeasured(), health_url: null })));
+  assert.equal(result.phase, "done");
+  assertForwardComposeArgs(calls, join(root, "kaoiro-deploy", result.transactionId), "yaml", 5, 2);
+});
+
 for (const mode of ["none", "yaml", "yml", "both"]) {
   test(`Compose inputs: ${mode} prepare and update bind the selected files`, () => {
     if (mode === "yaml" || mode === "both") writeComposeOverride("yaml");
@@ -6194,8 +6228,11 @@ for (const mode of ["none", "yaml", "yml", "both"]) {
       assert.equal(readFileSync(recovery.compose_files[1].path, "utf8"), readFileSync(join(workDir, "server", recovery.compose_files[1].source), "utf8"));
     }
     assert.equal(recovery.compose_sha256, target.compose_sha256);
-    const result = withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha,
-      transaction: tx.id, maintenanceApproved: true }, configWithCleanStopMeasured()));
+    const calls = [];
+    const result = observeDockerCalls((args, output) => { calls.push(args.join(" ")); return output; }, () =>
+      withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha,
+        transaction: tx.id, maintenanceApproved: true }, { ...configWithCleanStopMeasured(), health_url: null })));
+    assertForwardComposeArgs(calls, tx.dir, mode === "none" ? undefined : mode === "both" ? "yml" : mode, 3, 1);
     assert.equal(result.phase, "done");
     assert.deepEqual(readManifest(tx.dir).recovery_plan.compose_files, recovery.compose_files);
   });
@@ -6381,7 +6418,7 @@ test("Compose inputs: Q0 compares relocated recovery render when source bytes ma
     }
     return output;
   }, () => withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha }, configWithCleanStopMeasured()))),
-  /relocated recovery effective compose plan compose_sha256/);
+  /relocated recovery render differs from the explicit checkout render/);
   assert.equal(relocated, true);
   assert.equal(mutations.length, 0);
 });

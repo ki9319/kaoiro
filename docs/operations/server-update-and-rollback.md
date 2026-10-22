@@ -977,6 +977,10 @@ Prepare keeps a private mode-0600 override copy and records ordered input paths 
 in `recovery_plan.compose_files` and `target_plan.compose_files`. Transaction directories follow
 the process umask; directory privacy is not promised. Retained transactions retain the private copy,
 which can contain secrets; rolled-back transactions are not automatically pruned.
+A refusal before the first journal write can leave a transaction directory containing the copy.
+The refusal identifies the directory directly or through its captured-copy path. After the failed
+CLI process has exited, a directory with no `journal.json` may be removed manually. Preserve any
+directory with a journal and use its recorded recovery procedure instead.
 
 Forward checks compare live selection/bytes and the actual default-discovery render with the
 explicit saved-input render, after build and preparation and immediately before stop and start.

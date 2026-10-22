@@ -2332,12 +2332,15 @@ export function runUpdate(flags, config) {
         const bytes = readFileSync(join(serverDir, selected));
         const copy = overrideCopyPath(dir, selected);
         writeFileDurably(copy, bytes, undefined, { mode: 0o600 });
-        if (sha256File(copy) !== sha256Bytes(bytes)) fail("Compose override copy bytes do not match captured input");
+        if (sha256File(copy) !== sha256Bytes(bytes)) fail(`Compose override copy bytes do not match captured input; transaction directory: ${dir}`);
         recoveryFiles.push(composeFile(selected, copy));
       }
       recoveryPlan = composePlan(bin, serverDir, recoveryComposeArgs(recoveryComposeFile, serverDir, selected && overrideCopyPath(dir, selected)), recoveryFiles);
       const initial = checkForwardCompose(bin, serverDir, dir, recoveryPlan, undefined);
-      if (composeArtifact.sha256 === sha256Bytes(recoverySource)) requirePlanMatch(recoveryPlan, initial, "relocated recovery");
+      if (composeArtifact.sha256 === sha256Bytes(recoverySource) &&
+          (recoveryPlan.compose_sha256 !== initial.compose_sha256 || recoveryPlan.env_sha256 !== initial.env_sha256)) {
+        fail(`relocated recovery render differs from the explicit checkout render; transaction directory: ${dir} — refusing before Docker mutation`);
+      }
       journal = {
         schema_version: 1,
         release_context: releaseAudit.release_context ?? null,
