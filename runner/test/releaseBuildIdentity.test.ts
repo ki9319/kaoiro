@@ -245,7 +245,7 @@ describe("release tag real entry", () => {
       { cwd: source, encoding: "utf8", env: { PATH: `${bin}:${process.env.PATH}`, HOME: dir } });
   }
   const build = (source: string) => spawnSync(process.execPath, [join(source, "scripts/with-build-identity.mjs"), "--require-tagged", "--",
-    process.execPath, "-e", "process.stdout.write(process.env.KAOIRO_BUILD_IDENTITY_JSON)"], { cwd: source, encoding: "utf8", env: { PATH: process.env.PATH } });
+    process.execPath, "-e", "process.stdout.write(process.env.KAOIRO_BUILD_IDENTITY_JSON)"], { cwd: source, encoding: "utf8", env: { PATH: process.env.PATH, HOME: dir } });
 
   it("the helper's printed commands produce a tag that the coordinated build accepts", () => {
     const source = project();

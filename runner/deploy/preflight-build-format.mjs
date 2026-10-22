@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 
 export async function checkBuildFormat(root, configPath, env = process.env, allowUntagged = false) {
   const identity = JSON.parse(readFileSync(join(root, "dist/build-info.json"), "utf8"));
-  if (identity.version === "untagged" && !allowUntagged) throw new Error("production activation requires a completed landing tag; use --allow-dirty only for development");
+  if (identity.version === "untagged" && !allowUntagged) throw new Error("production activation requires a completed landing or release tag; use --allow-dirty only for development");
   if (identity.version !== "untagged" && !/^\d{4}\.\d{2}\.\d{2}\.[1-9][0-9]{0,5}$/.test(identity.version)) return;
   const config = JSON.parse(readFileSync(configPath, "utf8"));
   const serverUrl = env.KAOIRO_RUNNER_SERVER_URL || config.server_url;
