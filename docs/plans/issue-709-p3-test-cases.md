@@ -149,17 +149,35 @@ the recovery phase-table and fault-schedule suites are not candidates for deleti
 
 | File / baseline line | Case | Retire / preserve and transfer |
 | --- | --- | --- |
-| `server/deploy/test/recovery.test.mjs:109` | rendered commands carry the recorded repo, config and release context | R2 release argv; K3 repo/config/target/transaction/restore rendering. Add an old-journal ignored-metadata positive case and malformed retained-field negative cases. |
+| `server/deploy/test/recovery.test.mjs:109` | rendered commands carry the recorded repo, config and release context | R2 release argv; K3 repo/config/target/transaction/restore rendering. Add old-to-new ignored-metadata and new-to-old discovery cases; the new writer keeps release_authority: null. Malformed retained fields still fail. |
 | `server/deploy/test/recovery.test.mjs:151` | a malformed recorded target or invocation is refused, never tolerated as an extra field | R2 validation of release_authority; K3 target/repo/config validation. Relative release_authority becomes ignored extra metadata, while relative repo/config stays rejected. |
 | `server/deploy/test/recovery.test.mjs:173` | the release module's held-lock message is the one the lock refusal reads | R2 only; delete with RELEASE_LOCK_HELD_RE. Ordinary lock diagnostics remain K3 in the property case below. |
 | `server/deploy/test/recovery-property.test.mjs:574` | recovery property: an enrolled server killed mid-rollback leaves both locks, and the printed steps recover it | R2 descriptor, second lock and release lifecycle recovery commands; K3 actual CLI kill, ordinary lock refusal, status/printed recovery and completed rollback. Rewrite in place with the ordinary fixture. Keep the landed L1b schedule. |
 | `server/deploy/test/recovery-property.test.mjs:631` | recovery property: an enrolled update resume runs as printed with its release context, and is refused without it | R2 audit binding and refusal when release argv are omitted; K3 executable printed repo/config/target/transaction. Rewrite in place: old release metadata does not produce obsolete argv and ordinary resume succeeds. Keep landed L4/L5 conditions and negative controls. |
+| `scripts/test/child-process-environment.test.mjs:34` | each operation's explicit keys preserve only its intended authority | R3 forwarding of KAOIRO_RELEASE_RETAINED_UNIT; K4 all other per-profile authority limits. Add the retired key to input and require it absent; restoring that one allowlist member must turn the assertion red. |
 | `scripts/test/child-process-environment.test.mjs:58` | existing authority and new repair SSH launches both exclude ambient secrets | P2 retires repair SSH; P3 retires authority launch (R2/R4). K4 shared environment isolation remains in the real-child cases at lines 23, 34, 45 and 108; move any distinct forbidden-key assertion there before deleting this entrance-specific case. |
 | `scripts/test/child-process-environment.test.mjs:83` | coverage check rejects separate existing and new bypasses and its own disabled guard | K4. Replace deleted source targets with build-identity / with-build-identity and retain the disabled-guard mutation. Recompute counts from the integrated tree, not an assumed constant. |
 | `scripts/test/child-process-environment.test.mjs:95` | coverage pins import-only, spawn/fork, exact legacy count and both scope-presence checks | K4. Retain every rejection; include a new scanned file and imported dependency to pin replacement enumeration. |
+| `runner/test/releaseCleanup.test.ts:10` | update cleanup retains recoverable ownership after $failRemoval removal failure and gate $gateStatus (five it.each legs) | R3 release-gate failure legs; K1 build/Codex-owner removal failure, link-lock release and update-lock/owner retention, plus successful cleanup. Rewrite in place without release-owner/gate stubs; see the leg mapping below. |
 | `runner/test/releaseUpdate.test.ts:205` | independent detached argv and no work in caller | K2. Absorbs the retained detach/env assertions; keep ordinary no-descriptor setup and add descriptor-ignored variants separately. |
 | `runner/test/releaseUpdate.test.ts:425` | stop → switch → start | K1. Absorbs successful ordinary worker / lock cleanup assertions from deleted reconciliation cases. |
 | `runner/test/releaseUpdate.test.ts:599` | failed switch restarts the old release | K1. Absorbs late proof-failure recovery intent using a retained failure trigger. Assert source remains current and is restarted; deleting that restart must turn the test red. |
+
+The cleanup parameter table is split by assertion, not deleted wholesale:
+
+| Baseline input | Disposition after release cleanup retires |
+| --- | --- |
+| gateStatus 0 / none | K1: successful cleanup removes build and both locks. |
+| gateStatus 1 / none | R3: failure caused only by release cleanup; remove. |
+| gateStatus 0 / build | K1: build removal fails, cleanup is nonzero, links lock is released, update lock and Codex owner remain. |
+| gateStatus 1 / build | R3: gate failure is removed; its K1 build-failure assertions consolidate into the preceding row. |
+| gateStatus 0 / owner | K1: Codex-owner removal fails, cleanup is nonzero and the update lock/owner remain. |
+
+Remove the gateStatus dimension and the release-owner file/stub. Keep the
+three ordinary success/build-failure/owner-failure scenarios in
+`releaseCleanup.test.ts`. Suppressing cleanup's failure status or releasing
+its update lock despite failed cleanup must make the corresponding case red;
+restore and rerun. Do not remove the Codex-owner cleanup contract before N2.
 
 Existing runner queue-failure, caller-death, link-lock, artifact verification,
 attestation and native-state tests remain. Existing recovery-table/property

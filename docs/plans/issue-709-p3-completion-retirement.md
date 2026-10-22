@@ -1,6 +1,6 @@
 # P3: retire completion and enrollment
 
-Status: proposed; design review r1. Implementation classification: L (server
+Status: proposed; design review r2. Implementation classification: L (server
 and runner launch paths, shared safety checks and CLI/record consumers).
 Source baseline: `2d3040de0b5213a622df6b5c75f64ba49325f1d3`.
 Parent: [release reduction](issue-709-release-reduction.md), sections 3.4–3.6
@@ -23,7 +23,12 @@ consumer here, but its export and implementation retire in N2.
 
 P1 is present at this baseline. The director reports C1 and C2 complete; this
 design does not independently establish production enrollment or tag rules.
-P3 implementation lands only after P2 and issue #695 L1b/L4/L5. Use their
+P3 implementation lands only after P2, issue #695 L1b/L4/L5, and issues
+#711 then #713. Issue #711 owns the child-environment CI step; #713 lands
+on #711. P3 keeps their resulting child-process protections and CI wiring,
+then recalculates its reduced scope/call counts on that integrated tree.
+If the director changes this order, the later change must reconcile these
+files and return the changed design for review before landing. Use their
 integrated tree as the implementation base, or have the director transplant
 the reviewed change onto it and reconcile the overlap before landing. Do not
 reintroduce an old recovery table or replace the new L1b/L4/L5 tests with the
@@ -72,9 +77,11 @@ Change these surviving files narrowly:
 | `runner/deploy/kaoiro-runner-common.sh` | Remove `kaoiro_release_gate` and `kaoiro_release_enrolled`; retain all ordinary and native-state helpers. Add the warning described below. |
 | `runner/deploy/kaoiro-runner-update.sh` | Remove `release_audit`, release flag parsing/forwarding, both enrolled audits, pinned-launcher selection in detach, seal/proof reads and release-owner/runner-cleanup handling. Keep `.lock.update`, `.lock.links`, Codex owner/transaction cleanup and cleanup-failure lock retention. |
 | `runner/deploy/kaoiro-runner-switch.sh` | Remove `release_manual`, release-only manual update-lock ownership/cleanup, audit/seal/proof verification before and after link-lock acquisition, and release flag parsing. Keep the link lock, artifact/identity/native-state guards and link ordering. |
+| `runner/deploy/child-process-environment.mjs` | Remove only `KAOIRO_RELEASE_RETAINED_UNIT` from `RUNNER`: both its writer and reader retire here. Preserve all other profile entries and semantics from #711/#713. |
+| `.gitignore` | Keep `/server/.kaoiro-release-authority.json`, and its copy in the recovery-property fixture. An ignored descriptor must not make the checkout dirty and block artifact identity checks. |
 | `runner/deploy/kaoiro-runner-bootstrap.sh` | Remove enrolled `runner-audit` before install; retain argument/config validation, dry-run, wizard/install and optional service setup. |
 | `scripts/build-runner-tarball.sh` | Remove only release-tools staging. Keep CLI/shim checks, runtime `MANIFEST.json`, source identity check and archive/staging cleanup. |
-| `server/deploy/kaoiro-server-deploy.mjs` | Remove the two deleted-module imports, release value flags, `runUpdate` admission/under-lock audit and resume/bind/context writes; remove release activity locking from `runBuild`, `runStart`, `acquireDeploymentLocks`/`releaseDeploymentLocks`. Simplify `heldLockSteps` to the deployment lock; remove `RELEASE_LOCK_HELD_RE`, descriptor error reporting, its `authorityError` result and `runStatus`'s `lockAuthorityError`. `invocationOf` records repo/config only. Drop `releaseReconciliation` dry-run output and new journal `release_context`/`release_reconciliation` fields. Retain ordinary locking and all phase/restore/health logic, including L1b/L4/L5. |
+| `server/deploy/kaoiro-server-deploy.mjs` | Remove the two deleted-module imports, release value flags, `runUpdate` admission/under-lock audit and resume/bind/context writes; remove release activity locking from `runBuild`, `runStart`, `acquireDeploymentLocks`/`releaseDeploymentLocks`. Simplify `heldLockSteps` to the deployment lock; remove `RELEASE_LOCK_HELD_RE`, descriptor error reporting, its `authorityError` result and `runStatus`'s `lockAuthorityError`. `invocationOf` records repo/config plus the fixed compatibility literal `release_authority: null` (never a flag value). Drop `releaseReconciliation` dry-run output and new journal `release_context`/`release_reconciliation` fields. Retain ordinary locking and all phase/restore/health logic, including L1b/L4/L5. |
 | `server/deploy/kaoiro-deploy-recovery.mjs` | `isInvocation` checks repo/config only; `baseArgv` and `renderRecovery` stop emitting release flags. Preserve target, transaction, config, refusal conditions, placeholders and explicit restore approval. |
 
 Remove updater/switch options `--release-repo`, `--release-authority`,
@@ -104,7 +111,8 @@ Remove only deleted paths from `CHILD_ENVIRONMENT_SCOPE`. Retain the exact
 legacy-call allowlist and checks for new raw imports/calls, helper import and
 checked-call presence. Reconcile any already-landed child-environment change
 before editing this table; never increase an allowance to make deletion pass.
-Keep both shared child-environment modules and their profile semantics.
+Keep both shared child-environment modules and their profile semantics except
+the single retired `RUNNER` key above.
 
 ## 3. Remaining launch and recovery paths
 
@@ -115,7 +123,7 @@ Keep both shared child-environment modules and their profile semantics.
 | Runner update | Validate → generic detach submission if requested; otherwise `.lock.update` → prepare/verify artifact and native state → stop → switch under `.lock.links` → start → attestation/registration check → existing prune/cleanup. |
 | Runner switch/rollback | Validate → `.lock.links` → verify target and retained native-state permission → update current/previous. No release-proof bypass. |
 | Runner bootstrap | Validate/configure → existing dry-run or install/service setup. No release exporter. |
-| Detached runner worker | Queue the physical updater script with its ordinary argv/env. Keep `--user`, `--no-block`, `--expand-environment=no`, independent unit, queue failure behavior and the distinction between ENQUEUED and completed. No retained production-worker protocol. |
+| Detached runner worker | Check `kaoiro_node >/dev/null` before queueing, then queue the physical updater script with its ordinary argv/env. Keep `--user`, `--no-block`, `--expand-environment=no`, independent unit, queue failure behavior and the distinction between ENQUEUED and completed. No retained production-worker protocol. |
 
 For server `runBuild`/`runStart`/`runUpdate`/`runRollback`/`runStatus` and the
 three runner entry scripts, once the installation path is known, check only
@@ -135,10 +143,23 @@ locks or old release-tools directories. They are inert bytes to the new
 code. A held legacy `.lock.server` does not block P3; the ordinary deployment
 lock still does. There is no new cleanup command.
 
+Retain the pre-queue Node availability check explicitly in the updater's
+`--detach` branch before reset-failed/submission. Its current call is an
+incidental part of release admission; removing admission must not turn an
+immediate missing-Node refusal into ENQUEUED followed by worker failure.
+
 Old server journals remain readable. Unknown legacy `release_context`,
 `release_reconciliation` and `invocation.release_authority` fields are ignored
 for execution and left on disk; their contents must not invalidate an
-otherwise valid repo/config invocation. New journals omit them. Recovery
+otherwise valid repo/config invocation. New journals omit `release_context`
+and `release_reconciliation`, but `invocationOf` continues writing
+`release_authority: null` as a fixed literal. This is reader compatibility,
+not enrollment state: it is never derived from flags, never authorizes an
+operation, and is ignored by the new reader. Pre-P3 `isInvocation` requires
+this key; without it, `readJournal` rejects the entire record and
+`findUnfinishedTransaction` silently skips it. Keeping the literal preserves
+discovery by old tooling without adding a P3-specific rollback prohibition.
+The remaining phase/restore restrictions still apply. Recovery
 from an old journal renders only current arguments and continues through the
 unchanged phase restrictions. Missing invocation still renders placeholders;
 malformed repo/config/target still refuses. Do not migrate phases or rewrite
@@ -157,10 +178,10 @@ final test names and mutation results alongside the implementation review.
 
 | Group | Destination and required check | Negative control / mutation |
 | --- | --- | --- |
-| K1 runner lifecycle | `runner/test/releaseUpdate.test.ts` / `releaseSwitch.test.ts`: actual scripts, stop→switch→start, current/previous, `.lock.update` and `.lock.links`, failed post-stop switch restarts unchanged source. Existing ordinary cases can absorb assertions. | Bypass ordinary update/link lock guards separately; suppress source restart after a retained switch failure. Each corresponding test must fail. Never use removed proof validation as the failure trigger. |
-| K2 ordinary detach | `releaseUpdate.test.ts`: physical script, literal argv (spaces, `$`, `%`), explicit safe env/no token leak, independent unit, submit failure has no ENQUEUED/no stop, caller death does not kill owned worker. | Remove `--expand-environment=no`, bypass queue error, or forward a forbidden ambient variable: matching tests fail. Keep the owned-child caller-death test; no host-wide PID enumeration. Typed retained-worker inspection and completion imports retire. |
-| K3 server recovery | `server/deploy/test/recovery.test.mjs` and `recovery-property.test.mjs`: execute printed commands after actual owned CLI kill, ordinary held-lock refusal and status hints, update/rollback completion, old-journal extra fields ignored, repo/config/target/restore approval preserved. | Bypass ordinary deployment lock; omit recorded repo/config from rendered argv; weaken repo/config validation or a retained restore/phase refusal: corresponding tests fail. Keep L1b/L4/L5 fault schedules and archive/volume invariants from their landed tree. |
-| K4 child environment | `scripts/test/child-process-environment.test.mjs`: retain default real-child and operation-profile tests. Retarget bypass probes to surviving checked sources, not removed authority/SSH code. Check directory enumeration plus a newly added relative-import dependency. | Raw import without call; spawn/fork; legacy count change; missing helper import/call; unchecked source in another scanned directory or imported dependency must each fail. Disable checker rejection/enumeration once in the test harness and confirm red. |
+| K1 runner lifecycle | `runner/test/releaseUpdate.test.ts` / `releaseSwitch.test.ts`: actual scripts, stop→switch→start, current/previous, `.lock.update` and `.lock.links`, failed post-stop switch restarts unchanged source; `releaseCleanup.test.ts` keeps failure to remove build/Codex owner retaining the update lock. Existing ordinary cases can absorb assertions. | Bypass ordinary update/link lock guards separately; suppress source restart after a retained switch failure. Swallow cleanup failure or release the update lock on failure: the cleanup test must fail. Each corresponding test must fail. Never use removed proof validation as the failure trigger. |
+| K2 ordinary detach | `releaseUpdate.test.ts`: physical script, literal argv (spaces, `$`, `%`), explicit safe env/no token leak, independent unit, submit failure has no ENQUEUED/no stop, caller death does not kill owned worker. | Remove `--expand-environment=no`, bypass queue error, remove the explicit pre-queue Node check, or forward a forbidden ambient variable: matching tests fail. Keep the owned-child caller-death test; no host-wide PID enumeration. Typed retained-worker inspection and completion imports retire. |
+| K3 server recovery | `server/deploy/test/recovery.test.mjs` and `recovery-property.test.mjs`: execute printed commands after actual owned CLI kill, ordinary held-lock refusal and status hints, update/rollback completion, old-journal extra fields ignored, new journal visible to pinned pre-P3 readers, repo/config/target/restore approval preserved. | Bypass ordinary deployment lock; omit recorded repo/config from rendered argv; weaken repo/config validation or a retained restore/phase refusal, or omit the compatibility literal from the actual writer: corresponding tests fail. Keep L1b/L4/L5 fault schedules and archive/volume invariants from their landed tree. |
+| K4 child environment | `scripts/test/child-process-environment.test.mjs`: retain default real-child and operation-profile tests. Retarget bypass probes to surviving checked sources, not removed authority/SSH code. Check directory enumeration plus a newly added relative-import dependency; assert that the retired `KAOIRO_RELEASE_RETAINED_UNIT` is no longer forwarded while unrelated runner keys still are. | Raw import without call; spawn/fork; legacy count change; missing helper import/call; unchecked source in another scanned directory or imported dependency must each fail. Disable checker rejection/enumeration once in the test harness and confirm red; restoring the retired key to the profile must fail its assertion. |
 | K5 artifact/start boundary | `runner/test/releaseInstall.test.ts`, `releaseUpdate.test.ts`, `releaseBootstrap.test.ts` and an isolated real-artifact check: build a real runner tarball, assert no release-tools/release-gate, run its CLI and launch-shim validation and strict manifest verification; preserve machine identity and production activation checks. | Remove a required runtime module or mismatch the artifact's full SHA: reject before stop/link change. Remove the verifier invocation in the script: corresponding test fails. |
 
 Add contract-removal checks using the actual entry scripts/functions and
@@ -179,16 +200,32 @@ isolated fake Docker/service-manager/registration endpoints:
 3. For server recovery, use a valid pre-P3 journal containing retired fields;
    execute printed update/rollback argv and verify no retired flags. Include
    malformed *retired* metadata as a positive ignored-field case and malformed
-   repo/config/target as negative cases. New journal creation omits old fields.
+   repo/config/target as negative cases. Also run the actual P3 CLI until it
+   writes an unfinished journal, then feed its disk bytes to pinned pre-P3
+   `isValidJournalShape`, `readJournal` and `findUnfinishedTransaction` from the
+   integrated predecessor. They must accept/find it. Pin genuine reader source
+   with its commit provenance, not a reimplementation of the expected shape.
+   Remove the literal from the writer: this compatibility test must turn red;
+   restore it and rerun. New journal assertions require the null literal and
+   absence of the other two retired fields.
 4. Run an upgrade from a pre-P3 **not-enrolled** source using the actual newly
    built tarball, then an update launched through the new physical updater.
    This covers both the first rollout and the path after rollout; fake only
    external services, not the shell scripts or artifact verifier. Bootstrap
    dry-run/install/optional service paths must likewise need no release tools.
+   For the server's first rollout, the pre-P3 CLI process loads its imports
+   before `git merge --ff-only` advances the checkout to P3. On the not-enrolled
+   path there is no later read/launch of the removed modules: imports are static
+   and the lifecycle-script command is in the enrolled lock branch. Failure
+   writes an old-shape journal, covered by the old-to-new recovery check
+   above. This first-rollout explanation is source inspection, not a claimed
+   deployment measurement.
 5. Confirm the warning test becomes red when its call is removed. Confirm a
    stale-descriptor test becomes red when old admission/exporter access is
    restored. Keep these mutations disposable; restore and rerun the final
-   artifact. If any transferred guard remains unpinned, report it and do not
+   artifact. Add a missing `KAOIRO_NODE` detach case: zero reset/queue/stop
+   calls and no ENQUEUED; removing only the pre-queue check must make it red.
+   If any transferred guard remains unpinned, report it and do not
    count the migration as finished.
 
 Run implementation checks on the integrated commit via the prescribed remote
@@ -217,9 +254,10 @@ Remove `server/deploy/test-support/fake-release-exporter.mjs` after its cases
 move. Remove permissions for the deleted native/unit tests from
 `scripts/test/fixtures/test-isolation-permits.cjs`. Remove CI's
 `release-identity` job after P2's landing tests and P3's completion tests are
-gone. Keep runner and server-deploy jobs, and ensure the surviving
-child-environment/checker tests run in CI (add an explicit step to the
-existing test-isolation job if no existing job runs them). Deleting the old
+gone. Keep runner and server-deploy jobs and the child-environment checker/test
+steps owned by #711 and updated by #713. P3 does not add a competing CI step;
+its integration check verifies that those surviving steps still execute the
+reduced source scope and the transferred assertions. Deleting the old
 job must not delete a retained assertion's only execution path. In review,
 check that the final workflow includes the exact surviving test command;
 temporarily remove the step and confirm that this check fails. This can be a
@@ -232,11 +270,45 @@ CLI recipes from `build-identity-and-release-tags.md`; adjust
 `runner-install.md`, `reference/deployment/transactions-and-identity.md` and
 `docs/README.md`. Also fix any live removed-command guidance in
 `high-risk-change-release.md`. Explain the ignored-descriptor warning,
-unchanged health/identity checks and ordinary recovery commands. Regenerate
-the server recovery table from its current source; remove enrolled lock
+unchanged health/identity checks and ordinary recovery commands. Explicitly
+list the removed stdout JSON fields: status `lockAuthorityError`, release-kind
+entries in `locks[]`, and update dry-run `releaseReconciliation`. Machine
+consumers must stop expecting those fields; ordinary lock/status fields remain.
+Regenerate the server recovery table from its current source; remove enrolled lock
 instructions without weakening ordinary stale-lock ownership checks. Keep
 ADRs and historical plans as history, linking the current runbook where
 necessary. No production inventory or private paths belong in these docs.
 
-Design evidence is source inspection at the baseline and the case ledger;
-the implementation checks above are requirements, not claimed test results.
+Design evidence is source inspection at the baseline, the case ledger and the
+old-reader observation below. The implementation checks above remain
+requirements, not claimed tests of a P3 implementation.
+
+## 6. Old-reader compatibility observation
+
+On 2026-10-23, an isolated disposable run imported the unchanged reader
+modules and their dependencies from `2d3040de`. For each variant it wrote
+`journal.json` under an owned temporary `20261023T000000Z` directory, then
+called `isValidJournalShape`, `readJournal` and
+`findUnfinishedTransaction(parent)`.
+
+The common specimen (the JSON below is input, not a P3 implementation output):
+
+```json
+{"schema_version":1,"transaction_id":"20261023T000000Z","phase":"preflight","invocation":{"repo":"/srv/kaoiro","config":null,"release_authority":null},"history":[{"phase":"preflight","at":"2026-10-23T00:00:00Z","observation":{"container":"kaoiro-fixture","free_bytes":100,"volume_bytes":1,"threshold_bytes":2}}]}
+```
+
+| Variant | Old shape check | Old unfinished scan |
+| --- | --- | --- |
+| Add old `release_context: null` and `release_reconciliation: {status: "generic"}` | true | finds the transaction |
+| Common specimen: fixed null literal, neither other field | true | finds the transaction |
+| Remove only `invocation.release_authority` | false | returns null |
+
+The same acceptance assertions turned red for the missing-field variant.
+Restoring the literal and writing through the real `writeJournal` completed
+a successful read/scan round trip. The run exited 0; stdout was 362 bytes,
+SHA-256 `cff7021c29c9544bc48022043d1c624576f7d014a86939e4b3b0d0aa4ba0890f`.
+The owned journal directory and remote run were removed. This establishes
+the old reader's requirement, not coverage of the future P3 writer; section
+4 requires repeating the check with that writer's actual output and mutation.
+Keeping one inert null field is therefore preferred to a new old-tool
+return restriction.
