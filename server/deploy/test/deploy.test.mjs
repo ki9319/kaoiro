@@ -6434,9 +6434,12 @@ for (const corruption of ["path", "hash", "missing"]) {
       const other = join(root, "substituted.yaml"); fs.copyFileSync(copy, other);
       old.compose_files[1].path = other; writeJournal(tx.dir, journal);
     }
-    assert.throws(() => withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha,
-      transaction: tx.id, maintenanceApproved: true }, configWithCleanStopMeasured())),
+    const calls = [];
+    assert.throws(() => observeDockerCalls((args, output) => { calls.push(args); return output; }, () =>
+      withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha,
+      transaction: tx.id, maintenanceApproved: true }, configWithCleanStopMeasured()))),
       corruption === "path" ? /outside its bound/ : corruption === "hash" ? /hash changed/ : /could not read saved/);
+    assert.equal(calls.length, 0);
   });
 }
 

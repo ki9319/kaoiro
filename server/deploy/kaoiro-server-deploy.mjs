@@ -2236,6 +2236,7 @@ export function runUpdate(flags, config) {
       // Re-verify: prepare ran against a running container, and resume
       // may happen an arbitrary time later — nothing here should trust
       // that it still is.
+      boundComposeArgs(recoveryPlan, serverDir, dir, true);
       container = requireRunningContainer(bin, serverDir, SERVICE, recoveryComposeArgs(join(serverDir, "docker-compose.yaml"), serverDir, recoveryPlan.compose_files?.[1]?.path));
       if (journal.phase === PHASE.OLD_IMAGE_SAVED) {
         // issue #695: the build is retried only from the exact recorded
