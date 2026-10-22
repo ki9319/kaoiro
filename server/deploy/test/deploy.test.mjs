@@ -6547,6 +6547,18 @@ for (const corruption of ["path", "hash", "missing"]) {
   });
 }
 
+test("Compose inputs: failed-build resume re-failure restores the pinned old image", () => {
+  writeComposeOverride();
+  const attempt = flags => observeDockerCalls((args, output) => output, () => withScenario("running-clean-stop", () =>
+    runUpdate(flags, configWithCleanStopMeasured())), args => {
+    if (normalizedComposeCall(args.join(" ")) === "compose build") throw new Error("injected repeated build refusal");
+  });
+  assert.throws(() => attempt({ repo: workDir, target: headSha }), /injected repeated build refusal.*confirmed by read-back/);
+  assert.throws(() => attempt({ repo: workDir, target: headSha,
+    transaction: currentComposeJournal().transaction_id }), /injected repeated build refusal.*confirmed by read-back/);
+  assert.equal(currentComposeJournal().phase, "old_image_saved");
+});
+
 test("Compose inputs: failed-build resume completes using the recorded target inputs", () => {
   writeComposeOverride();
   assert.throws(() => observeDockerCalls((args, output) => output, () => withScenario("running-clean-stop", () =>
