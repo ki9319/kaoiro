@@ -1,7 +1,7 @@
 ---
 title: Security enforcement boundaries
 status: accepted
-last_updated: 2026-10-17
+last_updated: 2026-10-23
 ---
 
 # Security enforcement boundaries
@@ -254,3 +254,18 @@ costs. Design decisions live in ADR-0057; boundary mechanics live in
   interactive `agy` sessions keep their prompts. Any future change that
   needs a host-wide setting is a threat-model change, not a deployment
   note.
+
+## Child process environments
+
+[Issue #571](https://github.com/sakuraiyuta/kaoiro/issues/571) child commands use one closed environment builder. Privileged profiles
+search the current Node directory and `/usr/local/bin:/usr/bin:/bin`. The build
+profile's sole caller, `with-build-identity.mjs`, preserves a nonempty supplied
+`PATH` exactly so pnpm, version-manager shims and nested compiler commands use
+the selected toolchain; an absent or empty `PATH` uses the fixed search path.
+Other environment keys remain allow-listed. The retained runner worker still
+uses its explicit fixed `CHILD_PATH`. Git/SSH children exclude loader settings,
+arbitrary Git environment settings, and HTTP tokens. Only gh receives its HTTP credential;
+Actions Git receives an explicitly constructed authorization header. User-manager
+connection keys, runner settings and build identity fields are carried only by
+their corresponding profiles. Privileged release commands require tools in
+their fixed search path or at the explicitly configured absolute path.

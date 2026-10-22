@@ -2,7 +2,7 @@
 title: Build identity and release tags
 description: Immutable landing identities, common production checkpoints and guarded release automation.
 status: accepted
-last_updated: 2026-10-22
+last_updated: 2026-10-23
 related: [deployment, protocol]
 ---
 
@@ -624,18 +624,8 @@ Any local `url.*.insteadOf` or `url.*.pushInsteadOf` setting refuses repair,
 including benign HTTPS-to-SSH rewrites. Use a reviewed clean checkout without
 these settings; do not bypass the check or redirect the repository path.
 
-Issue 571 child commands use one closed environment builder. Privileged profiles
-search the current Node directory and `/usr/local/bin:/usr/bin:/bin`. The build
-profile's sole caller, `with-build-identity.mjs`, preserves a nonempty supplied
-`PATH` exactly so pnpm, version-manager shims and nested compiler commands use
-the selected toolchain; an absent or empty `PATH` uses the fixed search path.
-Other environment keys remain allow-listed. The retained runner worker still
-uses its explicit fixed `CHILD_PATH`. Git/SSH children exclude loader settings,
-arbitrary Git environment settings, and HTTP tokens. Only gh receives its HTTP credential;
-Actions Git receives an explicitly constructed authorization header. User-manager
-connection keys, runner settings and build identity fields are carried only by
-their corresponding profiles. Privileged release commands require tools in
-their fixed search path or at the explicitly configured absolute path.
+See the [child environment contract](../reference/security/enforcement-boundaries.md#child-process-environments) for the closed child profiles and tool lookup.
+
 There is no HTTPS fallback and no added OAuth workflow scope. `gh` reads the
 original run/artifact, accepted control/boundary and current User login only.
 That login must have repository push authority and match the existing

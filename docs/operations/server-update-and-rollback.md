@@ -111,7 +111,7 @@ Satisfy all of the following before starting.
 The CLI's Git commands use the closed `git` profile; health curl and archive
 tar commands use `authority`. Their `CHILD_PATH` starts with the current Node
 executable's directory, followed by `/usr/local/bin:/usr/bin:/bin`; locale is C.
-See the [child environment contract](build-identity-and-release-tags.md) for
+See the [child environment contract](../reference/security/enforcement-boundaries.md#child-process-environments) for
 profile authority. Git keeps repository-local configuration and normal
 HOME/session-based SSH access, while global/system Git configuration,
 ambient Git overrides and HTTP tokens are excluded.
