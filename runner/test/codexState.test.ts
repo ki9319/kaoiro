@@ -6,9 +6,10 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { revisionOf, runScript, writeReleaseTree } from "./releaseFixture.js";
-import { verifySnapshotFromF84297a5 } from "./codexSnapshotLegacyVerifier.js";
 const deploy = fileURLToPath(new URL("../deploy/", import.meta.url));
 const snapshotModule = join(deploy, "codex-snapshot.mjs");
+const legacySnapshotFixture = fileURLToPath(new URL("./fixtures/codex-snapshot-f84297a5.mjs", import.meta.url));
+const legacySnapshot = await import(legacySnapshotFixture);
 const serviceModule = join(deploy, "codex-service.mjs");
 const snap = await import(snapshotModule);
 const service = await import(serviceModule);
@@ -49,7 +50,13 @@ describe("Codex state snapshots", () => {
     expect(snap.inventory(home, true)).toEqual(before);
     const result = JSON.parse(probe.stdout);
     expect(result.manifest).not.toHaveProperty("migrationLevels");
-    expect(await verifySnapshotFromF84297a5(join(dir, "backup"), result.sha256, snapshotModule)).toEqual(result.manifest);
+    const legacyBytes = readFileSync(legacySnapshotFixture);
+    const legacyBlobId = createHash("sha1").update(`blob ${legacyBytes.length}\0`).update(legacyBytes).digest("hex");
+    expect(legacyBlobId).toBe("f5025623c73672a11025c391ef01b501141f8cc1");
+    expect(legacySnapshot.verifySnapshot(join(dir, "backup"), result.sha256)).toEqual(result.manifest);
+    const legacyRestore = join(dir, "legacy-restore");
+    expect(legacySnapshot.prepareRestore(join(dir, "backup"), result.sha256, home, legacyRestore)).toEqual(result.manifest);
+    expect(legacySnapshot.inventory(legacyRestore, true)).toEqual(result.manifest.entries);
     expect(snap.verifySnapshot(join(dir, "backup"), result.sha256).entries).toEqual(snap.stateEntries(before));
   });
   it("reads a previous schema-1 migration-level manifest and prepares it for restore", async () => {

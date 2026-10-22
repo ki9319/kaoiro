@@ -489,7 +489,7 @@ accumulated.
 | `codexLegacy.test.ts` | 10 | 216.326 s | deleted; one fast case for the old-record cutover refusal goes to `codexState.test.ts` | N2 |
 | `codexReceipt.test.ts` | 39 | 205.019 s | deleted | N2 |
 | `codexLineage.test.ts` | 7 | 200.270 s | deleted | N2 |
-| `codexForeignUid.test.ts` | 49 | 192.721 s | deleted; the post-stop population case ("still active after stop → no switch, source resumed") moves to the workflow file | N1 |
+| `codexForeignUid.test.ts` | 49 | 192.721 s | deleted; keep cases move to `codexStateKeepSafety.test.ts` and the post-stop population case ("still active after stop → no switch, source resumed") moves to the workflow file | N1 |
 
 Supporting files `codexLineageHarness.ts` and `codexCgroupFixture.ts` are
 deleted or reduced with them. `codexState.test.ts` (35 tests, 5.7 s) keeps
@@ -660,8 +660,10 @@ Only the row that will actually create release tags must pass before C3.
   deploy happy paths still pass their existing tests. Negative control: a
   leftover descriptor produces the warning and is otherwise ignored.
 - N1: the foreign-UID and diagnostics code is gone and the remaining
-  workflow cases pass unchanged; records written before and after N1 are
-  byte-compatible, so a revert needs no data step.
+  workflow cases pass; records written before and after N1 are readable in
+  both directions, so a revert needs no data step. The old reader is exercised
+  against a new snapshot, and the new reader against a schema-1 manifest with
+  `migrationLevels`.
 - N2, start intent: kill the updater just before saving `start-intent` →
   never-started return; kill after saving it and before the start request,
   and again after the start request and before `completed` → a code-only

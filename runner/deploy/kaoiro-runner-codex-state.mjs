@@ -269,7 +269,6 @@ async function prepare(root, target, home, destination, service, tool, owner) {
   const entries = inventory(home);
   const estimate = { backup: capacity(dirname(destination), entries), restore: capacity(dirname(home), entries) };
   requireCgroupV2();
-  if (entries.some((e) => e.path.endsWith(".sqlite"))) await import("node:sqlite");
   const p = init(root);
   const uuid = randomUUID();
   const tx = { schema: 1, bindingReceiptVersion: 1, uuid, root, mode: "forward", order: Math.max(0, ...records(root, "transactions").map((r) => r.order || 0)) + 1, owner: liveOwner(owner), source, target: candidate, tool, binding, service, snapshot: destination, staging: join(dirname(destination), `.staging.codex-${uuid}`), estimate, created: new Date().toISOString(), phase: "prepared" };

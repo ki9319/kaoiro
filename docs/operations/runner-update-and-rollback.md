@@ -323,17 +323,12 @@ the updater never takes its target from inherited `CODEX_HOME`:
   --codex-backup-dir "$new_snapshot_dir" --detach
 ```
 
-Before publishing a state transaction or its owner record, the helper reads the
-unit's `ControlGroup` and walks only that cgroup subtree. It reads `cgroup.procs`
-and the listed PIDs' UID, command name, start time and membership. All four UID
-fields must match the updater's UID. Foreign or unverified members refuse with
-exit 78 before stop, naming the PID, UID and command without argv or environment.
-Unsupported topology, paths and identity changes also refuse. Keep apt,
-add-apt-repository and other root operations outside the runner's cgroup. Inspect
-the named unit and listed PIDs read-only; do not use pattern-based kill pipelines
-or automatic sudo cleanup. The observation does not prevent later descendants,
-so keep the maintenance interval free of competing operations. The post-stop
-cgroup-empty check remains required before snapshot or state replacement.
+The helper requires unified cgroup v2 before stop. After stop it requires the unit
+to be inactive and `MainPID` to be 0, and checks for `populated 0` when the unit's
+`ControlGroup` has a `cgroup.events` file. A failed check refuses the update and
+attempts to resume the unchanged source when its recorded phase permits. Keep apt,
+add-apt-repository and other root operations outside the runner's cgroup. Do not
+use pattern-based kill pipelines or automatic sudo cleanup.
 
 Forward backup requires the source runner to be active for live home binding.
 A snapshot failure means a nonzero worker exit and no switch. If this worker
