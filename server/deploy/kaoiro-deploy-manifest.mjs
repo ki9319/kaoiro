@@ -180,11 +180,16 @@ export function isComposeIdentity(identity) {
       typeof mount === "object" && mount !== null && typeof mount.type === "string" && typeof mount.source === "string");
 }
 
+export function isComposePlanBase(value) {
+  return typeof value === "object" && value !== null &&
+    typeof value.compose_sha256 === "string" && SHA256_RE.test(value.compose_sha256) &&
+    typeof value.env_sha256 === "string" && SHA256_RE.test(value.env_sha256) && isComposeIdentity(value.identity);
+}
+
 export function isComposePlan(value) {
-  if (typeof value !== "object" || value === null || !SHA256_RE.test(value.compose_sha256) ||
-      !SHA256_RE.test(value.env_sha256) || !isComposeIdentity(value.identity)) return false;
+  if (!isComposePlanBase(value)) return false;
   const files = value.compose_files;
-  if (!Array.isArray(files) || files.length < 1 || files.length > 2) return false;
+  if (!Array.isArray(files) || files.length > 2) return false;
   if (files[0]?.source !== "docker-compose.yaml") return false;
   if (files.length === 2 && !["docker-compose.override.yml", "docker-compose.override.yaml"].includes(files[1]?.source)) return false;
   return files.every(file => typeof file === "object" && file !== null &&

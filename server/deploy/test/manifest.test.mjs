@@ -7,6 +7,7 @@ import { afterEach, beforeEach, test } from "node:test";
 
 import {
   isValidManifestShape,
+  isComposePlan,
   ManifestError,
   readManifest,
   writeManifest,
@@ -320,3 +321,34 @@ for (const field of ["recovery_plan", "target_plan"]) {
     }
   });
 }
+
+
+test("Compose inputs: strict plan field domains reject malformed values", () => {
+  for (const value of [null, undefined, false, 1, "plan", []]) assert.equal(isComposePlan(value), false);
+  const invalid = [
+    p => { p.compose_sha256 = [p.compose_sha256]; }, p => { p.env_sha256 = [p.env_sha256]; },
+    p => { p.compose_sha256 = "bad"; }, p => { p.env_sha256 = "bad"; },
+    p => { p.identity = null; }, p => { p.identity = false; },
+    p => { p.identity.project_name = 1; }, p => { p.identity.project_name = ""; },
+    p => { p.identity.services = null; }, p => { p.identity.services = [1]; }, p => { p.identity.services = [""]; },
+    p => { p.identity.service_mounts = null; }, p => { p.identity.service_mounts = [null]; },
+    p => { p.identity.service_mounts = [{ type: 1, source: "volume" }]; },
+    p => { p.identity.service_mounts = [{ type: "volume", source: 1 }]; },
+    p => { p.compose_files = null; }, p => { p.compose_files = "files"; }, p => { p.compose_files = []; },
+    p => { p.compose_files[0] = null; }, p => { p.compose_files[0].source = "other.yaml"; },
+    p => { p.compose_files[1].source = "other.yml"; }, p => { p.compose_files[0].path = 1; },
+    p => { p.compose_files[0].path = ""; }, p => { p.compose_files[0].sha256 = ["c".repeat(64)]; },
+    p => { p.compose_files[0].sha256 = "bad"; },
+    p => { p.compose_files.push({ source: "extra", path: "/fixture/extra", sha256: "e".repeat(64) }); },
+    p => { p.compose_files[1].path = p.compose_files[0].path; },
+  ];
+  for (const [index, change] of invalid.entries()) {
+    const plan = composePlanFixture(); change(plan);
+    assert.equal(isComposePlan(plan), false, `invalid domain case ${index}`);
+  }
+  for (const suffix of ["yaml", "yml"]) {
+    const plan = composePlanFixture(); plan.compose_files[1].source = `docker-compose.override.${suffix}`;
+    plan.identity.service_mounts.push({ type: "volume", source: "data" });
+    assert.equal(isComposePlan(plan), true);
+  }
+});

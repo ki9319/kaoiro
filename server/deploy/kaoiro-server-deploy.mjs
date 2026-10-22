@@ -33,7 +33,7 @@ import {
   runDocker,
 } from "./kaoiro-deploy-docker.mjs";
 import { advancePhase, readJournal, writeJournal } from "./kaoiro-deploy-journal.mjs";
-import { isComposeIdentity, isComposePlan, SHA256_RE, readManifest, writeManifest } from "./kaoiro-deploy-manifest.mjs";
+import { isComposeIdentity, isComposePlan, isComposePlanBase, readManifest, writeManifest } from "./kaoiro-deploy-manifest.mjs";
 import { PHASE, TRANSITIONS, validateJournalAgainstStateMachine } from "./kaoiro-deploy-phase.mjs";
 import { acquireLock, LockError, releaseLock } from "./kaoiro-deploy-lock.mjs";
 import { entryActs, formatRecovery, OPERATION, recoveryFacts, renderRecovery, selectEntry } from "./kaoiro-deploy-recovery.mjs";
@@ -307,7 +307,7 @@ function composeFile(source, path) {
 
 function boundComposeArgs(plan, serverDir, dir, recovery = false) {
   const base = recovery ? recoveryComposePath(dir) : join(serverDir, "docker-compose.yaml");
-  if (!SHA256_RE.test(plan?.compose_sha256) || !SHA256_RE.test(plan?.env_sha256) || !isComposeIdentity(plan?.identity)) {
+  if (!isComposePlanBase(plan)) {
     fail("recorded compose plan lacks a usable project identity or hashes; refusing before Docker mutation");
   }
   if (!Object.hasOwn(plan, "compose_files")) return recoveryComposeArgs(base, serverDir);
@@ -328,13 +328,22 @@ function targetPlanAt(bin, serverDir, dir, plan) {
   return composePlan(bin, serverDir, boundComposeArgs(plan, serverDir, dir), plan?.compose_files);
 }
 
-export function checkForwardCompose(bin, serverDir, dir, recoveryPlan, targetPlan, target) {
+export function checkForwardCompose(bin, serverDir, dir, recoveryPlan, targetPlan) {
   checkComposeSelectors(serverDir);
   boundComposeArgs(recoveryPlan, serverDir, dir, true);
   const captured = recoveryPlan?.compose_files?.[1];
   const selected = selectedComposeOverride(serverDir);
   const copy = captured?.path ?? recoveryComposePath(dir);
-  const refuseDrift = cause => fail(`${cause}; captured input copy: ${copy}. Restore the original inputs and resume update --repo ${dirname(serverDir)} --target ${target} --transaction ${basename(dir)}, or roll back with rollback --repo ${dirname(serverDir)} --transaction ${basename(dir)} --confirm-restore`);
+  const refuseDrift = cause => {
+    let exit = "Restore the original inputs and retry prepare";
+    if (existsSync(join(dir, "journal.json"))) {
+      const journal = readJournal(dir);
+      exit = entryActs(selectEntry(journal.phase, "update", recoveryFacts(journal)))
+        ? "Restore the original inputs and resume using the printed update command, or roll back using the printed rollback command"
+        : "Roll back using the printed rollback command; update cannot resume this phase";
+    }
+    fail(`${cause}; captured input copy: ${copy}. ${exit}`);
+  };
   if (selected !== captured?.source) refuseDrift("selected Compose override changed since capture (legacy records cannot adopt an override)");
   if (captured && sha256File(join(serverDir, selected)) !== captured.sha256) refuseDrift("selected Compose override bytes changed since capture");
   const files = recoveryPlan?.compose_files === undefined ? undefined :
@@ -1577,10 +1586,10 @@ function buildUnderLock({ repo, target }, config, composeArgs = []) {
 function prepareTarget({ bin, repo, serverDir, target, config, dir, journal, oldImageId, recoveryPlan, resume = false }) {
   let buildResult;
   let targetPlan;
-  if (resume) checkForwardCompose(bin, serverDir, dir, recoveryPlan, undefined, target);
+  if (resume) checkForwardCompose(bin, serverDir, dir, recoveryPlan, undefined);
   try {
     buildResult = buildUnderLock({ repo, target }, config, recoveryComposeArgs(join(serverDir, "docker-compose.yaml"), serverDir, recoveryPlan.compose_files?.[1]?.path));
-    targetPlan = checkForwardCompose(bin, serverDir, dir, recoveryPlan, undefined, target);
+    targetPlan = checkForwardCompose(bin, serverDir, dir, recoveryPlan, undefined);
     requirePlanIdentityMatch(recoveryPlan, targetPlan);
   } catch (err) {
     try {
@@ -2326,7 +2335,7 @@ export function runUpdate(flags, config) {
         recoveryFiles.push(composeFile(selected, copy));
       }
       recoveryPlan = composePlan(bin, serverDir, recoveryComposeArgs(recoveryComposeFile, serverDir, selected && overrideCopyPath(dir, selected)), recoveryFiles);
-      const initial = checkForwardCompose(bin, serverDir, dir, recoveryPlan, undefined, target);
+      const initial = checkForwardCompose(bin, serverDir, dir, recoveryPlan, undefined);
       if (composeArtifact.sha256 === sha256Bytes(recoverySource)) requirePlanMatch(recoveryPlan, initial, "relocated recovery");
       journal = {
         schema_version: 1,
@@ -2523,7 +2532,7 @@ export function runUpdate(flags, config) {
       fail(err.message);
     }
 
-    checkForwardCompose(bin, serverDir, dir, recoveryPlan, targetPlan, target);
+    checkForwardCompose(bin, serverDir, dir, recoveryPlan, targetPlan);
     if (flags.maintenanceApproved !== true) {
       fail(
         `update requires --maintenance-approved before the stop window opens (no-downtime steps are complete); resume once the operator has approved the maintenance window`,
@@ -2558,7 +2567,7 @@ export function runUpdate(flags, config) {
     // MAINTENANCE_GATE_PASSED).
     const fleetCompatibility = compatibleFleet({ bin, targetImageId: buildResult.imageId,
       targetRevision: target, containerId: oldContainerId, fleetStopped: flags.fleetStopped === true });
-    checkForwardCompose(bin, serverDir, dir, recoveryPlan, targetPlan, target);
+    checkForwardCompose(bin, serverDir, dir, recoveryPlan, targetPlan);
     journal = advancePhase(dir, journal, PHASE.STOPPING, { fleet_compatibility: fleetCompatibility }, validateJournalAgainstStateMachine);
 
     // --- commit: from here on the service is stopped. Everything above
@@ -2753,7 +2762,7 @@ export function runUpdate(flags, config) {
     // would otherwise leave the journal at ARCHIVED, indistinguishable
     // from "up was never attempted" even though runbook 4.4 (3)'s
     // recovery branches on exactly that distinction.
-    checkForwardCompose(bin, serverDir, dir, recoveryPlan, targetPlan, target);
+    checkForwardCompose(bin, serverDir, dir, recoveryPlan, targetPlan);
     journal = advancePhase(dir, journal, PHASE.STARTING, {}, validateJournalAgainstStateMachine);
     runDocker(bin, ["compose", ...boundComposeArgs(targetPlan, serverDir, dir), "up", "-d", "--no-build"], { cwd: serverDir, stdio: "inherit" });
     // クロエ design review F2: `compose up -d` on a changed image

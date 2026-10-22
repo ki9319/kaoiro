@@ -6213,8 +6213,8 @@ for (const change of ["add", "remove", "bytes", "priority"]) {
       assert.throws(() => withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha,
         transaction: tx.id, maintenanceApproved: true }, configWithCleanStopMeasured())), err => {
         assert.match(err.message, /override.*changed since capture/);
-        assert.ok(err.message.includes(tx.dir));
-        assert.match(err.message, /Restore.*resume update.*or roll back/);
+        assert.ok(err.message.includes(join(tx.dir, change === "add" ? "recovery-compose.yaml" : "compose-override.yaml")));
+        assert.match(err.message, /Restore.*resume.*printed update command.*or roll back.*printed rollback command/);
         return true;
       });
     } finally { delete process.env.KAOIRO_TEST_CALL_LOG; }
@@ -6353,7 +6353,13 @@ for (const point of ["Q1", "Q2", "Q3", "Q4"]) {
       if (!changed && hooks[point](args)) { changed = true; writeComposeOverride("yaml", "changed"); }
       return output;
     }, () => withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha,
-      maintenanceApproved: true }, configWithCleanStopMeasured()))), /override bytes changed since capture/);
+      maintenanceApproved: true }, configWithCleanStopMeasured()))), error => {
+      assert.match(error.message, /override bytes changed since capture/);
+      if (point === "Q4") {
+        assert.match(error.message, /Roll back using the printed rollback command; update cannot resume this phase/);
+      }
+      return true;
+    });
     assert.equal(changed, true);
     assert.equal(currentComposeJournal().phase, COMPOSE_CHECKPOINTS.find(c => c.name === point).expected);
     assert.ok(!observed.some(line => /^compose up/.test(line)));
@@ -6420,7 +6426,7 @@ for (const corruption of ["path", "hash", "missing"]) {
     const journal = readJournal(tx.dir);
     const old = journal.history.find(e => e.phase === "old_image_saved").observation.recovery_plan;
     const copy = old.compose_files[1].path;
-    if (corruption === "hash") writeFileSync(copy, "changed");
+    if (corruption === "hash") writeFileSync(copy, readFileSync(copy, "utf8") + "\n");
     if (corruption === "missing") rmSync(copy);
     if (corruption === "path") {
       const other = join(root, "substituted.yaml"); fs.copyFileSync(copy, other);
@@ -6473,3 +6479,45 @@ test("Compose inputs: verify copied bytes before rendering or journaling their r
   assert.equal(currentComposeJournal(), undefined);
   assert.ok(!calls.some(args => args[0] === "compose" && args.includes("config")));
 });
+
+
+test("Compose inputs: unreadable dotenv refuses before prepare", () => {
+  mkdirSync(join(workDir, "server", ".env"));
+  assert.throws(() => withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha },
+    configWithCleanStopMeasured())), /could not read Compose .env before prepare/);
+  assert.equal(existsSync(join(root, "kaoiro-deploy")), false);
+});
+
+test("Compose inputs: even an equivalent empty override is not adopted by legacy metadata", () => {
+  const tx = prepareComposeTransaction(); removeComposeMetadata(tx);
+  writeFileSync(join(workDir, "server", "docker-compose.override.yaml"), JSON.stringify({ services: { kaoiro: { volumes: [] } } }));
+  assert.throws(() => withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha,
+    transaction: tx.id, maintenanceApproved: true }, configWithCleanStopMeasured())), /legacy records cannot adopt an override/);
+});
+
+
+for (const checkpoint of ["Q3", "Q4"]) {
+  test(`Compose inputs: ${checkpoint} rechecks dotenv immediately before its mutation`, () => {
+    let changed = false;
+    assert.throws(() => observeDockerCalls((args, output) => {
+      const phase = currentComposeJournal()?.phase;
+      const selected = checkpoint === "Q3" ? args.includes("rpc") && phase === "maintenance_gate_passed"
+        : args[0] === "inspect" && args[1] === "kaoiro-server:latest" && phase === "archived";
+      if (!changed && selected) { changed = true; writeFileSync(join(workDir, "server", ".env"), "# changed after prepare\n"); }
+      return output;
+    }, () => withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha,
+      maintenanceApproved: true }, configWithCleanStopMeasured()))), /target effective compose plan env_sha256 has changed/);
+    assert.equal(changed, true);
+    assert.equal(currentComposeJournal().phase, checkpoint === "Q3" ? "maintenance_gate_passed" : "archived");
+  });
+}
+
+for (const flag of ["-f", "--file"]) {
+  test(`Compose inputs: actual CLI rejects ${flag} without prepare`, () => {
+    const cli = fileURLToPath(new URL("../kaoiro-server-deploy.mjs", import.meta.url));
+    const result = spawnSync(process.execPath, [cli, "update", "--repo", workDir, "--target", headSha, flag, "other.yaml"], { encoding: "utf8" });
+    assert.equal(result.status, 64);
+    assert.match(result.stderr, /unknown flag/);
+    assert.equal(existsSync(join(root, "kaoiro-deploy")), false);
+  });
+}
