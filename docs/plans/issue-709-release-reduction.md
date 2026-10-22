@@ -258,17 +258,35 @@ C is a sequence of operator operations, not a code unit. Each step needs its
 own approval. Until C1 and C2 are complete, using schema-2 tags and stopping
 allocation are **not approved** by this design.
 
-1. **C1, enrollment (U2).** The operator runs the read-only checks of
-   section 9 on the server and on every runner installation. Result "not
-   enrolled" everywhere: continue. Any "enrolled": with the tools of the
-   currently deployed release (its `deploy/release-tools`, or a clean checkout
-   of the release commit; not a post-P2 checkout), close every unfinished
-   attempt (`abandon`, `retire-deployed` or `quarantine`), then move the
-   descriptor and the canonical history root, unmodified, to private storage
-   on the same host. Completed attempts that were never published cannot be
-   archived by the old tools (archive needs a published pair); they move with
-   the history unchanged and are not given a fabricated publication. Repeat
-   the read-only check until every root reports "not enrolled".
+1. **C1, enrollment (U2).** The operator runs the read-only check of
+   section 9 on the server and on every runner installation. C1 passes only
+   when every installation reports `not-enrolled` (exit 0). Any `unknown`
+   stops C1 until the path or permission is fixed and the check rerun. Any
+   `enrolled` starts the resolution below, which writes production state and
+   therefore needs its own operator approval:
+   1. List the attempts without touching production. In a new private (0700)
+      scratch directory on the same host, copy the canonical history root and
+      its sibling `<root>-inventory.json` with `cp -a`, and make a fresh
+      `git clone` of the public repository. Run the old audit from the
+      deployed release's tools (its `deploy/release-tools`, or a clean
+      checkout of the release commit; not a post-P2 checkout) with
+      `--root <copy> --repo <clone>`. The audit can run `git fetch --tags` in
+      the clone (`production-release-card.mjs:106-118`); that write stays in
+      the scratch directory. Production history, the production checkout and
+      the remote are not changed. The history holds private paths and host
+      aliases, not credentials; keep the output private and delete the scratch
+      directory afterwards. If the audit refuses the copy (for example a path
+      or ownership check bound to the original location), the listing is
+      `unknown` and C1 stops for an operator decision; the audit is never run
+      against the original instead.
+   2. Close each unfinished attempt with the same tools (`abandon`,
+      `retire-deployed` or `quarantine`). Completed attempts that were never
+      published cannot be archived by the old tools (archive needs a
+      published pair); they stay in the history unchanged and are not given a
+      fabricated publication.
+   3. Move the descriptor and the canonical history root, unmodified, to
+      private storage on the same host, then rerun the read-only check until
+      that installation reports `not-enrolled`.
 2. **C2, tag creation (U6).** The disposable-repository measurement of
    section 9 has passed for the principal, credential and transport that will
    create release tags, and the operator has approved that combination.
@@ -281,9 +299,15 @@ allocation are **not approved** by this design.
    commit or day number. The release under it uses the normal path of
    section 3.3.
 
-Rollback before C4: set `KAOIRO_LANDING_ENABLED=true` again; nothing else
-changed. After C4, the schema-2 tag stays (immutable) and the P1 reader keeps
-reading it.
+Rollback before C4 reverses C3 only: set `KAOIRO_LANDING_ENABLED=true`
+again and allocation resumes. Installations de-enrolled in C1 stay
+de-enrolled; the reached state is "old allocator running, no enrolled root",
+which is accepted because the schema-1 reader stays in P1 and the
+publication that enrolled records fed was never enabled
+(`KAOIRO_RELEASE_ENABLED=false`, measured). Re-enrolling would be the
+enrollment procedure of the pre-P3 runbook, run separately by the operator;
+this design does not provide or require it. After C4, the schema-2 tag stays
+(immutable) and the P1 reader keeps reading it.
 
 ## 4. Native Codex state: the minimal protected boundary
 
@@ -519,42 +543,58 @@ core); N3 medium. C is operator time only.
 | Id | Premise | Blocks | Probe (read-only or disposable) |
 |---|---|---|---|
 | U1 | An older Codex native cannot reliably open or resume a home migrated by a newer native | nothing (B2 is kept either way); must be measured first if it is ever used to drop snapshots (D2) | in a disposable directory, install two Codex pins from npm. Controls first: new→new and old→old, each starting `codex app-server` on an empty `CODEX_HOME`, creating a thread, stopping, restarting the same pin and resuming it; record the thread id, the rollout file under `sessions/` and the `_sqlx_migrations` rows. Only a thread that both controls show as persisted and resumable is then used for new→old: the newer pin creates and persists it, the older pin opens the same home and calls `thread/list` and `thread/resume`. Record exit codes and errors; no model turn is needed |
-| U2 | No server or runner installation is enrolled, and no canonical history holds unfinished attempts | C1 (before the first schema-2 tag and before allocation stops) | the operator runs the read-only commands below on the server and on every runner installation |
+| U2 | No server or runner installation is enrolled, and no canonical history holds unfinished attempts | C1 (before the first schema-2 tag and before allocation stops) | the operator runs the read-only check below on the server and on every runner installation; `unknown` stops C1 |
 | U3 | Every other runner installation has only terminal Codex state records | N2 deployment on that host | on each runner host, read `phase` of `codex-state/transactions/*.json` and `retired` of `codex-state/backups/*.json` (field projection only; the records hold paths and environment, so never print them whole) |
 | U4 | Disabling `KAOIRO_LANDING_ENABLED` makes push and schedule runs skip allocation, and no allocation is still running | C3 | read: the `publish` job condition requires the variable (`develop-landing.yml:42-50`). Before C4: `gh run list --repo sakuraiyuta/kaoiro --workflow develop-landing.yml --status queued` and `--status in_progress` both empty; the next push run and the next scheduled run (minute 17 of the hour) show `publish` skipped; `git ls-remote --tags origin 'refs/tags/v*' 'refs/tags/identity/landing/*'` lists the same refs as before the change |
 | U6 | Each intended principal can create an annotated `v*` tag under the same ruleset, through its real credential, transport and harness, and cannot move or delete it | C2 (C3 and C4 are unapproved until it passes for the principal that will create release tags) | disposable-repository plan below; the repository needs operator approval and is created by the operator |
 | U5 | The CI wall-time effect of N1-N3 | none (reporting) | compare runner job wall time and accumulated test time on the N3 candidate with run 39747478279 |
 
-U2, read-only commands for the operator. They print only `enrolled` /
-`not-enrolled` and, when enrolled, the history root; they never print a
-descriptor whole (it holds SSH settings and private paths). Keep outputs
-private.
+U2, read-only check for the operator. It only resolves a directory and
+tests whether two names exist; it opens no file, prints no file content and
+writes nothing. Run it once per installation: the server directory the
+deploy CLI manages, and every runner install root.
 
 ```sh
-# Server: <server-dir> is the directory the deploy CLI manages.
-d="$(realpath <server-dir>)/.kaoiro-release-authority.json"
-if [ -e "$d" ] || [ -L "$d" ]; then echo enrolled; else echo not-enrolled; fi
-
-# Each runner installation: <install-root> is its install root.
-r="$(realpath <install-root>)"
-if [ -e "$r/release-authority.json" ] || [ -L "$r/release-authority.json" ]
-then echo enrolled; else echo not-enrolled; fi
-[ -e "$r/production-attempts" ] && echo attempts-directory-present
-
-# Only if the server printed "enrolled": the schema and history root.
-node -e 'const d = JSON.parse(require("fs").readFileSync(process.argv[1]));
-  console.log(d.schema, d.root)' "$d"
-# With the tools of the deployed release (not a post-P2 checkout):
-node <release-tools>/scripts/production-release-card.mjs audit \
-  --root <history-root> --repo <repository-checkout>
+# Usage: u2_check server|runner <absolute install root>
+# Prints one line. Exit 0 not-enrolled, 10 enrolled, 2 unknown (stop C1).
+u2_check() {
+  case $1 in
+    server) n=.kaoiro-release-authority.json ;;
+    runner) n=release-authority.json ;;
+    *) echo "unknown: role must be server or runner"; return 2 ;;
+  esac
+  case $2 in
+    /*) ;;
+    *) echo "unknown: root must be an absolute path"; return 2 ;;
+  esac
+  r=$(cd -P -- "$2" 2>/dev/null && pwd -P) ||
+    { echo "unknown: cannot resolve $1 root"; return 2; }
+  { [ -r "$r" ] && [ -x "$r" ]; } ||
+    { echo "unknown: $1 root is not readable"; return 2; }
+  if [ -e "$r/$n" ] || [ -L "$r/$n" ]; then echo "enrolled"; return 10; fi
+  if [ "$1" = runner ] &&
+     { [ -e "$r/production-attempts" ] || [ -L "$r/production-attempts" ]; }
+  then echo "enrolled: production-attempts present"; return 10; fi
+  echo "not-enrolled"; return 0
+}
 ```
 
-Reading the result: `not-enrolled` from the server and from every runner,
-and no `attempts-directory-present`, means C1 passes with nothing to do. Any
-`enrolled` or `attempts-directory-present` means C1's resolution steps apply
-(section 3.7). The audit reads remote refs and creates nothing (exit 0: no
-unfinished or unpublished attempt; non-zero: records to resolve). Because
-publication never ran, a completed attempt also reports non-zero.
+```sh
+u2_check server <server-dir>; echo "exit $?"
+u2_check runner <install-root>; echo "exit $?"
+```
+
+| Output and exit | Meaning | C1 |
+|---|---|---|
+| `not-enrolled`, 0 | the directory exists and is readable, and neither name exists | this installation needs nothing |
+| `enrolled`, 10 (including a dangling descriptor link, or `production-attempts` on a runner) | old enrolled consumers can run here | resolution steps of section 3.7 apply |
+| `unknown: ...`, 2 | the root could not be resolved or read (missing, not a directory, not readable, relative, empty) | C1 stops; fix the path or the permission and run the check again. `unknown` is never counted as `not-enrolled` |
+
+C1 passes only when every installation returned `not-enrolled` with exit 0.
+The check was run against disposable directories on 2026-10-22 under bash and
+dash (section 10). It does not tell which attempts are unfinished; that is
+part of the resolution steps, which never run the old audit against the
+production history or a production checkout (section 3.7).
 
 U6, disposable-repository plan (the operator approves and creates the
 repository; no tag is created in the real repository):
@@ -563,23 +603,37 @@ repository; no tag is created in the real repository):
    same ruleset body as the real one: target `tag`, the four include
    patterns of section 3.1, rules `update` and `deletion`, no bypass actors.
    Read it back with `gh api repos/<owner>/<repo>/rulesets` and compare.
-2. For each row of the matrix, push one commit and one annotated schema-2
-   tag `v<date>.1` with the row's credential and transport; read it back with
-   `git ls-remote --tags`. Expected: created.
-3. Negative controls for each row: force-push the same tag name to another
-   commit, and delete it. Expected: both refused by the ruleset.
-4. Record a lightweight `v*` tag push once. GitHub is expected to accept it;
-   the P1 reader must refuse it (section 10), so this is a reader control,
-   not a ruleset one.
-5. Record per row: login, transport, result and time, privately. A public
-   evidence page, if any, names no host or path. The operator deletes the
-   throwaway repository afterwards.
+2. Positive control, per row, each with its own unused tag name (the `N`
+   column below), so no two rows share an immutable object. Before: `git
+   ls-remote --tags origin refs/tags/<name>` is empty. Create and push one
+   annotated schema-2 tag with the row's credential and transport. After: the
+   same `ls-remote` lists it, and `git cat-file -t <name>` in a fresh clone
+   prints `tag` (an annotated object, not a lightweight ref). Expected:
+   created.
+3. Negative controls, **operator row from an OS shell outside any agent
+   only**: force-push the operator row's tag name to another commit, and
+   delete it. Expected: both refused by the GitHub ruleset, with GitHub's
+   rule-violation message. The agent row never attempts a force push or a
+   deletion: agents must not try a force push at all (the operator's Git
+   rules), and a refusal by the agent harness is not evidence about the
+   ruleset. The record names the layer that refused each attempt (GitHub
+   ruleset or agent harness).
+4. Record a lightweight `v*` tag push once, from the operator row. GitHub is
+   expected to accept it; the P1 reader must refuse it (section 10), so this
+   is a reader control, not a ruleset one.
+5. Record per row: login, transport, tag name, result, refusing layer and
+   time, privately. A public evidence page, if any, names no host or path.
+   The operator deletes the throwaway repository afterwards.
 
-| Principal | Credential | Transport |
-|---|---|---|
-| operator | the operator's existing SSH key | `git push origin refs/tags/<name>` |
-| operator | the operator's `gh` login | `gh api` create-ref (only if the operator wants this path) |
-| director agent session | the agent host's Git credential | `git push` through the agent harness, including its permission rules |
+| Principal | Credential | Transport | Tag name | Negative controls |
+|---|---|---|---|---|
+| operator, OS shell | the operator's existing SSH key | `git push origin refs/tags/<name>` | `v2099.01.01.1` | yes (step 3) |
+| operator | the operator's `gh` login | `gh api` create-ref (only if the operator wants this path) | `v2099.01.01.2` | no |
+| director agent session | the agent host's Git credential | `git push` of a new tag through the agent harness, under its permission rules | `v2099.01.01.3` | no (creation only) |
+
+The ruleset's update and deletion refusals are proven once, by the operator
+row; they do not depend on who created the tag, because the ruleset has no
+bypass actors (read-back, section 3.1).
 
 Only the row that will actually create release tags must pass before C3.
 
@@ -592,6 +646,15 @@ Only the row that will actually create release tags must pass before C3.
   must exit non-zero. Real entry: `with-build-identity.mjs --require-tagged`
   and `build-runner-tarball.sh --require-tagged` in a disposable clone with a
   local tag.
+- U2 check (run 2026-10-22 against disposable directories, bash and dash):
+  `not-enrolled`/0 for an existing root without either name and for a root
+  reached through a symlink; `enrolled`/10 for a server or runner
+  descriptor, a dangling descriptor link and a runner `production-attempts`
+  directory; `unknown`/2 for a missing root under a missing parent (the r2
+  review's counterexample, which the previous command reported as
+  `not-enrolled`), a regular file, a root without read permission, an
+  execute-only root, a relative path, an empty argument and an unknown role.
+  The same cases are rerun on the final text before C1.
 - P2/P3: reference sweep (`grep` for every removed module name) shows no
   importer; full suite and CI on the candidate; the runner update and server
   deploy happy paths still pass their existing tests. Negative control: a
