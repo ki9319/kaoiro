@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { artifactBuildIdentity, BUILD_REPOSITORY_ID, computeBuildIdentity, consumeBuildIdentity,
-  requireTaggedIdentity } from "../../scripts/build-identity.mjs";
+  readReleaseTag, readVersionTag, requireTaggedIdentity } from "../../scripts/build-identity.mjs";
 import { planReleaseTag } from "../../scripts/release-tag.mjs";
 import { loadBuildInfo } from "../src/build_info.js";
 
@@ -86,6 +86,7 @@ describe("schema-2 release tag reader", () => {
     ["a landing pair and a release tag on one commit", () => { landing(); release(); }],
     ["a signature block after the record", () => release({}, { message: JSON.stringify(releaseRecord()) + armor })],
     ["an object over 4,096 bytes", () => release({}, { message: `{${" ".repeat(5000)}${JSON.stringify(releaseRecord()).slice(1)}` })],
+    ["an object over 4,096 bytes only through whitespace after the record", () => release({}, { message: `${JSON.stringify(releaseRecord())}\n${" ".repeat(5000)}` })],
   ];
   it.each(refusals)("refuses %s", (_name, setup) => {
     setup();
@@ -111,6 +112,26 @@ describe("schema-2 release tag reader", () => {
     expect(computeBuildIdentity(repo)).toMatchObject({ version: "untagged", degraded: false });
     expect(() => requireTaggedIdentity(repo, { target: revision, timeoutMs: 500 }))
       .toThrow(/completed exact landing tag\/claim or release tag/);
+  });
+
+  it("production refuses a pushed release tag whose raw object exceeds 4,096 bytes through trailing whitespace", () => {
+    withOrigin();
+    release({}, { message: `${JSON.stringify(releaseRecord())}\n${" ".repeat(5000)}` });
+    expect(Number(git(["cat-file", "-s", "refs/tags/v2026.10.22.1"]))).toBeGreaterThan(4096);
+    git(["push", "-q", "origin", "refs/tags/v2026.10.22.1"]);
+    expect(() => requireTaggedIdentity(repo, { target: revision, timeoutMs: 500 })).toThrow(/production identity refused: invalid release tag object/);
+  });
+
+  it("refuses when the claim namespace cannot be read, and reads the tag when it can", () => {
+    release();
+    // Real Git for every read except the claim lookup, which fails as null.
+    const realGit = (args: string[], cwd: string) => {
+      try { return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(); } catch { return null; }
+    };
+    const failingClaim = (args: string[], cwd: string) => args[0] === "for-each-ref" ? null : realGit(args, cwd);
+    expect(readVersionTag(repo, "v2026.10.22.1", BUILD_REPOSITORY_ID, { gitReader: realGit })).toMatchObject({ kind: "release" });
+    expect(() => readVersionTag(repo, "v2026.10.22.1", BUILD_REPOSITORY_ID, { gitReader: failingClaim })).toThrow(/must not carry a landing claim/);
+    expect(() => readReleaseTag(repo, "v2026.10.22.1", BUILD_REPOSITORY_ID, { gitReader: failingClaim })).toThrow(/must not carry a landing claim/);
   });
 
   it("production accepts a pushed release tag and refuses one that is local only", () => {
@@ -196,6 +217,7 @@ describe("release-tag.mjs plan", () => {
     ["a local release tag", () => release(), /already tagged as v2026\.10\.22\.1/],
     ["a local lightweight calver tag", () => git(["tag", "v2026.10.20.3"]), /already tagged as v2026\.10\.20\.3/],
     ["a local landing claim", () => git(["update-ref", `refs/tags/identity/landing/${revision}`, revision]), /landing claim exists for/],
+    ["a local landing claim that points at another commit", () => git(["update-ref", `refs/tags/identity/landing/${revision}`, otherCommit("claim target")]), /landing claim exists for/],
     ["a release tag on origin only", () => { release(); git(["push", "-q", "origin", "--tags"]); git(["tag", "-d", "v2026.10.22.1"]); }, /already tagged on origin as v2026\.10\.22\.1/],
     ["a landing claim on origin only", () => { git(["update-ref", `refs/tags/identity/landing/${revision}`, revision]); git(["push", "-q", "origin", "--tags"]); git(["update-ref", "-d", `refs/tags/identity/landing/${revision}`]); }, /landing claim exists on origin/],
     ["a revision that is not a full commit id", () => undefined, /full 40-hex commit/],
@@ -204,6 +226,12 @@ describe("release-tag.mjs plan", () => {
     setup();
     const options = name.startsWith("a revision") ? { day, revision: "--upload-pack=x" } : { day };
     expect(() => planReleaseTag(repo, options)).toThrow(message);
+  });
+  it("plans a tag when no claim exists, and the same checkout refuses once a claim names the revision", () => {
+    withOrigin();
+    expect(planReleaseTag(repo, { day }).name).toBe("v2026.10.22.1");
+    git(["update-ref", `refs/tags/identity/landing/${revision}`, otherCommit("claim target")]);
+    expect(() => planReleaseTag(repo, { day })).toThrow(/landing claim exists for/);
   });
   it("creates, pushes and fetches nothing", () => {
     withOrigin();

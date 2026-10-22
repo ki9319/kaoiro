@@ -63,8 +63,9 @@ export function formatLandingVersion(day: string, number: number): string;
 export function validateLandingRecord(value: unknown, repositoryId?: number): LandingRecord;
 export function readLandingTag(cwd: string, tag: string, repositoryId?: number): { record: LandingRecord; object: string; tag: string };
 export function validateReleaseRecord(value: unknown, repositoryId?: number): ReleaseRecord;
-export function readReleaseTag(cwd: string, tag: string, repositoryId?: number): { record: ReleaseRecord; object: string; tag: string };
-export function readVersionTag(cwd: string, tag: string, repositoryId?: number):
+export type GitReader = (args: string[], cwd: string) => string | null;
+export function readReleaseTag(cwd: string, tag: string, repositoryId?: number, options?: { gitReader?: GitReader }): { record: ReleaseRecord; object: string; tag: string };
+export function readVersionTag(cwd: string, tag: string, repositoryId?: number, options?: { gitReader?: GitReader }):
   | { kind: "landing"; record: LandingRecord; object: string; tag: string }
   | { kind: "release"; record: ReleaseRecord; object: string; tag: string };
 export function artifactBuildIdentity(identity: BuildIdentity, builtAt?: string): FrozenBuildIdentity;

@@ -28,10 +28,12 @@ export function planReleaseTag(cwd = repoRoot, { revision, day = new Date().toIS
   if (!SHA.test(target) || git(["rev-parse", "--verify", `${target}^{commit}`], cwd) !== target) {
     refuse("revision must be a full 40-hex commit in this checkout");
   }
-  // `git tag --points-at` lists a landing claim as `identity/landing/<revision>`
-  // whether the claim points at a tag object or at the commit.
+  // The claim is checked by its canonical name, whatever it points at, as the
+  // reader does; an unreadable namespace makes git() throw and refuses.
+  if (git(["for-each-ref", "--format=%(objectname)", `refs/tags/identity/landing/${target}`], cwd) !== "") {
+    refuse(`a landing claim exists for ${target}`);
+  }
   const local = git(["tag", "--points-at", target], cwd).split("\n").filter(Boolean);
-  if (local.includes(`identity/landing/${target}`)) refuse(`a landing claim exists for ${target}`);
   const localTag = local.find((name) => CALVER_TAG.test(name));
   if (localTag) refuse(`already tagged as ${localTag}`);
 

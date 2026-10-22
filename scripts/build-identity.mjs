@@ -114,6 +114,10 @@ function landingFromTag(cwd, { object, header, message }, repositoryId, gitReade
 }
 
 function releaseFromTag(cwd, { object, header, record }, gitReader) {
+  // The shared reader measures trimmed output; a schema-2 tag is bounded by
+  // the raw Git object size, so trailing whitespace cannot hide its length.
+  const size = Number(gitReader(["cat-file", "-s", object], cwd));
+  if (!Number.isSafeInteger(size) || size < 1 || size > 4_096) throw new Error("invalid release tag object");
   const publicName = `v${record.version}`;
   if (header[0] !== `object ${record.revision}` || header[1] !== "type commit" ||
       header[2] !== `tag ${publicName}` ||
