@@ -3570,7 +3570,8 @@ function splitTarEntryName(typeChar, rawName) {
 /** Lists an archive with `tar tvzf --numeric-owner` for parseTarEntries.
  *  LC_ALL=C is forced for this child process only: under a ja_JP.UTF-8
  *  locale tar prints a hardlink as "... へのリンク" instead of " link to ",
- *  which parseTarEntries cannot read. Other variables are inherited.
+ *  which parseTarEntries cannot read. The authority profile supplies its
+ *  approved child environment; arbitrary caller variables do not reach tar.
  *  Trade-off: under LC_ALL=C tar escapes non-ASCII entry names as octal
  *  (e.g. \346\227\245.txt). A manifest recorded under a UTF-8 locale before
  *  this change differs from a listing taken now for such names, and
