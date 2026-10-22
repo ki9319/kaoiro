@@ -42,25 +42,31 @@ Proposed; the inventory, boundary, landing units and measurements are in the
    release tag `vYYYY.MM.DD.N`, created at release time on the released commit
    with a schema-2 annotation and no claim ref. Historical schema-1 landing
    pairs stay valid. Release records are the release tag and the release note.
+   The reader lands first and changes nothing by itself. Using schema-2 tags
+   and stopping allocation wait until every server and runner installation is
+   confirmed not enrolled (or is de-enrolled with the current tools) and tag
+   creation by the intended principal is measured in a disposable repository
+   with the same ruleset.
 3. **Retire** per-push landing allocation, hourly reconciliation and landing
    repair; the completion receipt, enrolled release authority, canonical
    history, retained worker and lifecycle commands; the
    `production-release.yml` dispatch; and the `KAOIRO_*` repository-variable
    gates.
 4. **Bound** native Codex state protection by nine invariants (plan section
-   4.1): usable home at launch; no differing native binary on a home unless it
-   was just restored for that binary or is fresh; credentials never rolled
-   back; no credentials in snapshots and fail-closed classification; copy and
+   4.1): usable home at launch; a differing native binary only as a safe
+   forward over a verified snapshot, a return before the candidate's start
+   was requested, or a restore when the start was requested or is unknown,
+   told apart by a durable start intent; credentials never rolled back; no credentials in snapshots and fail-closed classification; copy and
    replace only with the runner stopped and its cgroup empty; verified
-   snapshots; resumable, non-destructive replacement; restore writes the home
-   the runner will use; the snapshot's release is kept and a harmless failure
+   snapshots; resumable, non-destructive replacement; the live home, the
+   next-start home and the snapshotted or restored home are the same path; the snapshot's release is kept and a harmless failure
    restarts the unchanged source.
 5. **Retire** outside that boundary: acceptance evidence and binding receipts,
    restore lineage, legacy and barrier handling, the pre-stop foreign-UID walk,
-   migration diagnostics, file-identity binding of the unit and `runner.env`,
-   and evidence-gated retirement and abandonment. The phase machine shrinks to
-   six states and records move to `codex-state/v2/`; old records are never
-   converted.
+   migration diagnostics, file-identity binding of the unit and `runner.env`
+   (the home path checks stay), and evidence-gated retirement and
+   abandonment. The phase machine shrinks to eight states and records move to
+   `codex-state/v2/`; old records are never converted.
 
 ## Consequences
 
@@ -72,14 +78,16 @@ Proposed; the inventory, boundary, landing units and measurements are in the
   and registration checks and on the release note.
 - A pin update completes when the updater's own start check passes; the
   operator's first-turn and resume check becomes a runbook step, not a gate.
-  Editing `runner.env` no longer strands rollback points. Restoring an older
+  The updater's own check does not prove that a turn ran or a thread resumed.
+  Editing `runner.env` without changing the home path no longer strands
+  rollback points. Restoring an older
   snapshot is allowed and quarantines newer threads.
 - The six slow runner files are deleted or reduced to about 15 workflow
   cases; the CI effect is measured after the native units land.
-- [Issue #707](https://github.com/sakuraiyuta/kaoiro/issues/707) is superseded.
+- [Issue #707](https://github.com/sakuraiyuta/kaoiro/issues/707) should not start; closing or re-scoping it is proposed. Its target is retired only when N2 lands.
   [Issue #695](https://github.com/sakuraiyuta/kaoiro/issues/695) L1b, L4 and L5
   are unaffected by the boundary; L2 and L3 are re-scoped to the smaller
-  machine.
+  machine; their open defects are carried into the reduced contract.
 - Each landing unit is a separate issue. Disabling workflows, changing
   repository variables and production steps remain operator operations with
   their own approval.
@@ -87,5 +95,6 @@ Proposed; the inventory, boundary, landing units and measurements are in the
 ## Status gates
 
 This ADR stays `proposed` until the design review passes and the operator
-records the decision points of plan section 8. Unit P3 additionally waits for
-the server enrollment measurement (plan section 9, U2).
+records the decision points of plan section 8. Using schema-2 tags and
+stopping allocation additionally wait for the enrollment check (U2) and the
+tag-creation measurement (U6) of plan section 9.

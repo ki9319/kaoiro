@@ -21,7 +21,8 @@ Claims are marked **(measured)** with the probe in section 9, **(read)** when
 they come from reading code or documents at the base commit, and
 **(unmeasured)** when nothing has established them yet. Nothing in this design
 is approved while it depends on an unmeasured premise that section 9 lists as
-blocking.
+blocking. Design review rounds and their findings are recorded on the issue;
+this revision answers review r1.
 
 ## 1. Operator decision this design implements
 
@@ -92,7 +93,9 @@ Consequences for the deletions:
 - Build identity depends on landing tags. Stopping allocation without a new
   tag source makes every new commit `untagged`, and production builds and
   `--from-repo` updates refuse it. The replacement tag source (unit P1) must
-  land before allocation stops.
+  land before allocation stops, and the old consumers that read landing
+  records on enrolled roots must be out of the way before the first new tag
+  (cutover C, section 3.7).
 - The completion collector depends on native-state acceptance
   (`acceptedForwardTransaction`, `kaoiro-runner-codex-state.mjs:139`). Removing
   acceptance (unit N2) after the collector is gone (unit P3) avoids a
@@ -161,13 +164,16 @@ released, before the build. Provisional choice (decision point D1):
 - Who creates it: the release operator (the operator, or a director whose
   release is approved). Creating `v*` tags needs ordinary Contents-write
   authority; the active ruleset has only `update` and `deletion` rules and no
-  bypass actors (measured, read-back 2026-10-22). A tag push by a
-  non-workflow principal under this ruleset is **(unmeasured)** on the real
-  repository; the first P1 release tag is that measurement. Whether an agent
-  session may push a tag is a harness/permission question for the operator
-  and is not changed here.
+  bypass actors (measured, read-back 2026-10-22). Until now only the workflow
+  bot has created `v*` tags. Creation by each intended principal, credential
+  and transport under this ruleset is **(unmeasured)** and is measured in a
+  disposable repository before the cutover (U6, section 9). No trial tag is
+  created in the real repository's immutable namespaces.
+- Landing the reader (P1) and starting to use schema-2 tags (cutover C,
+  section 3.7) are separate steps. P1 is additive: with no schema-2 tag in
+  existence it changes nothing.
 
-Normal path after P1-P3: choose the commit, write the release note, create
+Normal path after C, P2 and P3: choose the commit, write the release note, create
 and push the release tag, build with `--require-tagged`, update server then
 runner, run the canary, commit the release note. Failure/recovery: a failed
 build or deployment leaves the tag in place; redeploying the same commit
@@ -203,8 +209,18 @@ before deleting; a file still imported by kept code stays.
 | Unit | Code | Tests | Runbook / docs |
 |---|---|---|---|
 | P1 | none removed; `build-identity.mjs` reader extended, new `scripts/release-tag.mjs` | `scripts/test` build-identity cases extended; `releaseSwitch` "requires a landing tag" case rewritten for the release tag | `build-identity-and-release-tags.md` "Identity" rewritten; `docs/release/README.md` gains the tag step; `runner-update-and-rollback.md` "Build identity preconditions" |
-| P2 | `.github/workflows/develop-landing.yml`, `production-release.yml`; `scripts/landing-workflow.mjs`, `landing-tags.mjs`, `landing-backlog.mjs`, `landing-repair*.mjs`, `production-release-workflow.mjs`, `production-release-tags.mjs`, `production-release-card.mjs`, `release-automation-gate.mjs` | `scripts/test/landing-reconciliation.test.mjs`, `landing-repair.test.mjs`, `mock-github-api.mjs`, `fixtures/landing-repair-fixture.mjs`; CI job `release-identity` loses the landing file | `build-identity-and-release-tags.md`: "Automation activation and trust", "Repair", "Recorded repair of a historical landing" removed; "Repairing a malformed reserved tag" kept, shortened |
-| P3 | `collect-production-release.mjs`, `production-runner-worker.mjs`, the remaining `scripts/production-release-*.mjs`; `runner/deploy/release-gate.mjs`; enrolled branches in `kaoiro-runner-update.sh` / `-switch.sh` / `-bootstrap.sh` / `-common.sh`; `release-tools` staging in `build-runner-tarball.sh:203`; `server/deploy/kaoiro-release-reconciliation.mjs` and the enrolled branches / `--release-attempt` argv of `kaoiro-server-deploy.mjs` and `kaoiro-deploy-recovery.mjs:186`; `check-release-child-environments.mjs` if nothing else uses it | `scripts/test/production-release*.test.mjs`, `production-runner-worker.test.mjs` (CI job `release-identity` removed); `runner/test/releaseReconciliation.test.ts`; enrolled-fixture cases of `server/deploy/test/recovery*.test.mjs`, `test-support/fake-release-exporter.mjs` | `build-identity-and-release-tags.md`: "Enrolled production authority", "Common production checkpoint", "Reconciliation and explicit recovery" (with the release state table) removed; matching paragraphs of `runner-update-and-rollback.md`, `server-update-and-rollback.md`, `runner-install.md`, `reference/deployment/transactions-and-identity.md`, `docs/README.md` |
+| P2 | `.github/workflows/develop-landing.yml`, `production-release.yml`; `scripts/landing-workflow.mjs`, `landing-tags.mjs`, `landing-backlog.mjs`, `landing-repair*.mjs`, `production-release-workflow.mjs`, `production-release-card.mjs`, `release-automation-gate.mjs`; their entries in `check-release-child-environments.mjs` | `scripts/test/landing-reconciliation.test.mjs`, `landing-repair.test.mjs`, `mock-github-api.mjs`, `fixtures/landing-repair-fixture.mjs`; CI job `release-identity` loses the landing file | `build-identity-and-release-tags.md`: "Automation activation and trust", "Repair", "Recorded repair of a historical landing" removed; "Repairing a malformed reserved tag" kept, shortened |
+| P3 | `collect-production-release.mjs`, `production-runner-worker.mjs`, the remaining `scripts/production-release-*.mjs` including `production-release-tags.mjs`; `runner/deploy/release-gate.mjs`; enrolled branches in `kaoiro-runner-update.sh` / `-switch.sh` / `-bootstrap.sh` / `-common.sh`; `release-tools` staging in `build-runner-tarball.sh:203`; `server/deploy/kaoiro-release-reconciliation.mjs` and the enrolled branches / `--release-attempt` argv of `kaoiro-server-deploy.mjs` and `kaoiro-deploy-recovery.mjs:186`; `check-release-child-environments.mjs` if nothing else uses it | `scripts/test/production-release*.test.mjs`, `production-runner-worker.test.mjs` (CI job `release-identity` removed); `runner/test/releaseReconciliation.test.ts`; enrolled-fixture cases of `server/deploy/test/recovery*.test.mjs`, `test-support/fake-release-exporter.mjs` | `build-identity-and-release-tags.md`: "Enrolled production authority", "Common production checkpoint", "Reconciliation and explicit recovery" (with the release state table) removed; matching paragraphs of `runner-update-and-rollback.md`, `server-update-and-rollback.md`, `runner-install.md`, `reference/deployment/transactions-and-identity.md`, `docs/README.md` |
+
+`production-release-tags.mjs` stays until P3: `collect-production-release.mjs`,
+`production-release-reconciliation.mjs`, `production-release-lifecycle.mjs`
+and `production-runner-worker.mjs` import it (measured by import sweep; the r1
+review reproduced the load failure in a disposable copy). The release-tools
+staging in `build-runner-tarball.sh:203` follows every import in its scopes
+(`production-release-tools.mjs:28,66-106`), so P2's acceptance includes a
+tarball build with staging, a load of the retained audit and lifecycle
+modules, and `scripts/test/child-process-environment.test.mjs` after the
+`check-release-child-environments.mjs` entries are removed.
 
 Sizes at the base commit (measured with `wc -l`): 26 publication scripts,
 8,104 lines; 10 publication test files, 4,269 lines; the two workflows, 158
@@ -214,23 +230,60 @@ removal is not a CI-time argument.
 ### 3.6 Unfinished records and operator operations
 
 - Landing allocations: once `KAOIRO_LANDING_ENABLED=false`, pushes between the
-  last allocation and the switch stay untagged. They are not repaired; P1
-  release tags supersede them. Existing pairs remain immutable and readable.
-- Repository variables: the operator sets `KAOIRO_LANDING_ENABLED=false`
-  after P1 is deployed, and deletes the `KAOIRO_*` variables after P2 lands.
+  last allocation and the first release tag stay untagged. They are not
+  repaired. Existing pairs remain immutable and readable.
+- Repository variables: the operator sets `KAOIRO_LANDING_ENABLED=false` in
+  cutover step C3, and deletes the `KAOIRO_*` variables only after P2 has
+  removed both workflows and no run of them is queued or in progress (D6).
   `KAOIRO_RELEASE_ENABLED` is already false.
 - Ruleset: unchanged. It costs nothing and keeps historical tags immutable.
-- Enrolled roots: P3 requires U2. If any root is enrolled, its unfinished
-  attempts are first closed with the current tools (`abandon`,
-  `retire-deployed` or `quarantine`), and the descriptor and canonical history
-  are moved, unmodified, to private storage before P3 is deployed. A
-  descriptor left in place after P3 is ignored by the new code; P3 adds one
+- Enrolled roots: resolved before the cutover, not before P3 (section 3.7).
+  The old consumers that require a schema-1 landing record
+  (`production-release-plan.mjs:173-186`, `collect-production-release.mjs:562,597`,
+  `production-release-card.mjs:30-34`, and the enrolled audits of the runner
+  updater at `kaoiro-runner-update.sh:230-234,360-364,455-459` through
+  `release-gate.mjs:20-28`) run only on enrolled roots. Removing enrollment
+  before the first schema-2 tag means no old consumer ever reads one. A
+  descriptor that reappears after P3 is ignored by the new code; P3 adds one
   warning line when it sees one, so a forgotten root is visible.
 - Old tools reading new records: nothing new is written by P1-P3 except the
   schema-2 tag annotation. An older `build-identity.mjs` treats a schema-2 tag
   without a claim as a broken pair and refuses a production build. That is
   fail-closed and only matters for building a post-cutover tag with
   pre-P1 code, which the runbook forbids.
+
+### 3.7 Cutover order (C)
+
+C is a sequence of operator operations, not a code unit. Each step needs its
+own approval. Until C1 and C2 are complete, using schema-2 tags and stopping
+allocation are **not approved** by this design.
+
+1. **C1, enrollment (U2).** The operator runs the read-only checks of
+   section 9 on the server and on every runner installation. Result "not
+   enrolled" everywhere: continue. Any "enrolled": with the tools of the
+   currently deployed release (its `deploy/release-tools`, or a clean checkout
+   of the release commit; not a post-P2 checkout), close every unfinished
+   attempt (`abandon`, `retire-deployed` or `quarantine`), then move the
+   descriptor and the canonical history root, unmodified, to private storage
+   on the same host. Completed attempts that were never published cannot be
+   archived by the old tools (archive needs a published pair); they move with
+   the history unchanged and are not given a fabricated publication. Repeat
+   the read-only check until every root reports "not enrolled".
+2. **C2, tag creation (U6).** The disposable-repository measurement of
+   section 9 has passed for the principal, credential and transport that will
+   create release tags, and the operator has approved that combination.
+3. **C3, stop allocation.** P1 is deployed to server and runner. The operator
+   sets `KAOIRO_LANDING_ENABLED=false`, then checks U4: no `develop-landing.yml`
+   run is queued or in progress, and the next push and the next scheduled run
+   skip `publish` without creating a `v*` tag or claim.
+4. **C4, first release tag.** The first schema-2 tag is created only after
+   C3, so the old allocator and the new writer never compete for the same
+   commit or day number. The release under it uses the normal path of
+   section 3.3.
+
+Rollback before C4: set `KAOIRO_LANDING_ENABLED=true` again; nothing else
+changed. After C4, the schema-2 tag stays (immutable) and the P1 reader keeps
+reading it.
 
 ## 4. Native Codex state: the minimal protected boundary
 
@@ -246,17 +299,32 @@ unprotected by design.
 | Id | Invariant | Why start/resume depends on it |
 |---|---|---|
 | B1 | The runner refuses Codex launches when `CODEX_HOME` is unusable, with a reason | otherwise every wrapper crash-loops (`codex-home.md`) |
-| B2 | Code is never switched so that a Codex native binary different from the one that last opened the home starts on it, unless the home was just restored from a snapshot taken under that binary, or is fresh | a differing binary may migrate or fail to open the databases; an older binary on migrated state is the start/resume risk (U1) |
+| B2 | A switch to a release with a different Codex native hash happens only in one of three forms: (a) **safe forward**: a verified snapshot of the stopped home exists, then the candidate's native opens the home; (b) **never-started return**: the candidate's start was never requested, so the source restarts on the untouched home; (c) **restore**: the candidate's start was requested or its state is unknown, so the home is restored from the snapshot before the source starts. Any other differing-native switch refuses | an older binary on state that a newer binary may have migrated is the start/resume risk (U1); the code-only return in (b) is safe only when the candidate never had the chance to open the home |
 | B3 | Restore never brings back older credentials (`auth.json`, `.credentials.json`, `secrets/`, `mcp-oauth-locks/`); the current entries are moved, not copied or read | an older refresh token can be revoked, and the wrapper then cannot authenticate |
 | B4 | A snapshot never includes credentials, and unknown home entries refuse rather than being copied blindly | an unrecognized credential-bearing file would be rolled back by restore (B3) |
 | B5 | Home state is copied or replaced only while the managed runner is inactive, `MainPID` is 0 and the service cgroup is empty | a live writer makes the SQLite/WAL copy inconsistent |
 | B6 | A snapshot is verified against its manifest hash before it replaces the live home | a corrupt copy replaces a working home |
 | B7 | Replacing the home is resumable and non-destructive: the old home is renamed aside, never deleted, and an interrupted replacement leaves a record naming both paths | an interruption between the two renames leaves no home at the configured path |
-| B8 | The home a restore writes is the home the runner will use next (resolved `CODEX_HOME` path from the unit and `runner.env`) | restoring a different directory leaves the real home unchanged |
+| B8 | Three paths agree as resolved absolute paths: the home the running runner actually uses (the `CODEX_HOME` of its `MainPID`, read while it is active), the home the next start will use (unit environment plus `runner.env`), and the `--codex-home` that is snapshotted or restored. A pin update or restore never doubles as a home relocation; moving the home stays a separately approved operation | the runner's resume scan and the wrapper's SDK resume use the home they actually run with (`runner/src/sessions.ts:608-610,722-730`, `wrapper/codex/src/host.ts:2041-2048`); `runner.env` edited after start can differ from the live environment, so checking only the next-start path can snapshot B while the threads live in A |
 | B9 | The release whose native binary a retained snapshot needs is not pruned while the snapshot is retained; a failure before any state change restarts the unchanged source | restoring a snapshot without its binary cannot start; a stopped runner after a harmless failure is an outage |
 
-B2 is enforced whether or not records exist (`guard` compares native hashes
-directly, `kaoiro-runner-codex-state.mjs:209-213`), and this stays.
+The refusal part of B2 is enforced whether or not records exist (`guard`
+without a transaction refuses a differing native hash,
+`kaoiro-runner-codex-state.mjs:209-213`), and this stays. Forms (a)-(c) are
+told apart by the durable start intent of S11 (section 4.3), not by an owner
+PID or a catch handler: a SIGKILL or power loss between the start request and
+the completion record must still route to restore.
+
+Where B8 reads each path: at forward prepare the runner is active, so the
+live `MainPID` environment (`captureBinding`, `codex-service.mjs:118-128`) and
+the next-start environment (`staticBinding`, `:73-117`) are both compared with
+`--codex-home`. Before switch and before start the runner is stopped, so only
+the next-start path is re-read and must equal the path recorded at prepare.
+A restore that begins with the runner active compares both, as forward does;
+one that begins stopped compares the next-start path with the snapshot's
+recorded home path. What is dropped is file identity: unit file hashes,
+`runner.env` byte hash and device/inode, manager environment and `ExecStart`
+text.
 
 Whether to keep cross-pin rollback at all (and hence snapshots) is decision
 point D2 (section 8). This design keeps it, simplified: without a snapshot,
@@ -273,18 +341,18 @@ Codex peers.
 | S3 | Credential exclusion from snapshots and move-not-copy on restore | B3, B4 | keep | the per-credential `credential-intent/moved:<name>` phases collapse into the single replacement record of S11 |
 | S4 | Home classification, fail closed on unknown names (`inventory`) | B4 | keep | `codexHomeClassification` stays (1.7 s) |
 | S5 | Post-stop check: inactive, `MainPID` 0, empty cgroup (`assertStopped`); unified cgroup v2 required | B5 | keep | |
-| S6 | Pre-stop foreign-UID walk of the runner cgroup (`assertOwnedCgroup`) | none | retire | lost: refusal before stop when a foreign process sits in the cgroup. S5 still refuses after stop and the source is resumed (S13) |
+| S6 | Pre-stop foreign-UID walk of the runner cgroup (`assertOwnedCgroup`) | none | retire (N1) | lost: refusal before stop when a foreign process sits in the cgroup. S5 still refuses after stop and the source is resumed (S13). It never proved snapshot consistency against independent writers, and its removal adds no new permission for such writers |
 | S7 | Snapshot manifest and hash verification before replacement | B6 | keep | |
-| S8 | SQLite migration-level diagnostics and throughput estimate | none | retire | lost: rollback diagnosis data. The capacity check stays (a full disk breaks start) |
-| S9 | Static/live binding: unit file hashes, `runner.env` `sourceHash` and device/inode, manager environment, `ExecStart`, live `MainPID` home binding (`codex-service.mjs:73-135`) | B8 | simplify | compare only the resolved `CODEX_HOME` path from the unit and `runner.env` with `--codex-home`, at prepare and before restore. Lost: refusal on any `runner.env` byte or inode change; editing `runner.env` no longer strands rollback points |
-| S10 | Acceptance evidence file, binding receipt, `sequence`, `awaiting-acceptance` gate | none | retire | the updater completes the forward after its own start check (active, `MainPID`, attested release). Lost: an operator attestation that Codex started and history resumed before the next update; it becomes a runbook check, not a gate |
-| S11 | 16-phase transaction machine plus owner PID/start-tick proofs (`codex-owner.json`) | B7, B9 | simplify | forward: `prepared` → `snapshot-verified` → `completed` / `failed`; restore: `replace-intent` → `restored`. The `.lock.update` directory stays the mutual exclusion; the updater PID is recorded for diagnosis only |
-| S12 | Restore lineage: newest-unrestored rule, `acceptedHome`, `recoveryLineage`, chained restores | none | retire | restore takes an explicitly named retained snapshot whose source native equals the release being started. Lost: refusal to restore an older snapshot when a newer one exists; restoring an older snapshot quarantines newer threads, as restore already does |
-| S13 | Code-only recovery for a never-started candidate; unchanged-source restart (`restartSource`) | B9 | simplify | one rule: if the candidate never started, restart the source with the home untouched; otherwise restore |
-| S14 | Legacy (pre-receipt) record handling and ignored `barriers/` | none | retire | the new helper refuses while any old record is non-terminal or any old reference is unretired (section 4.4) |
-| S15 | Retirement with a gate-6 evidence file; `abandon` with owner-state checks | none | simplify | `prune <root> <uuid>` deletes a retained snapshot and marks it retired, no evidence file. A forward that failed before writing its snapshot is `failed` and does not block the next update, so `abandon` disappears |
-| S16 | Release prune protection for references and unfinished transactions (`protected`) | B9 | keep | narrowed to retained snapshots' source releases and an in-flight replacement |
-| S17 | `acceptedForwardTransaction` export for the completion collector | none | retire | removed with P3 |
+| S8 | SQLite migration-level diagnostics (`codex-snapshot.mjs:132-153`, called at `:165`) and throughput estimate | none | retire (N1) | lost: rollback diagnosis data. The capacity check (bytes and inodes) stays (a full disk breaks start) |
+| S9 | Static/live binding: unit file hashes, `runner.env` `sourceHash` and device/inode, manager environment, `ExecStart`, live `MainPID` home binding (`codex-service.mjs:73-135`) | B8 | simplify (N2) | keep the three-way path agreement of B8, including the live `MainPID` path while the runner is active; drop file identity. Lost: refusal on a `runner.env` byte or inode change that leaves the home path unchanged; such an edit no longer strands rollback points. Done in N2, not N1, because `validateReceipt` (`kaoiro-runner-codex-state.mjs:48-56`) requires full binding equality between a transaction and its receipt, and receipts exist until N2 |
+| S10 | Acceptance evidence file, binding receipt, `sequence`, `awaiting-acceptance` gate | none | retire (N2) | the updater completes the forward after its own post-start check (active, `MainPID`, attested release). Lost: an operator attestation that Codex started and history resumed before the next update; it becomes a runbook check, not a gate. The durable start intent of S11 is a different thing and stays |
+| S11 | 16-phase transaction machine plus owner PID/start-tick proofs (`codex-owner.json`) | B2, B7, B9 | simplify (N2) | forward: `prepared` → `snapshot-verified` → `start-intent` → `completed`, or `failed` from `prepared`/`snapshot-verified` only; restore: `restore-prepared` → `replace-intent` → `restored`. `start-intent` is saved durably before the start request, as `start-attempted` is today (`kaoiro-runner-codex-state.mjs:292-305`, `kaoiro-runner-update.sh:549-557`). The `.lock.update` directory stays the mutual exclusion; the updater PID is recorded for diagnosis only |
+| S12 | Restore lineage: newest-unrestored rule, `acceptedHome`, `recoveryLineage`, chained restores | none | retire (N2) | restore takes an explicitly named retained snapshot whose source native equals the release being started. Lost: refusal to restore an older snapshot when a newer one exists; restoring an older snapshot quarantines newer threads, as restore already does |
+| S13 | Code-only recovery for a never-started candidate; unchanged-source restart (`restartSource`) | B2, B9 | simplify (N2) | one rule over the durable phase: `prepared` or `snapshot-verified` (start never requested) → restart the source on the untouched home; `start-intent` without `completed` (started or unknown) → restore from the snapshot. An updater death is classified by the saved phase alone |
+| S14 | Legacy (pre-receipt) record handling and ignored `barriers/` | none | retire (N2) | the new helper refuses while any old record is non-terminal or any old reference is unretired (section 4.4) |
+| S15 | Retirement with a gate-6 evidence file; `abandon` with owner-state checks | none | simplify (N2) | `prune <root> <uuid>` deletes a retained snapshot and marks it retired, no evidence file. A forward that failed before writing its snapshot is `failed` and does not block the next update, so `abandon` disappears |
+| S16 | Release prune protection for references and unfinished transactions (`protected`) | B9 | keep (N2) | narrowed to retained snapshots' source releases and an in-flight replacement |
+| S17 | `acceptedForwardTransaction` export for the completion collector | none | retire (N2, after P3) | removed with P3 |
 | S18 | Snapshot privacy (0700/0600, same user), restore at the original canonical path | B3, B8 | keep | |
 
 The result keeps nine invariants with one small record type, and drops the
@@ -297,10 +365,17 @@ registry-wide validation that makes every scan refuse on one malformed field.
 | Classification, capacity or path check fails before stop | nothing; source running | fix the cause, retry |
 | Stop leaves a process in the cgroup | forward `prepared`; source stopped | updater restarts the unchanged source, records `failed` |
 | Snapshot copy or verification fails | forward `failed`; staging removed when possible, else named in the record | source restarted; a leftover staging directory is reported by the next update (warning, not a refusal) |
-| Switch fails, candidate never started | forward `snapshot-verified` | source restarted with the home untouched; record `failed` |
-| Candidate started, then the operator wants the old code | forward `completed`, snapshot retained | `--restore-codex-backup <snapshot>`: stop, verify, move credentials, rename home aside, promote, start source release |
-| Restore interrupted between renames | restore `replace-intent` naming home, staging and aside paths | rerunning the same restore finishes or reverses the renames; the runner refuses Codex launches meanwhile (B1) |
+| Switch fails before `start-intent` is saved | forward `snapshot-verified` | never-started return (B2 b): source restarted on the untouched home; record `failed` |
+| Updater killed after `start-intent` is saved, before or after the start request | forward `start-intent` | started-or-unknown: staying on the target is safe, so either finish the forward (the target is `current` and passes the post-start check, then `completed`) or restore from the snapshot before any source start (B2 c). A code-only return to the source refuses |
+| Candidate start fails or its post-start check fails | forward `start-intent` | restore from the snapshot (B2 c); the updater reports a failed update |
+| Candidate started and checked, then the operator wants the old code | forward `completed`, snapshot retained | `--restore-codex-backup <snapshot>`: stop, verify, move credentials, rename home aside, promote, start source release |
+| Restore interrupted at any rename or credential move | restore `replace-intent` naming home, staging, aside paths and the credential entries | rerunning the same restore finishes or reverses the step from the observed filesystem state; N2's design shows the exit from each interruption point (the current per-credential phases, `codex-snapshot.mjs:193-211`, are the reference); the runner refuses Codex launches meanwhile (B1) |
 | Restore cannot succeed | home or staging preserved | fresh setup (`codex-home.md`), unchanged |
+
+The `completed` record means the updater's own post-start check passed
+(active service, `MainPID`, attested release). It does not prove that a
+Codex turn ran or that an old thread resumed; that remains a runbook check
+(D3).
 
 The runner-side transaction table that [issue #695](https://github.com/sakuraiyuta/kaoiro/issues/695) L2/L3 planned for the
 current machine is re-derived for this smaller machine (section 5).
@@ -318,10 +393,17 @@ current machine is re-derived for this smaller machine (section 5).
   "Resolve old Codex state records with the previous tool release". That
   exit uses the last pre-N2 tool release, which N2's runbook names; the new
   helper never converts or edits old records.
-- An old helper does not read `v2/`. Rolling the runner back across N2 while
-  a v2 snapshot is retained would hide that snapshot from the old tool; the
-  runbook therefore prunes or restores v2 snapshots before such a rollback.
-  Same-native code-only rollback is unaffected.
+- An old helper does not read `v2/`, and its `protectedReleases`
+  (`kaoiro-runner-codex-state.mjs:31-33,379-388`) lists only releases named by
+  old records, so the old updater's prune (`kaoiro-runner-update.sh:616-640`)
+  can delete a release that a v2 snapshot needs. Returning to pre-N2 code is
+  therefore allowed only with no v2 snapshot retained and no v2 replacement
+  in flight: prune or restore every v2 snapshot first. Under that condition a
+  same-native code-only rollback needs no state copy. With a retained v2
+  snapshot or an in-flight replacement, N2's design states for each path
+  (automatic recovery, manual `--rollback`, a code revert) which tool release
+  is used and which operation is refused; keeping an old tool release around
+  is not by itself a way back.
 - Stopping and restarting the agent that may initiate an update: unchanged.
   The update is queued with `--detach` from the new release's physical tool
   path and the agent ends its turn after enqueue.
@@ -340,21 +422,33 @@ lands after them, or rebases onto them if it is ready first, and removes the
 enrolled rows from the server property test in the same change. L1b's live
 fleet admission uses `build_identity_formats` (G3), which stays.
 
-**[Issue #695](https://github.com/sakuraiyuta/kaoiro/issues/695) L2, L3 (runner side): re-scope.** Their states (sections 3.2 and
-5.4 of the issue-695 plan) belong to the machine retired by S10-S15. After N3
-the runner has six states (section 4.3). Recommendation: fold the runner
-recovery table and its property test into N3, sized for that machine, and
-close L2/L3 as superseded. Alternative: keep the L2/L3 issue numbers and
-rewrite their scope after N3 (decision point D4). [Issue #531](https://github.com/sakuraiyuta/kaoiro/issues/531) (stopped forward
-keeps its staging) is covered by the `failed` path of section 4.3.
+**[Issue #695](https://github.com/sakuraiyuta/kaoiro/issues/695) L2, L3 (runner side): one contract, not two machines.**
+They stay on hold, as the operator decided, and no state of the retired
+machine (sections 3.2 and 5.4 of the issue-695 plan) is implemented. The
+reduced machine of section 4.3 (eight states) is the only runner contract.
+N2 implements it with its own exits; N3 adds the runner recovery table and
+property test over it. Whether N3 keeps the L2/L3 issue numbers or closes them
+as superseded is the director's call (D4); either way each runner defect of
+the issue-695 plan (section 4.2) is carried, not dropped:
 
-**[Issue #707](https://github.com/sakuraiyuta/kaoiro/issues/707): close as superseded.** Its targets `staticShape`,
+| issue-695 defect | Where it is closed in the reduced contract |
+|---|---|
+| R1 `prepared` without a named exit | N2: a pre-snapshot failure records `failed` and does not block; N3: the hint names the command |
+| R2 `stopped` residues ([issue #531](https://github.com/sakuraiyuta/kaoiro/issues/531)) | N2: the operator decision of 2026-10-20 carries over (delete exactly the recorded staging path, record its path and size); a complete snapshot without its record and a record without its snapshot each get an exit in N2's design |
+| R3 killed worker at `snapshot-verified` needs a live lock owner | N2: never-started return is chosen from the durable phase alone (S13), with the existing stale-lock inspection |
+| R4 intermediate restore phases without exit | N2: `replace-intent` is resumable from each interruption point (section 4.3) |
+| R5 `awaiting-acceptance` hint | retired with S10 |
+| R6 refusals name no command or runbook anchor | N3: the recovery table is the single source of hints |
+| R7 `retire` killed mid-removal cannot rerun | N2: `prune` records its intent before deleting and a rerun accepts a partly removed snapshot |
+
+**[Issue #707](https://github.com/sakuraiyuta/kaoiro/issues/707): do not start; propose closing it as superseded.** Its targets `staticShape`,
 `validateReceipt` and `validateTransactionState`
 (`kaoiro-runner-codex-state.mjs:35-73`) are retired by N2, and its
 test file `codexReceipt.test.ts` is deleted. The record checks that remain are
 small and live in the fast `codexState.test.ts`. If the CI measurement after
 N3 still shows the workflow file as a bottleneck, a new, narrowly scoped issue
-is opened against the new code.
+is opened against the new code. Proposing the close is not the same as the
+target being retired: that happens when N2 lands.
 
 **[Issue #704](https://github.com/sakuraiyuta/kaoiro/issues/704):** [issues #705](https://github.com/sakuraiyuta/kaoiro/issues/705) and [#706](https://github.com/sakuraiyuta/kaoiro/issues/706) are unaffected. The CI measurement that
 the operator scheduled after [#709](https://github.com/sakuraiyuta/kaoiro/issues/709) and [#705](https://github.com/sakuraiyuta/kaoiro/issues/705) lands is taken after N3.
@@ -389,42 +483,105 @@ performed by the operator after review, never by an agent.
 
 | Unit | Content | Depends on | Design review | Operator op |
 |---|---|---|---|---|
-| P1 | Release-tag reader (schema 2) and `scripts/release-tag.mjs plan`; runbook and release README | — | this design, plus the annotation grammar | deploy P1 to server and runner; then set `KAOIRO_LANDING_ENABLED=false` |
-| P2 | Delete the two workflows, landing scripts, card/workflow scripts and their tests; docs | P1 deployed, allocation disabled | this design | delete `KAOIRO_*` repository variables |
-| P3 | Delete completion/enrollment code in scripts, runner updater/switch/bootstrap, tarball staging and server deploy; tests; docs | P2; U2 measured; after [#695](https://github.com/sakuraiyuta/kaoiro/issues/695) L1b/L4/L5 or rebased on them | own short design (server and runner launch paths are high-risk: FS class) | if enrolled: close attempts and archive descriptors first |
-| N1 | Compare only the resolved home path (S9; the full binding is still captured and stored, so records keep their format); retire the foreign-UID walk and the diagnostics (S6, S8) | — (parallel to P1-P3) | this design | none |
-| N2 | `v2/` records and the reduced phase machine with the cutover refusal (S11); retire acceptance, receipts, lineage, legacy, barriers, evidence-gated retirement and `abandon` (S10, S12, S14, S15, S17); `prune`; unified never-started rule (S13); narrowed release protection (S16) | N1; P3 (collector gone) | own design round (record format and helper rewrite) | none |
+| P1 | Release-tag reader (schema 2) and `scripts/release-tag.mjs plan`; runbook and release README. Additive: no schema-2 tag exists yet | — | this design, plus the annotation grammar | deploy P1 to server and runner |
+| C | Cutover (section 3.7): C1 enrollment resolved (U2), C2 tag creation measured (U6), C3 allocation stopped and idle (U4), C4 first schema-2 tag | P1 deployed | this design | every step |
+| P2 | Delete the two workflows, landing scripts, card/workflow scripts and their tests; docs (`production-release-tags.mjs` stays for P3) | C complete | this design | delete `KAOIRO_*` repository variables once no run of either workflow is queued or in progress |
+| P3 | Delete completion/enrollment code in scripts, runner updater/switch/bootstrap, tarball staging and server deploy; tests; docs | P2; after [#695](https://github.com/sakuraiyuta/kaoiro/issues/695) L1b/L4/L5 or rebased on them | own short design (server and runner launch paths are high-risk: FS class) | none (enrollment was resolved in C1) |
+| N1 | Retire the foreign-UID walk (S6) and the migration/throughput diagnostics (S8). No record, binding or receipt changes | — (parallel to the P chain; it touches `codex-state.mjs` / `codex-service.mjs` / `codex-snapshot.mjs`, not the updater's release branches) | this design | none |
+| N2 | `v2/` records and the reduced phase machine with the durable start intent and the cutover refusal (S11); B8 path agreement replacing file identity (S9); retire acceptance, receipts, lineage, legacy, barriers, evidence-gated retirement and `abandon` (S10, S12, S14, S15, S17); `prune`; never-started rule from the durable phase (S13); narrowed release protection (S16); exits for issue-695 R1-R4 and R7 | N1; P3 (collector gone); U3 on each host before deploying there | own design round (record format and helper rewrite), with the phase/record/lock lifecycle observed once in a disposable environment before approval | none |
 | N3 | Runner recovery table and property test for the reduced machine, replacing [#695](https://github.com/sakuraiyuta/kaoiro/issues/695) L2/L3; final runbook rewrite | N2 | own design round (it replaces the L2/L3 design) | none |
 
 Each N unit is a Codex state change on the runner's update path and follows
 `high-risk-change-release.md` when deployed. Each one is validated with the
 real updater against a disposable home: one forward across differing native
-hashes, one restore, and the negative controls of section 10.
+hashes, one restore, and the negative controls of section 10. N1 changes no
+record, so reverting it needs no data handling. N2 must be safe on its own
+when it lands: the start intent and the restore exits are part of N2, not
+deferred to N3.
 
 Estimated implementation size (estimate): P1 small; P2 deletion-heavy; P3
 medium (touches high-risk launch paths); N1 small; N2 large (the helper
-core); N3 medium.
+core); N3 medium. C is operator time only.
 
 ## 8. Decision points (provisional conclusions)
 
 | Id | Question | Provisional | Alternatives |
 |---|---|---|---|
 | D1 | Name of the production release tag | keep `vYYYY.MM.DD.N`, created at release time | `release/vYYYY.MM.DD.N` (namespace already protected, but the version source and labels need a second change) |
-| D2 | Keep cross-pin rollback (snapshots) | keep, simplified | retire snapshots; keep only B1/B2/B5; cross-pin rollback means fresh setup and loses every Codex login and thread |
-| D3 | After a pin update, wait for an operator check before the next update | no gate; the runbook asks for a first-turn and resume check | keep a one-line `confirm <uuid>` without an evidence file |
-| D4 | Where the runner recovery table lives | fold into N3, close [#695](https://github.com/sakuraiyuta/kaoiro/issues/695) L2/L3 | keep L2/L3 and re-scope them after N3 |
+| D2 | Keep cross-pin rollback (snapshots) | keep, simplified; a conservative choice while U1 is unmeasured, not a claim that old natives fail. Final choice: operator | retire snapshots; keep only B1/B2/B5; cross-pin rollback means fresh setup and loses every Codex login and thread |
+| D3 | After a pin update, wait for an operator check before the next update | no gate; the runbook asks for a first-turn and resume check. The durable start intent (S11) is not this gate and stays | keep a one-line `confirm <uuid>` without an evidence file |
+| D4 | Runner recovery after the reduction | one contract: the reduced machine (N2) plus its table and property test (N3); no state of the retired machine is built; issue-695 R1-R7 and [issue #531](https://github.com/sakuraiyuta/kaoiro/issues/531) are carried (section 5) | the director decides whether N3 reuses the L2/L3 issue numbers or closes them as superseded |
 | D5 | Unknown home entries | keep fail-closed (S4) | copy unknown entries and warn; accepts the B3 risk for new credential files |
-| D6 | Repository variables after P2 | delete | leave them in place (harmless, but misleading) |
+| D6 | Repository variables after P2 | delete, once both workflows are removed and no run of either is queued or in progress | leave them in place (harmless, but misleading) |
 
 ## 9. Unmeasured premises and probes
 
 | Id | Premise | Blocks | Probe (read-only or disposable) |
 |---|---|---|---|
-| U1 | An older Codex native cannot reliably open or resume a home migrated by a newer native | nothing (B2 is kept either way); informs D2 | in a disposable directory, install two Codex pins from npm; start the newer `codex app-server` on an empty `CODEX_HOME`, create a thread with `thread/start` (no model turn), stop; start the older pin on the same home and call `thread/list` and `thread/resume`; record exit codes, `_sqlx_migrations` rows and errors |
-| U2 | No server install root is enrolled and no canonical history holds unfinished attempts | P3 | operator, read-only on the server host: test for `realpath(<server-dir>)/.kaoiro-release-authority.json`; if present, run `production-release-card.mjs audit` with the current tools and record the result privately |
+| U1 | An older Codex native cannot reliably open or resume a home migrated by a newer native | nothing (B2 is kept either way); must be measured first if it is ever used to drop snapshots (D2) | in a disposable directory, install two Codex pins from npm. Controls first: new→new and old→old, each starting `codex app-server` on an empty `CODEX_HOME`, creating a thread, stopping, restarting the same pin and resuming it; record the thread id, the rollout file under `sessions/` and the `_sqlx_migrations` rows. Only a thread that both controls show as persisted and resumable is then used for new→old: the newer pin creates and persists it, the older pin opens the same home and calls `thread/list` and `thread/resume`. Record exit codes and errors; no model turn is needed |
+| U2 | No server or runner installation is enrolled, and no canonical history holds unfinished attempts | C1 (before the first schema-2 tag and before allocation stops) | the operator runs the read-only commands below on the server and on every runner installation |
 | U3 | Every other runner installation has only terminal Codex state records | N2 deployment on that host | on each runner host, read `phase` of `codex-state/transactions/*.json` and `retired` of `codex-state/backups/*.json` (field projection only; the records hold paths and environment, so never print them whole) |
-| U4 | Disabling `KAOIRO_LANDING_ENABLED` makes both push and schedule runs skip allocation | P1 operator op | read: the `publish` job condition requires the variable (`develop-landing.yml:42-50`); after the change, read the next push run's job list and confirm `publish` is skipped and no new `v*`/claim appears |
+| U4 | Disabling `KAOIRO_LANDING_ENABLED` makes push and schedule runs skip allocation, and no allocation is still running | C3 | read: the `publish` job condition requires the variable (`develop-landing.yml:42-50`). Before C4: `gh run list --repo sakuraiyuta/kaoiro --workflow develop-landing.yml --status queued` and `--status in_progress` both empty; the next push run and the next scheduled run (minute 17 of the hour) show `publish` skipped; `git ls-remote --tags origin 'refs/tags/v*' 'refs/tags/identity/landing/*'` lists the same refs as before the change |
+| U6 | Each intended principal can create an annotated `v*` tag under the same ruleset, through its real credential, transport and harness, and cannot move or delete it | C2 (C3 and C4 are unapproved until it passes for the principal that will create release tags) | disposable-repository plan below; the repository needs operator approval and is created by the operator |
 | U5 | The CI wall-time effect of N1-N3 | none (reporting) | compare runner job wall time and accumulated test time on the N3 candidate with run 39747478279 |
+
+U2, read-only commands for the operator. They print only `enrolled` /
+`not-enrolled` and, when enrolled, the history root; they never print a
+descriptor whole (it holds SSH settings and private paths). Keep outputs
+private.
+
+```sh
+# Server: <server-dir> is the directory the deploy CLI manages.
+d="$(realpath <server-dir>)/.kaoiro-release-authority.json"
+if [ -e "$d" ] || [ -L "$d" ]; then echo enrolled; else echo not-enrolled; fi
+
+# Each runner installation: <install-root> is its install root.
+r="$(realpath <install-root>)"
+if [ -e "$r/release-authority.json" ] || [ -L "$r/release-authority.json" ]
+then echo enrolled; else echo not-enrolled; fi
+[ -e "$r/production-attempts" ] && echo attempts-directory-present
+
+# Only if the server printed "enrolled": the schema and history root.
+node -e 'const d = JSON.parse(require("fs").readFileSync(process.argv[1]));
+  console.log(d.schema, d.root)' "$d"
+# With the tools of the deployed release (not a post-P2 checkout):
+node <release-tools>/scripts/production-release-card.mjs audit \
+  --root <history-root> --repo <repository-checkout>
+```
+
+Reading the result: `not-enrolled` from the server and from every runner,
+and no `attempts-directory-present`, means C1 passes with nothing to do. Any
+`enrolled` or `attempts-directory-present` means C1's resolution steps apply
+(section 3.7). The audit reads remote refs and creates nothing (exit 0: no
+unfinished or unpublished attempt; non-zero: records to resolve). Because
+publication never ran, a completed attempt also reports non-zero.
+
+U6, disposable-repository plan (the operator approves and creates the
+repository; no tag is created in the real repository):
+
+1. The operator creates a private throwaway repository and applies the
+   same ruleset body as the real one: target `tag`, the four include
+   patterns of section 3.1, rules `update` and `deletion`, no bypass actors.
+   Read it back with `gh api repos/<owner>/<repo>/rulesets` and compare.
+2. For each row of the matrix, push one commit and one annotated schema-2
+   tag `v<date>.1` with the row's credential and transport; read it back with
+   `git ls-remote --tags`. Expected: created.
+3. Negative controls for each row: force-push the same tag name to another
+   commit, and delete it. Expected: both refused by the ruleset.
+4. Record a lightweight `v*` tag push once. GitHub is expected to accept it;
+   the P1 reader must refuse it (section 10), so this is a reader control,
+   not a ruleset one.
+5. Record per row: login, transport, result and time, privately. A public
+   evidence page, if any, names no host or path. The operator deletes the
+   throwaway repository afterwards.
+
+| Principal | Credential | Transport |
+|---|---|---|
+| operator | the operator's existing SSH key | `git push origin refs/tags/<name>` |
+| operator | the operator's `gh` login | `gh api` create-ref (only if the operator wants this path) |
+| director agent session | the agent host's Git credential | `git push` through the agent harness, including its permission rules |
+
+Only the row that will actually create release tags must pass before C3.
 
 ## 10. Verification plan
 
@@ -439,6 +596,20 @@ core); N3 medium.
   importer; full suite and CI on the candidate; the runner update and server
   deploy happy paths still pass their existing tests. Negative control: a
   leftover descriptor produces the warning and is otherwise ignored.
+- N1: the foreign-UID and diagnostics code is gone and the remaining
+  workflow cases pass unchanged; records written before and after N1 are
+  byte-compatible, so a revert needs no data step.
+- N2, start intent: kill the updater just before saving `start-intent` →
+  never-started return; kill after saving it and before the start request,
+  and again after the start request and before `completed` → a code-only
+  return to the source refuses and restore (or finishing the forward)
+  succeeds.
+- N2, B8: live home A with next-start home B is refused before stop (the r1
+  review's probe shape, through the new code); a `runner.env` edit that keeps
+  the path, and an inode-only change, are accepted; the records written in
+  those cases are read back by the N2 reader.
+- N2, restore: an interruption at each rename and each credential move is
+  resumed by rerunning the same restore.
 - N1-N3: per invariant, one failing case through the real updater entry:
   B2 differing native without snapshot refused before stop; B3 restore keeps
   the current `auth.json` bytes; B5 active service after stop leads to no
