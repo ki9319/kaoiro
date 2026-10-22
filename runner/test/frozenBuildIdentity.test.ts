@@ -24,7 +24,7 @@ function project() {
 }
 function invoke(repo: string, body: string) {
   return spawnSync(process.execPath, [join(repo, "scripts/with-build-identity.mjs"), "--", process.execPath, "--input-type=module", "-e", body],
-    { cwd: repo, encoding: "utf8", env: { PATH: process.env.PATH } });
+    { cwd: repo, encoding: "utf8", env: { PATH: process.env.PATH, HOME: repo } });
 }
 
 describe("production frozen identity consumers", () => {
@@ -50,6 +50,7 @@ describe("production frozen identity consumers", () => {
   it("refuses a source change after successful child execution", () => {
     const { repo } = project();
     const result = invoke(repo, `import {writeFileSync} from 'node:fs'; writeFileSync('moved-source','x');`);
+    expect(readFileSync(join(repo, "moved-source"), "utf8")).toBe("x");
     expect(result.status).toBe(78); expect(result.stderr).toContain("source revision or dirty state changed");
   });
   it("finds pnpm and its nested tool only through the supplied toolchain PATH", () => {
@@ -68,7 +69,7 @@ test "$KAOIRO_BUILD_BRANCH" = develop || exit 96
 printf '%s\\n' "$PATH" "$KAOIRO_BUILD_REVISION" "$*"
 `, { mode: 0o755 });
     const result = spawnSync(process.execPath, [join(repo, "scripts/with-build-identity.mjs"), "--", "pnpm", "run", "build"],
-      { cwd: repo, encoding: "utf8", env: { PATH: bin, PNPM_HOME: bin, GH_TOKEN: "inert-secret", GIT_DIR: "/fixture/foreign" } });
+      { cwd: repo, encoding: "utf8", env: { PATH: bin, HOME: repo, PNPM_HOME: bin, GH_TOKEN: "inert-secret", GIT_DIR: "/fixture/foreign" } });
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
     expect(result.stdout).toBe(`${bin}\n${git("rev-parse", "HEAD")}\nrun build\n`);
