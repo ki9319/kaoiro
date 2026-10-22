@@ -6540,3 +6540,12 @@ test("Compose inputs: relative repo paths still bind absolute explicit files", (
   assert.equal(readManifest(join(root, "kaoiro-deploy", result.transactionId)).target_plan.compose_files[0].path,
     join(workDir, "server", "docker-compose.yaml"));
 });
+
+test("Compose inputs: use-time legacy validation precedes any rendering", () => {
+  const legacy = { compose_sha256: "a".repeat(64), env_sha256: "b".repeat(64) };
+  const calls = [];
+  assert.throws(() => observeDockerCalls((args, output) => { calls.push(args); return output; }, () =>
+    withScenario("running-clean-stop", () => checkForwardCompose(bin, join(workDir, "server"), root, legacy))),
+    /lacks a usable project identity or hashes/);
+  assert.equal(calls.length, 0);
+});
