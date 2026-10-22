@@ -576,3 +576,12 @@ for (const [phase, field] of [[PHASE.OLD_IMAGE_SAVED, "recovery_plan"], [PHASE.B
     assert.throws(() => validateJournalAgainstStateMachine(journal), PhaseError);
   });
 }
+
+
+test("Compose inputs: build-prepared retains target revision format validation", () => {
+  const journal = fullJournal();
+  journal.history[indexOf(journal, PHASE.BUILD_PREPARED)] = entry(PHASE.BUILD_PREPARED, {
+    ...BUILD_OBS, target_sha: "not-a-revision",
+  });
+  assert.throws(() => validateJournalAgainstStateMachine(journal), PhaseError);
+});

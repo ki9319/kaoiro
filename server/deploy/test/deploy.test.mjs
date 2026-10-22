@@ -6208,6 +6208,7 @@ test("Compose inputs: fresh forward binds every transaction Compose call to T or
   const calls = [];
   const result = observeDockerCalls((args, output, options) => {
     if (args[0] === "compose" && !args.includes("version")) assert.equal(options.cwd, join(workDir, "server"));
+    if (/^compose (?:stop|up)/.test(normalizedComposeCall(args.join(" ")))) assert.equal(options.stdio, "inherit");
     if (args[0] === "compose" && args.some(arg => arg.endsWith("/recovery-compose.yaml"))) captured = true;
     if (captured) calls.push(args.join(" "));
     return output;
@@ -6225,13 +6226,18 @@ test("Compose inputs: fresh forward binds policy and accepted new-store reads to
   ] }, () => {
     let captured = false;
     const calls = [];
+    const probes = [];
     const result = observeDockerCalls((args, output, options) => {
       if (args[0] === "compose" && !args.includes("version")) assert.equal(options.cwd, join(workDir, "server"));
+    if (/^compose (?:stop|up)/.test(normalizedComposeCall(args.join(" ")))) assert.equal(options.stdio, "inherit");
       if (args[0] === "compose" && args.some(arg => arg.endsWith("/recovery-compose.yaml"))) captured = true;
       if (captured) calls.push(args.join(" "));
       return output;
     }, () => runUpdate({ repo: workDir, target: headSha, maintenanceApproved: true,
-      acceptNewStores: new Set([POLICY_ENV]) }, { ...configWithCleanStopMeasured(), health_url: null }));
+      acceptNewStores: new Set([POLICY_ENV]) }, { ...configWithCleanStopMeasured(), health_url: null }), args => {
+      if (args[0] === "exec" && args.includes("stat")) { probes.push(args[1]); assert.equal(args[1], "kaoiro-c1"); }
+    });
+    assert.deepEqual(probes, ["kaoiro-c1"]);
     assert.equal(result.phase, "done");
     assertForwardComposeArgs(calls, join(root, "kaoiro-deploy", result.transactionId), "yaml", 5, 2);
   });
@@ -6368,7 +6374,12 @@ test("Compose inputs: rollback refuses multiple live containers before stop", ()
     return output;
   }, () => withScenario("running-clean-stop", () => runRollback({ repo: workDir,
     transaction: update.transactionId, confirmRestore: true }, configWithCleanStopMeasured()))),
-  /build identity guard requires one live server container/);
+  err => {
+    assert.ok(err instanceof DeployError);
+    assert.equal(err.exitCode, 78);
+    assert.match(err.message, /build identity guard requires one live server container/);
+    return true;
+  });
   assert.deepEqual(mutations, []);
   assert.equal(currentComposeJournal().phase, "done");
 });

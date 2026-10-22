@@ -333,6 +333,7 @@ test("Compose inputs: strict plan field domains reject malformed values", () => 
     p => { p.identity.project_name = 1; }, p => { p.identity.project_name = ""; },
     p => { p.identity.services = null; }, p => { p.identity.services = [1]; }, p => { p.identity.services = [""]; },
     p => { p.identity.service_mounts = null; }, p => { p.identity.service_mounts = [null]; },
+    p => { p.identity.service_mounts = [Object.assign(() => {}, { type: "volume", source: "data" })]; },
     p => { p.identity.service_mounts = [{ type: 1, source: "volume" }]; },
     p => { p.identity.service_mounts = [{ type: "volume", source: 1 }]; },
     p => { p.compose_files = null; }, p => { p.compose_files = "files"; }, p => { p.compose_files = []; },
