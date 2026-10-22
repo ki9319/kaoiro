@@ -192,7 +192,7 @@ export function isComposePlan(value) {
   if (!Array.isArray(files) || files.length > 2) return false;
   if (files[0]?.source !== "docker-compose.yaml") return false;
   if (files.length === 2 && !["docker-compose.override.yml", "docker-compose.override.yaml"].includes(files[1]?.source)) return false;
-  return files.every(file => typeof file === "object" && file !== null &&
+  return files.every(file => typeof file === "object" &&
     typeof file.path === "string" && file.path !== "" && typeof file.sha256 === "string" && SHA256_RE.test(file.sha256)) &&
     new Set(files.map(file => file.path)).size === files.length;
 }
