@@ -89,7 +89,7 @@ function makeWorld(t, { fleet = { schema: 1, hosts: [], wrappers: [] }, override
   git(source, "config", "user.name", "Test");
   writeFileSync(join(source, "server", "docker-compose.yaml"), "# fixture\n");
   // As in the real repository, the release authority descriptor is ignored.
-  writeFileSync(join(source, ".gitignore"), ".env\n/server/.kaoiro-release-authority.json\n");
+  writeFileSync(join(source, ".gitignore"), ".env\n/server/.kaoiro-release-authority.json\n/server/docker-compose.override.yaml\n/server/docker-compose.override.yml\n");
   copyCode(source);
   git(source, "add", "-A");
   git(source, "commit", "-q", "-m", "old");
@@ -102,6 +102,9 @@ function makeWorld(t, { fleet = { schema: 1, hosts: [], wrappers: [] }, override
   // changed); the regular transport reads complete objects only.
   execFileSync("git", ["clone", "--bare", "--no-local", "-q", source, bare]);
   execFileSync("git", ["clone", "--no-local", "-q", bare, work]);
+  if (overrideMount) writeFileSync(join(work, "server", "docker-compose.override.yaml"), JSON.stringify({
+    services: { kaoiro: { volumes: [{ type: "bind", source: "/srv/overlay", target: "/overlay", read_only: true }] } },
+  }));
   writeFileSync(join(source, "README"), "target\n");
   git(source, "add", "README");
   git(source, "commit", "-q", "-m", "target");
@@ -325,10 +328,8 @@ const RECIPES = [
   { name: "old_image_saved: killed after the build (latest moved)", phase: PHASE.OLD_IMAGE_SAVED, args: [],
     faults: [{ match: "^compose build", kind: "kill-after" }],
     residual: (w) => assert.notEqual(w.latest(), OLD_IMAGE), via: ["rollback", "update"], oracle: "non-destructive", clearFaults: true },
-  // The override itself is landing unit L5: until then the transaction is
-  // recoverable, and the next update is refused the same way.
-  { name: "old_image_saved: override adds a mount, pre-bridge fleet (issues 681, 584)", phase: PHASE.OLD_IMAGE_SAVED, args: [],
-    world: { overrideMount: true, fleet: null }, faults: [], nextUpdate: /different project identity/,
+  { name: "old_image_saved: build failure with a pre-bridge fleet (issue 584)", phase: PHASE.OLD_IMAGE_SAVED, args: [],
+    world: { fleet: null }, faults: [{ match: "^compose build", kind: "fail" }],
     residual: (w) => assert.equal(w.latest(), OLD_IMAGE), via: ["rollback"], oracle: "non-destructive" },
   { name: "build_prepared: probe fails, killed right after latest is restored", phase: PHASE.BUILD_PREPARED, args: [],
     faults: [{ match: "PersistencePaths\\.beam", kind: "fail" }, { match: "^tag sha256:\\S+ kaoiro-server:latest", kind: "kill-after" }],
@@ -713,6 +714,17 @@ for (const point of ["^tag sha256:\\S+ kaoiro-server:latest", "^start "]) {
     const volumeBefore = digestDir(world.volumeDir);
     assert.equal(followHints(world, recoverFromKill(world, args), "rollback").phase, PHASE.ROLLED_BACK);
     assertNonDestructive(world, volumeBefore);
+    assertNextUpdateAdmitted(world);
+  });
+}
+
+for (const overrideMount of [false, true]) {
+  test(`recovery property: issue 681 admitted forward, override=${overrideMount}`, t => {
+    const world = makeWorld(t, { overrideMount });
+    const result = world.update(...UPDATE_APPROVED);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(world.journal().phase, PHASE.DONE);
+    assert.equal(world.state().images[world.serviceContainer().image].revision, world.target);
     assertNextUpdateAdmitted(world);
   });
 }

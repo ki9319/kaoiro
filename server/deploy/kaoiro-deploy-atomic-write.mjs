@@ -35,10 +35,10 @@ const REAL_FS = { closeSync, fsyncSync, openSync, renameSync, writeSync };
  *  (open -> write -> fsync -> close -> rename -> open -> fsync -> close)
  *  to pin the M3 durability contract, and a tracking `fsImpl` is the
  *  seam that makes that observable without touching the module system. */
-export function writeFileDurably(target, content, fsImpl = REAL_FS) {
+export function writeFileDurably(target, content, fsImpl = REAL_FS, { mode } = {}) {
   const dir = dirname(target);
   const tmp = `${target}.tmp.${process.pid}`;
-  const fd = fsImpl.openSync(tmp, "w");
+  const fd = mode === undefined ? fsImpl.openSync(tmp, "w") : fsImpl.openSync(tmp, "wx", mode);
   try {
     fsImpl.writeSync(fd, content);
     fsImpl.fsyncSync(fd);

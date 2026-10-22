@@ -561,3 +561,18 @@ test("validateJournalAgainstStateMachine rejects a transition out of ROLLED_BACK
   journal.phase = PHASE.DONE;
   assert.throws(() => validateJournalAgainstStateMachine(journal), PhaseError);
 });
+
+for (const [phase, field] of [[PHASE.OLD_IMAGE_SAVED, "recovery_plan"], [PHASE.BUILD_PREPARED, "target_plan"]]) {
+  test(`Compose inputs: phase validates new ${field} without tightening legacy reads`, () => {
+    const journal = structuredClone(fullJournal());
+    const obs = journal.history.find(entry => entry.phase === phase).observation;
+    obs[field] = { compose_sha256: "a".repeat(64) };
+    assert.doesNotThrow(() => validateJournalAgainstStateMachine(journal));
+    obs[field] = { compose_sha256: "a".repeat(64), env_sha256: "b".repeat(64),
+      identity: { project_name: "fixture", services: ["kaoiro"], service_mounts: [] },
+      compose_files: [{ source: "docker-compose.yaml", path: "/fixture/base", sha256: "c".repeat(64) }] };
+    assert.doesNotThrow(() => validateJournalAgainstStateMachine(journal));
+    obs[field].compose_files[0].sha256 = "invalid";
+    assert.throws(() => validateJournalAgainstStateMachine(journal), PhaseError);
+  });
+}

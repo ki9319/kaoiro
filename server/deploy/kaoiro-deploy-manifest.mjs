@@ -172,6 +172,31 @@ export function isValidEnvConsistency(value) {
   return false;
 }
 
+export function isComposeIdentity(identity) {
+  return typeof identity === "object" && identity !== null &&
+    typeof identity.project_name === "string" && identity.project_name !== "" &&
+    Array.isArray(identity.services) && identity.services.every(service => typeof service === "string" && service !== "") &&
+    Array.isArray(identity.service_mounts) && identity.service_mounts.every(mount =>
+      typeof mount === "object" && mount !== null && typeof mount.type === "string" && typeof mount.source === "string");
+}
+
+export function isComposePlan(value) {
+  if (typeof value !== "object" || value === null || !SHA256_RE.test(value.compose_sha256) ||
+      !SHA256_RE.test(value.env_sha256) || !isComposeIdentity(value.identity)) return false;
+  const files = value.compose_files;
+  if (!Array.isArray(files) || files.length < 1 || files.length > 2) return false;
+  if (files[0]?.source !== "docker-compose.yaml") return false;
+  if (files.length === 2 && !["docker-compose.override.yml", "docker-compose.override.yaml"].includes(files[1]?.source)) return false;
+  return files.every(file => typeof file === "object" && file !== null &&
+    typeof file.path === "string" && file.path !== "" && typeof file.sha256 === "string" && SHA256_RE.test(file.sha256)) &&
+    new Set(files.map(file => file.path)).size === files.length;
+}
+
+// Historical plans were not validated during scans; reject unusable legacy plans only at use time.
+export function isComposePlanIfRecorded(value) {
+  return typeof value !== "object" || value === null || !Object.hasOwn(value, "compose_files") || isComposePlan(value);
+}
+
 /** Validates the shape the operator decisions on #303 fixed. STRICT, like
  *  verify-release.mjs's isBuildInfoShape: a manifest with any invalid
  *  field is not trustworthy over the whole, so this returns false rather
@@ -183,6 +208,7 @@ export function isValidManifestShape(value) {
     return false;
   }
   if (!isPathSha(value.compose_artifact)) return false;
+  if (!isComposePlanIfRecorded(value.recovery_plan) || !isComposePlanIfRecorded(value.target_plan)) return false;
   if (!isValidEnvConsistency(value.env_consistency)) return false;
   if (Object.hasOwn(value, "policy_store_placement") && !isPlacementReference(value.policy_store_placement)) return false;
   if (typeof value.image_id !== "string" || !IMAGE_ID_RE.test(value.image_id)) {

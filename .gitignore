@@ -34,6 +34,8 @@ node_modules/
 .env.*
 !.env.example
 server/oauth-allowlist.txt
+/server/docker-compose.override.yaml
+/server/docker-compose.override.yml
 
 # OS / editor
 .DS_Store

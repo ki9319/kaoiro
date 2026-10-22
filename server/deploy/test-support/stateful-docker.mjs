@@ -14,14 +14,16 @@ const statePath = process.env.FAKE_DOCKER_STATE;
 const state = JSON.parse(readFileSync(statePath, "utf8"));
 const args = process.argv.slice(2);
 const joined = args.join(" ");
+const operation = joined.replace(/^compose(?: (?:-f|--project-directory) \S+)+ /, "compose ");
+(state.argv ??= []).push(args);
 const save = () => writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
 const out = (value) => process.stdout.write(`${typeof value === "string" ? value : JSON.stringify(value)}\n`);
 const die = (message, code = 1) => { save(); process.stderr.write(`${message}\n`); process.exit(code); };
 
-state.calls.push(joined);
+state.calls.push(operation);
 let afterEffect = null;
 for (const [index, fault] of state.faults.entries()) {
-  if (!new RegExp(fault.match).test(joined)) continue;
+  if (!new RegExp(fault.match).test(operation)) continue;
   state.counters[index] = (state.counters[index] ?? 0) + 1;
   if (state.counters[index] !== (fault.nth ?? 1)) continue;
   if (fault.kind === "fail") die(`injected failure: ${joined}`);
@@ -51,10 +53,17 @@ function finish() {
 }
 
 function compose(rest) {
-  let recovery = false;
+  const files = [];
   while (rest[0] === "-f" || rest[0] === "--project-directory") {
-    if (rest[0] === "-f") recovery = true;
+    if (rest[0] === "-f") files.push(rest[1]);
     rest = rest.slice(2);
+  }
+  if (files.length === 0) {
+    files.push(join(process.cwd(), "docker-compose.yaml"));
+    for (const name of ["docker-compose.override.yml", "docker-compose.override.yaml"]) {
+      try { readFileSync(join(process.cwd(), name)); files.push(join(process.cwd(), name)); break; }
+      catch (err) { if (err.code !== "ENOENT") throw err; }
+    }
   }
   const [sub, ...tail] = rest;
   if (sub === "ps") {
@@ -66,7 +75,10 @@ function compose(rest) {
   }
   if (sub === "config") {
     const volumes = [{ type: "volume", source: "kaoiro-state", target: "/var/lib/kaoiro", volume: {} }];
-    if (state.overrideMount && !recovery) volumes.push({ type: "bind", source: "/srv/overlay", target: "/overlay", read_only: true });
+    for (const file of files.slice(1)) {
+      const override = JSON.parse(readFileSync(file, "utf8"));
+      volumes.push(...(override.services.kaoiro.volumes ?? []));
+    }
     out({ name: "kaoiro", services: { kaoiro: { environment: {}, volumes } }, volumes: { "kaoiro-state": { name: state.volume.name } } });
     return finish();
   }

@@ -64,3 +64,13 @@ See [the placement procedure](../../operations/server-update-and-rollback.md#del
 
 - [Server update and rollback](../../operations/server-update-and-rollback.md).
 - [Server deploy configuration](../configuration/server-deploy.md).
+
+### Bound Compose input files
+
+New server transactions store ordered `compose_files` entries (`source`, `path`, `sha256`) in each
+recovery/target plan. The base comes first and an optional selected override follows; the latter is
+a transaction-owned mode-0600 copy shared by both plans. Explicit `-f` inputs retain the original
+server `--project-directory`, including on rollback. Forward additionally checks equality against
+actual Compose default discovery. Legacy plans without the field remain readable and base-only;
+strict new-plan validation does not retroactively tighten their read/scan schema. See the server
+update/rollback runbook's Compose override section for drift exits and retained-secret handling.

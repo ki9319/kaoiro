@@ -8,6 +8,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  statSync,
   rmSync,
   writeFileSync,
   writeSync,
@@ -178,4 +179,20 @@ test("fsyncExistingPath propagates a fsyncSync failure and still closes the fd",
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("writeFileDurably creates private bytes with mode 0600 before writing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "kaoiro-deploy-private-"));
+  const target = join(dir, "override.yaml");
+  const calls = [];
+  const base = trackingFs(calls);
+  const prior = process.umask(0);
+  try {
+    writeFileDurably(target, "private fixture\n", { ...base, openSync(path, flags, mode) {
+      if (path !== dir) { assert.equal(flags, "wx"); assert.equal(mode, 0o600); }
+      return base.openSync(path, flags, mode);
+    } }, { mode: 0o600 });
+    assert.equal(readFileSync(target, "utf8"), "private fixture\n");
+    assert.equal(statSync(target).mode & 0o777, 0o600);
+  } finally { process.umask(prior); rmSync(dir, { recursive: true, force: true }); }
 });

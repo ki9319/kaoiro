@@ -14,6 +14,7 @@
 // until the work that defines the rest lands.
 import {
   IMAGE_ID_RE,
+  isComposePlanIfRecorded,
   isPathSha,
   isValidEnvConsistency,
   isValidRequiredEntries,
@@ -156,6 +157,7 @@ const OBSERVATION_SCHEMAS = {
     (obs.old_container_id === undefined ||
       (typeof obs.old_container_id === "string" && obs.old_container_id !== "")) &&
     isPathSha(obs.compose_artifact) &&
+    isComposePlanIfRecorded(obs.recovery_plan) &&
     typeof obs.rollback_tag === "string" &&
     ROLLBACK_TAG_RE.test(obs.rollback_tag) &&
     obs.rollback_tag === `kaoiro-server:rollback-${obs.old_sha}` &&
@@ -168,7 +170,8 @@ const OBSERVATION_SCHEMAS = {
     typeof obs.image_tag === "string" &&
     obs.image_tag !== "" &&
     typeof obs.target_sha === "string" &&
-    SHA_RE.test(obs.target_sha),
+    SHA_RE.test(obs.target_sha) &&
+    isComposePlanIfRecorded(obs.target_plan),
   // issue #220 absorption: the observation IS the manifest's own
   // env_consistency shape (isValidEnvConsistency, imported rather than
   // redefined — see that function's own doc comment).

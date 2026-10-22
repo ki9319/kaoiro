@@ -34,8 +34,8 @@ export const BRANCH = Object.freeze({
  *  which on a host that merely could not be checked would risk
  *  (re-)initializing over state that may well still be there. It
  *  diagnoses instead, the same as an unrecognised container status. */
-export function classify(bin, cwd, service, hasState) {
-  const names = dockerComposeContainerNames(bin, cwd, service);
+export function classify(bin, cwd, service, hasState, composeArgs = []) {
+  const names = dockerComposeContainerNames(bin, cwd, service, composeArgs);
   if (names.length > 1) {
     return {
       branch: BRANCH.DIAGNOSE,
@@ -76,8 +76,8 @@ export function classify(bin, cwd, service, hasState) {
  *  (stopped, multiple, unknown status) is refused here rather than
  *  auto-classified — running `status`/`start` first is what tells the
  *  operator which of A-D they are actually looking at. */
-export function requireRunningContainer(bin, cwd, service) {
-  const names = dockerComposeContainerNames(bin, cwd, service);
+export function requireRunningContainer(bin, cwd, service, composeArgs = []) {
+  const names = dockerComposeContainerNames(bin, cwd, service, composeArgs);
   if (names.length !== 1) {
     throw new BranchError(
       `expected exactly one container for service ${service}, found ${names.length}; run 'status' first`,

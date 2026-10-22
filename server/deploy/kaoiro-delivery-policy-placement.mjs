@@ -166,7 +166,7 @@ export function readPlacementReference(dir, reference, binding = {}) {
   return record;
 }
 
-export function preparePolicyPlacement({ bin, serverDir, imageId, transactionId, dir, targetPlan, queryPaths, expectedStateSource, previous, knownRegistration }) {
+export function preparePolicyPlacement({ bin, serverDir, imageId, transactionId, dir, targetPlan, queryPaths, expectedStateSource, previous, knownRegistration, composeArgs = [] }) {
   const rawPresence = runDocker(bin, ["run", "--rm", "--network", "none", "--entrypoint", "/bin/sh", imageId, "-c",
     "ls /app/lib/kaoiro_server-*/ebin/Elixir.KaoiroServer.DeliveryPolicies.beam >/dev/null 2>&1 && echo present || echo absent"]);
   if (!["present", "absent"].includes(rawPresence)) refuse("unknown DeliveryPolicies module observation");
@@ -190,7 +190,7 @@ export function preparePolicyPlacement({ bin, serverDir, imageId, transactionId,
       registrations[0].default_file !== "delivery_policies.dets") refuse("policy module and canonical registration disagree");
   const binding = { transaction_id: transactionId, image_id: imageId, compose_sha256: targetPlan.compose_sha256, env_sha256: targetPlan.env_sha256 };
   const prior = previous ? readPlacementReference(dir, previous, binding) : undefined;
-  const compose = json(runDocker(bin, ["compose", "config", "--format", "json"], { cwd: serverDir }), "effective compose");
+  const compose = json(runDocker(bin, ["compose", ...composeArgs, "config", "--format", "json"], { cwd: serverDir }), "effective compose");
   if (hash(JSON.stringify(canonical(compose))) !== targetPlan.compose_sha256) refuse("compose plan changed during placement observation");
   const service = compose.services?.kaoiro;
   if (!plain(service?.environment)) refuse("policy environment is not an effective compose map");

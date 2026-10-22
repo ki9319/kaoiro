@@ -297,3 +297,26 @@ test("readManifest throws on invalid JSON", () => {
   writeFileSync(target, "not json at all");
   assert.throws(() => readManifest(dir), ManifestError);
 });
+
+function composePlanFixture() {
+  return { compose_sha256: "a".repeat(64), env_sha256: "b".repeat(64),
+    identity: { project_name: "fixture", services: ["kaoiro"], service_mounts: [] },
+    compose_files: [{ source: "docker-compose.yaml", path: "/fixture/base", sha256: "c".repeat(64) },
+      { source: "docker-compose.override.yml", path: "/fixture/copy", sha256: "d".repeat(64) }] };
+}
+
+for (const field of ["recovery_plan", "target_plan"]) {
+  test(`Compose inputs: manifest validates new ${field} but reads legacy plans`, () => {
+    const value = validManifest();
+    value[field] = { compose_sha256: "a".repeat(64) };
+    assert.equal(isValidManifestShape(value), true);
+    value[field] = composePlanFixture();
+    assert.equal(isValidManifestShape(value), true);
+    for (const mutate of [p => { p.compose_files = []; }, p => { p.compose_files.reverse(); },
+      p => { p.compose_files[1].path = p.compose_files[0].path; }, p => { p.compose_files[0].sha256 = "bad"; },
+      p => { delete p.identity; }, p => { p.compose_files.push(p.compose_files[1]); }]) {
+      value[field] = composePlanFixture(); mutate(value[field]);
+      assert.equal(isValidManifestShape(value), false);
+    }
+  });
+}

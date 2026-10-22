@@ -964,3 +964,35 @@ reviewed execution card to stop/revert incompatible runners/wrappers before
 rolling back a server that predates the reader bridge. Invalid target image
 identity is never waived. Server DONE alone does not authorize a release tag;
 complete the [joint release checkpoint](build-identity-and-release-tags.md).
+
+### Compose overrides during updates and recovery
+
+The update transaction supports `server/docker-compose.yaml` plus the same directory's
+`docker-compose.override.yml` (preferred) or `docker-compose.override.yaml`. Both override names
+are ignored by Git; keep their contents out of commits. Other Compose discovery names and
+`COMPOSE_FILE` / `COMPOSE_ENV_FILES` selection are refused during forward prepare/resume.
+The `.env` selector-name check is conservative and also rejects mentions in comments or values.
+
+Prepare keeps a private mode-0600 override copy and records ordered input paths and SHA-256 hashes
+in `recovery_plan.compose_files` and `target_plan.compose_files`. Transaction directories follow
+the process umask; directory privacy is not promised. Retained transactions retain the private copy,
+which can contain secrets; rolled-back transactions are not automatically pruned.
+
+Forward checks compare live selection/bytes and the actual default-discovery render with the
+explicit saved-input render, after build and preparation and immediately before stop and start.
+A drift refusal names the saved copy and offers two exits: restore the original inputs and resume
+the recorded update, or use the transaction's rollback command. A refusal before start can leave
+the old container stopped; follow that rollback guidance rather than starting an unverified target.
+
+Destructive rollback uses explicit saved inputs, never current override discovery or forward selector
+checks. It still verifies recorded file/render hashes, `.env`, image, archive, container and fleet
+bindings. Removing or editing a live override does not replace the saved recovery input. Legacy
+records without `compose_files` remain base-only: forward refuses a later override, and destructive
+rollback recreates without it. If the historical ambient target render differs from base-only,
+rollback refuses rather than guessing uncaptured override bytes. Missing legacy plan identity does
+not prevent status from reading the record; an operation requiring that identity refuses at use.
+
+Include/extends are accepted only when actual default and explicit rendering agree. Referenced
+files and bind-source contents are not recursively copied or independently hash-bound; this is the
+same limit as the base Compose plan. Existing deployment locks serialize cooperating CLI actions,
+not out-of-band configuration edits.

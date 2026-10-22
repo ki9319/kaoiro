@@ -33,7 +33,7 @@ import {
   runDocker,
 } from "./kaoiro-deploy-docker.mjs";
 import { advancePhase, readJournal, writeJournal } from "./kaoiro-deploy-journal.mjs";
-import { readManifest, writeManifest } from "./kaoiro-deploy-manifest.mjs";
+import { isComposeIdentity, isComposePlan, SHA256_RE, readManifest, writeManifest } from "./kaoiro-deploy-manifest.mjs";
 import { PHASE, TRANSITIONS, validateJournalAgainstStateMachine } from "./kaoiro-deploy-phase.mjs";
 import { acquireLock, LockError, releaseLock } from "./kaoiro-deploy-lock.mjs";
 import { entryActs, formatRecovery, OPERATION, recoveryFacts, renderRecovery, selectEntry } from "./kaoiro-deploy-recovery.mjs";
@@ -200,7 +200,7 @@ function composeIdentity(parsed) {
   return { project_name: parsed.name, services: serviceNames, service_mounts: mounts };
 }
 
-function composePlan(bin, serverDir, composeArgs = []) {
+export function composePlan(bin, serverDir, composeArgs = [], composeFiles) {
   let rendered;
   try {
     rendered = runDocker(bin, ["compose", ...composeArgs, "config", "--format", "json"], { cwd: serverDir });
@@ -224,6 +224,7 @@ function composePlan(bin, serverDir, composeArgs = []) {
     compose_sha256: sha256Bytes(JSON.stringify(normalizeJson(parsed))),
     env_sha256: sha256Bytes(envBytes),
     identity: composeIdentity(parsed),
+    ...(composeFiles === undefined ? {} : { compose_files: composeFiles }),
   };
 }
 
@@ -231,8 +232,8 @@ function recoveryComposePath(dir) {
   return join(dir, "recovery-compose.yaml");
 }
 
-function recoveryComposeArgs(path, serverDir) {
-  return ["-f", path, "--project-directory", serverDir];
+function recoveryComposeArgs(path, serverDir, override) {
+  return ["-f", path, ...(override ? ["-f", override] : []), "--project-directory", serverDir];
 }
 
 function recoveryComposeSource(repo, oldSha) {
@@ -246,7 +247,7 @@ function recoveryComposeSource(repo, oldSha) {
   return gitFile(["show", `${oldSha}:server/docker-compose.yaml`], repo);
 }
 
-function recoveryPlanAt(bin, repo, serverDir, oldSha, path) {
+function recoveryPlanAt(bin, repo, serverDir, oldSha, path, recorded, dir) {
   const source = recoveryComposeSource(repo, oldSha);
   let recordedSourceSha;
   try {
@@ -259,7 +260,8 @@ function recoveryPlanAt(bin, repo, serverDir, oldSha, path) {
       `recovery compose file ${path} no longer matches old image revision ${oldSha} — refusing before Docker mutation`,
     );
   }
-  return composePlan(bin, serverDir, recoveryComposeArgs(path, serverDir));
+  const args = recorded === undefined ? recoveryComposeArgs(path, serverDir) : boundComposeArgs(recorded, serverDir, dir, true);
+  return composePlan(bin, serverDir, args, recorded?.compose_files);
 }
 
 function requirePlanMatch(recorded, current, label) {
@@ -272,23 +274,84 @@ function requirePlanMatch(recorded, current, label) {
   }
 }
 
+const COMPOSE_OVERRIDES = ["docker-compose.override.yml", "docker-compose.override.yaml"];
+const COMPOSE_ALTERNATIVES = ["compose.yaml", "compose.yml", "docker-compose.yml", "compose.override.yaml", "compose.override.yml"];
+const COMPOSE_SELECTORS = ["COMPOSE_FILE", "COMPOSE_ENV_FILES"];
+
+function checkComposeSelectors(serverDir) {
+  for (const name of COMPOSE_SELECTORS) {
+    if (Object.hasOwn(process.env, name)) fail(`unsupported Compose selector ${name}; unset it before prepare`);
+  }
+  let dotEnv = "";
+  try { dotEnv = readFileSync(join(serverDir, ".env"), "utf8"); }
+  catch (err) { if (err.code !== "ENOENT") fail("could not read Compose .env before prepare"); }
+  for (const name of COMPOSE_SELECTORS) {
+    if (dotEnv.includes(name)) fail(`unsupported Compose selector name ${name} in .env; remove it before prepare`);
+  }
+  for (const name of COMPOSE_ALTERNATIVES) {
+    if (existsSync(join(serverDir, name))) fail(`unsupported Compose discovery file ${name}; use docker-compose.yaml and its supported override`);
+  }
+}
+
+function selectedComposeOverride(serverDir) {
+  return COMPOSE_OVERRIDES.find(name => existsSync(join(serverDir, name)));
+}
+
+function overrideCopyPath(dir, source) {
+  return join(dir, source.endsWith(".yml") ? "compose-override.yml" : "compose-override.yaml");
+}
+
+function composeFile(source, path) {
+  return { source, path, sha256: sha256File(path) };
+}
+
+function boundComposeArgs(plan, serverDir, dir, recovery = false) {
+  const base = recovery ? recoveryComposePath(dir) : join(serverDir, "docker-compose.yaml");
+  if (!SHA256_RE.test(plan?.compose_sha256) || !SHA256_RE.test(plan?.env_sha256) || !isComposeIdentity(plan?.identity)) {
+    fail("recorded compose plan lacks a usable project identity or hashes; refusing before Docker mutation");
+  }
+  if (!Object.hasOwn(plan, "compose_files")) return recoveryComposeArgs(base, serverDir);
+  if (!isComposePlan(plan)) fail("recorded compose plan has invalid compose_files; refusing before Docker mutation");
+  const args = [];
+  for (const [index, file] of plan.compose_files.entries()) {
+    const expected = index === 0 ? base : overrideCopyPath(dir, file.source);
+    if (file.path !== expected) fail("recorded compose file path is outside its bound checkout/transaction location");
+    let hash;
+    try { hash = sha256File(expected); } catch { fail(`could not read saved compose input ${expected}; refusing before Docker mutation`); }
+    if (hash !== file.sha256) fail(`saved compose input hash changed: ${expected}; refusing before Docker mutation`);
+    args.push("-f", expected);
+  }
+  return [...args, "--project-directory", serverDir];
+}
+
+function targetPlanAt(bin, serverDir, dir, plan) {
+  return composePlan(bin, serverDir, boundComposeArgs(plan, serverDir, dir), plan?.compose_files);
+}
+
+export function checkForwardCompose(bin, serverDir, dir, recoveryPlan, targetPlan, target) {
+  checkComposeSelectors(serverDir);
+  boundComposeArgs(recoveryPlan, serverDir, dir, true);
+  const captured = recoveryPlan?.compose_files?.[1];
+  const selected = selectedComposeOverride(serverDir);
+  const copy = captured?.path ?? recoveryComposePath(dir);
+  const refuseDrift = cause => fail(`${cause}; captured input copy: ${copy}. Restore the original inputs and resume update --repo ${dirname(serverDir)} --target ${target} --transaction ${basename(dir)}, or roll back with rollback --repo ${dirname(serverDir)} --transaction ${basename(dir)} --confirm-restore`);
+  if (selected !== captured?.source) refuseDrift("selected Compose override changed since capture (legacy records cannot adopt an override)");
+  if (captured && sha256File(join(serverDir, selected)) !== captured.sha256) refuseDrift("selected Compose override bytes changed since capture");
+  const files = recoveryPlan?.compose_files === undefined ? undefined :
+    [composeFile("docker-compose.yaml", join(serverDir, "docker-compose.yaml")), ...recoveryPlan.compose_files.slice(1)];
+  const current = composePlan(bin, serverDir,
+    recoveryComposeArgs(join(serverDir, "docker-compose.yaml"), serverDir, captured?.path), files);
+  const ambient = composePlan(bin, serverDir);
+  if (current.compose_sha256 !== ambient.compose_sha256) refuseDrift("default-discovery and explicit Compose renders differ");
+  if (targetPlan !== undefined) {
+    boundComposeArgs(targetPlan, serverDir, dir);
+    requirePlanMatch(targetPlan, current, "target");
+  }
+  return current;
+}
+
 function requirePlanIdentityMatch(recoveryPlan, targetPlan) {
-  const isIdentity = (identity) =>
-    typeof identity === "object" &&
-    identity !== null &&
-    typeof identity.project_name === "string" &&
-    identity.project_name !== "" &&
-    Array.isArray(identity.services) &&
-    identity.services.every((service) => typeof service === "string" && service !== "") &&
-    Array.isArray(identity.service_mounts) &&
-    identity.service_mounts.every(
-      (mount) =>
-        typeof mount === "object" &&
-        mount !== null &&
-        typeof mount.type === "string" &&
-        typeof mount.source === "string",
-    );
-  if (!isIdentity(recoveryPlan?.identity) || !isIdentity(targetPlan?.identity)) {
+  if (!isComposeIdentity(recoveryPlan?.identity) || !isComposeIdentity(targetPlan?.identity)) {
     fail("recorded compose plan lacks a usable project identity; refusing before Docker mutation");
   }
   if (JSON.stringify(recoveryPlan.identity) !== JSON.stringify(targetPlan.identity)) {
@@ -368,11 +431,11 @@ function readRollbackCandidate(bin, containerId, identity, volumeId) {
   };
 }
 
-function rollbackCandidateIds(bin, serverDir, recoveryArgs, volumeId) {
+function rollbackCandidateIds(bin, serverDir, recoveryArgs, volumeId, targetArgs) {
   let ids;
   try {
     ids = [
-      ...dockerComposeContainerIds(bin, serverDir, SERVICE, [], true),
+      ...dockerComposeContainerIds(bin, serverDir, SERVICE, targetArgs, true),
       ...dockerComposeContainerIds(bin, serverDir, SERVICE, recoveryArgs, true),
       ...dockerVolumeContainerIds(bin, volumeId),
     ];
@@ -393,8 +456,9 @@ function requireRollbackContainersStopped(
   identity,
   volumeId,
   position,
+  targetArgs,
 ) {
-  const runningTargetIds = dockerComposeContainerIds(bin, serverDir, SERVICE);
+  const runningTargetIds = dockerComposeContainerIds(bin, serverDir, SERVICE, targetArgs);
   const runningRecoveryIds = dockerComposeContainerIds(bin, serverDir, SERVICE, recoveryArgs);
   if (runningTargetIds.length !== 0 || runningRecoveryIds.length !== 0) {
     fail(
@@ -843,10 +907,10 @@ function readEnvFileValue(envPath, envName) {
  *  treats as a hard failure, not a skip. Same treatment here: a shape
  *  this function does not recognize is a `DeployError`, never a quiet
  *  `{}`. */
-function composeDeclaredEnv(bin, serverDir) {
+function composeDeclaredEnv(bin, serverDir, composeArgs = []) {
   let raw;
   try {
-    raw = runDocker(bin, ["compose", "config", "--format", "json"], { cwd: serverDir });
+    raw = runDocker(bin, ["compose", ...composeArgs, "config", "--format", "json"], { cwd: serverDir });
   } catch (err) {
     fail(`'docker compose config' failed: ${err.message}`);
   }
@@ -993,7 +1057,7 @@ function checkEnvConsistency(
   composeEnv,
   containerEnv,
   oldPathsByEnv,
-  { bin, container, serverDir, acceptNewStores },
+  { bin, container, serverDir, acceptNewStores, composeArgs = [] },
 ) {
   const accepted = new Set(acceptNewStores ?? []);
   const known = new Set(paths.map((p) => p.env));
@@ -1027,7 +1091,7 @@ function checkEnvConsistency(
           `${envName}: --accept-new-store refused because the running container already has this variable set to ${JSON.stringify(containerRaw)}, so the store was configured before this update — follow docs/operations/server-update-and-rollback.md 4.3 (5-b) before retrying`,
         );
       }
-      const stateVolume = resolveNamedVolumeFromCompose(bin, serverDir);
+      const stateVolume = resolveNamedVolumeFromCompose(bin, serverDir, composeArgs);
       if (!stateVolume.ok || !isUnderStateVolume(compose)) {
         fail(`${envName}: cannot accept first application because compose does not place ${JSON.stringify(compose)} under the /var/lib/kaoiro named volume${stateVolume.ok ? "" : ` (${stateVolume.reason})`}`);
       }
@@ -1310,10 +1374,10 @@ function isDockerReachable(bin) {
  *  resolutions already key on. Returns `{ok: false, reason}` on
  *  anything unexpected — a caller must never treat that as "no volume
  *  configured". */
-function resolveNamedVolumeFromCompose(bin, serverDir) {
+function resolveNamedVolumeFromCompose(bin, serverDir, composeArgs = []) {
   let raw;
   try {
-    raw = runDocker(bin, ["compose", "config", "--format", "json"], { cwd: serverDir });
+    raw = runDocker(bin, ["compose", ...composeArgs, "config", "--format", "json"], { cwd: serverDir });
   } catch (err) {
     return { ok: false, reason: `'docker compose config' failed: ${err.message}` };
   }
@@ -1448,7 +1512,7 @@ function normalizeBuildFlags(flags) {
   return { repo, target: flags.target, dryRun: flags.dryRun === true };
 }
 
-function buildUnderLock({ repo, target }, config) {
+function buildUnderLock({ repo, target }, config, composeArgs = []) {
   const { bin, overridden } = resolveDockerBin(config);
   const serverDir = join(repo, "server");
 
@@ -1474,7 +1538,7 @@ function buildUnderLock({ repo, target }, config) {
   try { frozen = artifactBuildIdentity(requireTaggedIdentity(repo, { target })); }
   catch (error) { fail(error.message); }
   assertSourceIdentity(repo, frozen);
-  runDocker(bin, ["compose", "build"], {
+  runDocker(bin, ["compose", ...composeArgs, "build"], {
     cwd: serverDir,
     env: {
       ...process.env,
@@ -1510,12 +1574,13 @@ function buildUnderLock({ repo, target }, config) {
  *  repoints `kaoiro-server:latest` at the new image, so any failure from
  *  here on attempts to point it back at the old image and says whether
  *  that was confirmed by read-back. */
-function prepareTarget({ bin, repo, serverDir, target, config, dir, journal, oldImageId, recoveryPlan }) {
+function prepareTarget({ bin, repo, serverDir, target, config, dir, journal, oldImageId, recoveryPlan, resume = false }) {
   let buildResult;
   let targetPlan;
+  if (resume) checkForwardCompose(bin, serverDir, dir, recoveryPlan, undefined, target);
   try {
-    buildResult = buildUnderLock({ repo, target }, config);
-    targetPlan = composePlan(bin, serverDir);
+    buildResult = buildUnderLock({ repo, target }, config, recoveryComposeArgs(join(serverDir, "docker-compose.yaml"), serverDir, recoveryPlan.compose_files?.[1]?.path));
+    targetPlan = checkForwardCompose(bin, serverDir, dir, recoveryPlan, undefined, target);
     requirePlanIdentityMatch(recoveryPlan, targetPlan);
   } catch (err) {
     try {
@@ -2048,6 +2113,7 @@ export function runUpdate(flags, config) {
   const backupRoot = resolveBackupRoot(config);
   const dryRun = flags.dryRun === true;
 
+  checkComposeSelectors(serverDir);
   const admissionAudit = auditServerRelease(flags, serverDir, repo);
 
   if (dryRun) {
@@ -2161,7 +2227,7 @@ export function runUpdate(flags, config) {
       // Re-verify: prepare ran against a running container, and resume
       // may happen an arbitrary time later — nothing here should trust
       // that it still is.
-      container = requireRunningContainer(bin, serverDir, SERVICE);
+      container = requireRunningContainer(bin, serverDir, SERVICE, recoveryComposeArgs(join(serverDir, "docker-compose.yaml"), serverDir, recoveryPlan.compose_files?.[1]?.path));
       if (journal.phase === PHASE.OLD_IMAGE_SAVED) {
         // issue #695: the build is retried only from the exact recorded
         // starting point; every recorded fact is compared with a live
@@ -2183,8 +2249,8 @@ export function runUpdate(flags, config) {
         if (tagId !== oldImageId) {
           fail(`rollback tag ${rollbackTag} points at ${tagId}, not the recorded ${oldImageId} — refusing to retry the build`);
         }
-        requirePlanMatch(recoveryPlan, recoveryPlanAt(bin, repo, serverDir, oldSha, recoveryComposeFile), "recovery");
-        ({ journal, buildResult, targetPlan } = prepareTarget({ bin, repo, serverDir, target, config, dir, journal, oldImageId, recoveryPlan }));
+        requirePlanMatch(recoveryPlan, recoveryPlanAt(bin, repo, serverDir, oldSha, recoveryComposeFile, recoveryPlan, dir), "recovery");
+        ({ journal, buildResult, targetPlan } = prepareTarget({ bin, repo, serverDir, target, config, dir, journal, oldImageId, recoveryPlan, resume: true }));
       } else {
         const buildEntry = journal.history.find((e) => e.phase === PHASE.BUILD_PREPARED);
         if (buildEntry.observation.target_sha !== target) {
@@ -2250,7 +2316,18 @@ export function runUpdate(flags, config) {
       }
       recoveryComposeFile = recoveryComposePath(dir);
       writeFileDurably(recoveryComposeFile, recoverySource);
-      recoveryPlan = composePlan(bin, serverDir, recoveryComposeArgs(recoveryComposeFile, serverDir));
+      const selected = selectedComposeOverride(serverDir);
+      const recoveryFiles = [composeFile("docker-compose.yaml", recoveryComposeFile)];
+      if (selected) {
+        const bytes = readFileSync(join(serverDir, selected));
+        const copy = overrideCopyPath(dir, selected);
+        writeFileDurably(copy, bytes, undefined, { mode: 0o600 });
+        if (sha256File(copy) !== sha256Bytes(bytes)) fail("Compose override copy bytes do not match captured input");
+        recoveryFiles.push(composeFile(selected, copy));
+      }
+      recoveryPlan = composePlan(bin, serverDir, recoveryComposeArgs(recoveryComposeFile, serverDir, selected && overrideCopyPath(dir, selected)), recoveryFiles);
+      const initial = checkForwardCompose(bin, serverDir, dir, recoveryPlan, undefined, target);
+      if (composeArtifact.sha256 === sha256Bytes(recoverySource)) requirePlanMatch(recoveryPlan, initial, "relocated recovery");
       journal = {
         schema_version: 1,
         release_context: releaseAudit.release_context ?? null,
@@ -2340,10 +2417,10 @@ export function runUpdate(flags, config) {
           const entries = checkEnvConsistency(
             persistencePaths.paths,
             join(serverDir, ".env"),
-            composeDeclaredEnv(bin, serverDir),
+            composeDeclaredEnv(bin, serverDir, boundComposeArgs(targetPlan, serverDir, dir)),
             containerEffectiveEnv(bin, container),
             oldPathsByEnv,
-            { bin, container, serverDir, acceptNewStores: flags.acceptNewStores },
+            { bin, container, serverDir, composeArgs: boundComposeArgs(targetPlan, serverDir, dir), acceptNewStores: flags.acceptNewStores },
           );
           envConsistency = { skipped: false, entries };
           if (!Object.values(entries).every((e) => e.match)) {
@@ -2427,11 +2504,11 @@ export function runUpdate(flags, config) {
     }
 
     try {
-      requirePlanMatch(targetPlan, composePlan(bin, serverDir), "target");
+      requirePlanMatch(targetPlan, targetPlanAt(bin, serverDir, dir, targetPlan), "target");
       const placement = preparePolicyPlacement({ bin, serverDir, imageId: buildResult.imageId,
         transactionId, dir, targetPlan, queryPaths: () => queryPersistencePaths(bin, buildResult.imageId),
         expectedStateSource: () => resolveKaoiroLibMount(bin, container), previous: journal.policy_store_placement,
-        knownRegistration: journal.policy_store_registration });
+        knownRegistration: journal.policy_store_registration, composeArgs: boundComposeArgs(targetPlan, serverDir, dir) });
       if (placement !== undefined) {
         journal = { ...journal, policy_store_placement: placement };
         writeJournal(dir, journal, validateJournalAgainstStateMachine);
@@ -2446,16 +2523,16 @@ export function runUpdate(flags, config) {
       fail(err.message);
     }
 
+    checkForwardCompose(bin, serverDir, dir, recoveryPlan, targetPlan, target);
     if (flags.maintenanceApproved !== true) {
       fail(
         `update requires --maintenance-approved before the stop window opens (no-downtime steps are complete); resume once the operator has approved the maintenance window`,
         64,
       );
     }
-    requirePlanMatch(targetPlan, composePlan(bin, serverDir), "target");
     requirePlanMatch(
       recoveryPlan,
-      recoveryPlanAt(bin, repo, serverDir, oldSha, recoveryComposeFile),
+      recoveryPlanAt(bin, repo, serverDir, oldSha, recoveryComposeFile, recoveryPlan, dir),
       "recovery",
     );
     requirePlanIdentityMatch(recoveryPlan, targetPlan);
@@ -2481,6 +2558,7 @@ export function runUpdate(flags, config) {
     // MAINTENANCE_GATE_PASSED).
     const fleetCompatibility = compatibleFleet({ bin, targetImageId: buildResult.imageId,
       targetRevision: target, containerId: oldContainerId, fleetStopped: flags.fleetStopped === true });
+    checkForwardCompose(bin, serverDir, dir, recoveryPlan, targetPlan, target);
     journal = advancePhase(dir, journal, PHASE.STOPPING, { fleet_compatibility: fleetCompatibility }, validateJournalAgainstStateMachine);
 
     // --- commit: from here on the service is stopped. Everything above
@@ -2488,11 +2566,11 @@ export function runUpdate(flags, config) {
     // comment; nothing below it may run before the checkpoint above it
     // completed (S1 item ii).
     requireSingleBoundContainer(
-      dockerComposeContainerIds(bin, serverDir, SERVICE),
+      dockerComposeContainerIds(bin, serverDir, SERVICE, boundComposeArgs(targetPlan, serverDir, dir)),
       oldContainerId,
       "target",
     );
-    runDocker(bin, ["compose", "stop", "-t", "30"], { cwd: serverDir, stdio: "inherit" });
+    runDocker(bin, ["compose", ...boundComposeArgs(targetPlan, serverDir, dir), "stop", "-t", "30"], { cwd: serverDir, stdio: "inherit" });
 
     requireStoppedContainer(bin, oldContainerId, "target");
     const stopExitCode = parseDockerIntField(dockerInspect(bin, oldContainerId, "{{.State.ExitCode}}"));
@@ -2675,13 +2753,14 @@ export function runUpdate(flags, config) {
     // would otherwise leave the journal at ARCHIVED, indistinguishable
     // from "up was never attempted" even though runbook 4.4 (3)'s
     // recovery branches on exactly that distinction.
+    checkForwardCompose(bin, serverDir, dir, recoveryPlan, targetPlan, target);
     journal = advancePhase(dir, journal, PHASE.STARTING, {}, validateJournalAgainstStateMachine);
-    runDocker(bin, ["compose", "up", "-d", "--no-build"], { cwd: serverDir, stdio: "inherit" });
+    runDocker(bin, ["compose", ...boundComposeArgs(targetPlan, serverDir, dir), "up", "-d", "--no-build"], { cwd: serverDir, stdio: "inherit" });
     // クロエ design review F2: `compose up -d` on a changed image
     // recreates the container (not the same one `container` above named
     // — a new id), and runbook 4.4 (3)'s recovery starts by stopping
     // THAT container, which is otherwise nowhere in the journal.
-    const newContainer = requireRunningContainer(bin, serverDir, SERVICE);
+    const newContainer = requireRunningContainer(bin, serverDir, SERVICE, boundComposeArgs(targetPlan, serverDir, dir));
     const newContainerId = dockerInspect(bin, newContainer, "{{.Id}}");
     const startedAt = dockerInspect(bin, newContainer, "{{.State.StartedAt}}");
     journal = advancePhase(
@@ -2693,7 +2772,7 @@ export function runUpdate(flags, config) {
     );
 
     const curlBin = resolveCurlBin();
-    const healthUrl = resolveHealthUrl(bin, serverDir, config);
+    const healthUrl = resolveHealthUrl(bin, serverDir, config, boundComposeArgs(targetPlan, serverDir, dir));
     const health = pollHealth(
       curlBin,
       healthUrl,
@@ -3000,16 +3079,11 @@ export function runRollback(flags, config) {
       };
     }
 
-    const liveContainers = flags.fleetStopped === true ? [] : dockerComposeContainerIds(bin, serverDir, SERVICE);
-    if (liveContainers.length > 1) fail("build identity guard requires one live server container", 78);
-    compatibleFleet({ bin, targetImageId: oldImageId,
-      targetRevision: oldSha, containerId: liveContainers[0], fleetStopped: flags.fleetStopped === true });
-
     // --- destructive path ---
     const manifest = readManifest(dir);
     const volumeId = manifest.volume_id;
     const recoveryComposeFile = recoveryComposePath(dir);
-    const recoveryArgs = recoveryComposeArgs(recoveryComposeFile, serverDir);
+
     if (manifest.recovery_plan === undefined || manifest.target_plan === undefined) {
       fail(
         `transaction ${flags.transaction} predates effective compose-plan recording; do not roll it back automatically — recover it through the deployment runbook`,
@@ -3017,10 +3091,12 @@ export function runRollback(flags, config) {
     }
     requirePlanMatch(
       manifest.recovery_plan,
-      recoveryPlanAt(bin, repo, serverDir, oldSha, recoveryComposeFile),
+      recoveryPlanAt(bin, repo, serverDir, oldSha, recoveryComposeFile, manifest.recovery_plan, dir),
       "recovery",
     );
-    requirePlanMatch(manifest.target_plan, composePlan(bin, serverDir), "target");
+    const targetArgs = boundComposeArgs(manifest.target_plan, serverDir, dir);
+    const recoveryArgs = boundComposeArgs(manifest.recovery_plan, serverDir, dir, true);
+    requirePlanMatch(manifest.target_plan, targetPlanAt(bin, serverDir, dir, manifest.target_plan), "target");
     requirePlanIdentityMatch(manifest.recovery_plan, manifest.target_plan);
     const identity = manifest.target_plan.identity;
     if (!identity.service_mounts.some((mount) => mount.type === "volume" && mount.source === volumeId)) {
@@ -3028,6 +3104,11 @@ export function runRollback(flags, config) {
         `recorded compose plan does not bind ${SERVICE} to rollback volume ${volumeId} — refusing before Docker mutation`,
       );
     }
+
+    const liveContainers = flags.fleetStopped === true ? [] : dockerComposeContainerIds(bin, serverDir, SERVICE, targetArgs);
+    if (liveContainers.length > 1) fail("build identity guard requires one live server container", 78);
+    compatibleFleet({ bin, targetImageId: oldImageId,
+      targetRevision: oldSha, containerId: liveContainers[0], fleetStopped: flags.fleetStopped === true });
 
     // issue #322 M3 (must-fix): the recovery PAIR this rollback depends on
     // — the old image, the pre-deploy archive, and a compose file that
@@ -3081,7 +3162,7 @@ export function runRollback(flags, config) {
     }
     const upEntry = journal.history.find((entry) => entry.phase === PHASE.UP);
     const recordedTargetId = upEntry?.observation?.container_id;
-    const candidates = rollbackCandidateIds(bin, serverDir, recoveryArgs, volumeId);
+    const candidates = rollbackCandidateIds(bin, serverDir, recoveryArgs, volumeId, targetArgs);
     if (typeof recordedTargetId === "string" && recordedTargetId !== "") {
       candidates.add(recordedTargetId);
     }
@@ -3116,6 +3197,7 @@ export function runRollback(flags, config) {
       identity,
       volumeId,
       "before forensic archive",
+      targetArgs,
     );
     journal = advancePhase(
       dir,
@@ -3204,6 +3286,7 @@ export function runRollback(flags, config) {
       identity,
       volumeId,
       "immediately before restore",
+      targetArgs,
     );
 
     runDocker(bin, [
