@@ -7,7 +7,6 @@
 // The COMMIT half (stop/archive/up/health-poll/retention) and
 // `rollback`/`status` land in later commits (commit split agreed with
 // yuta 2026-09-06).
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { execChildSync } from "../../runner/deploy/child-process-environment.mjs";
 import {
@@ -88,7 +87,7 @@ function compatibleFleet(input) {
 
 function gitOutput(args, cwd) {
   try {
-    return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+    return execChildSync("git", "git", args, { cwd, encoding: "utf8" }).trim();
   } catch (err) {
     fail(`git ${args.join(" ")} failed in ${cwd}: ${err.message}`);
   }
@@ -96,7 +95,7 @@ function gitOutput(args, cwd) {
 
 function gitFile(args, cwd) {
   try {
-    return execFileSync("git", args, { cwd, encoding: "utf8" });
+    return execChildSync("git", "git", args, { cwd, encoding: "utf8" });
   } catch (err) {
     fail(`git ${args.join(" ")} failed in ${cwd}: ${err.message}`);
   }
@@ -114,7 +113,7 @@ function gitFile(args, cwd) {
  *  `--dry-run` reader assume a live check ran. */
 function targetKnownLocally(target, repo) {
   try {
-    execFileSync("git", ["cat-file", "-e", `${target}^{commit}`], { cwd: repo, stdio: "ignore" });
+    execChildSync("git", "git", ["cat-file", "-e", `${target}^{commit}`], { cwd: repo, stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -604,7 +603,7 @@ function bracketIpv6HostPort(hostPort) {
 function fetchHealth(curlBin, url) {
   let raw;
   try {
-    raw = execFileSync(curlBin, ["-sS", "--fail", "--max-time", "5", url], { encoding: "utf8" });
+    raw = execChildSync("authority", curlBin, ["-sS", "--fail", "--max-time", "5", url], { encoding: "utf8" });
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -3149,7 +3148,7 @@ export function runRollback(flags, config) {
     // tzf pass is kept on purpose: it reports an integrity failure with its
     // own message, distinct from the listing or the required_entries check.
     try {
-      execFileSync("tar", ["tzf", manifest.archive.path]);
+      execChildSync("authority", "tar", ["tzf", manifest.archive.path]);
     } catch (err) {
       fail(
         `pre-deploy archive at ${manifest.archive.path} failed full-traversal verification: ${err.message} — refusing before stopping or touching anything`,
@@ -3240,7 +3239,7 @@ export function runRollback(flags, config) {
       ".",
     ]);
     try {
-      execFileSync("tar", ["tzf", forensicPath]);
+      execChildSync("authority", "tar", ["tzf", forensicPath]);
     } catch (err) {
       fail(`forensic archive of the current (pre-restore) volume state failed verification: ${err.message}`);
     }
@@ -3270,7 +3269,7 @@ export function runRollback(flags, config) {
       );
     }
     try {
-      execFileSync("tar", ["tzf", manifest.archive.path]);
+      execChildSync("authority", "tar", ["tzf", manifest.archive.path]);
     } catch (err) {
       fail(`pre-deploy archive at ${manifest.archive.path} failed full-traversal verification: ${err.message}`);
     }

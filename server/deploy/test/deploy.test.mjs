@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, test } from "node:test";
-import { CHILD_PATH } from "../../../runner/deploy/child-process-environment.mjs";
+import { CHILD_PATH, childEnvironmentProfile } from "../../../runner/deploy/child-process-environment.mjs";
 
 import { DEFAULT_CONFIG } from "../kaoiro-deploy-config.mjs";
 import { readJournal, writeJournal } from "../kaoiro-deploy-journal.mjs";
@@ -822,24 +822,17 @@ let workDir;
 let headSha;
 let bin;
 
-// Simulates `curl -sS --fail --max-time N <url>` for pollHealth: ignores
-// its own args entirely and replies with the env-var-controlled
-// build_revision/build_dirty, so each test decides what "the running
-// server" reports without a real HTTP server. KAOIRO_TEST_HEALTH_REVISION
-// unset (the "no server up yet" case) reports a value that can never
-// match a real 40-hex target. KAOIRO_TEST_HEALTH_DIRTY defaults to
-// "false" (director ruling 2026-09-06: healthy requires build_dirty ===
-// false too, not just a matching revision). issue #322 S2:
-// KAOIRO_TEST_HEALTH_CURL_FAIL simulates a genuine connection failure
-// (curl's own `--fail` exit) — distinct from "reachable but reports an
-// unexpected shape", which the JSON body path above already covers.
+// Sidecars keep health fixture controls outside the product child's allowlist.
 const FAKE_CURL = `#!/bin/sh
-if [ -n "$KAOIRO_TEST_HEALTH_CURL_FAIL" ]; then
+if [ -s "$0.fail" ]; then
   echo 'curl: (7) Failed to connect' >&2
   exit 7
 fi
-printf '{"build_revision":"%s","build_dirty":%s}' \\
-  "\${KAOIRO_TEST_HEALTH_REVISION:-no-server-yet}" "\${KAOIRO_TEST_HEALTH_DIRTY:-false}"
+if [ -f "$0.response" ]; then
+  cat -- "$0.response"
+else
+  printf '%s' '{"build_revision":"no-server-yet","build_dirty":false}'
+fi
 `;
 
 let curlBin;
@@ -906,6 +899,8 @@ function configWithCleanStopMeasured() {
 }
 
 function withOverrideEnv(fn) {
+  const sidecars = [curlBin + ".response", curlBin + ".fail"].map(path =>
+    [path, existsSync(path) ? readFileSync(path) : undefined]);
   const priorWorkDir = process.env.KAOIRO_TEST_WORK_DIR;
   process.env.KAOIRO_TEST_WORK_DIR = workDir;
   const priorDocker = process.env.KAOIRO_DEPLOY_DOCKER_BIN;
@@ -933,9 +928,16 @@ function withOverrideEnv(fn) {
   if (process.env.KAOIRO_TEST_HEALTH_REVISION === undefined) {
     process.env.KAOIRO_TEST_HEALTH_REVISION = headSha;
   }
+  writeFileSync(curlBin + ".response", `{"build_revision":"${process.env.KAOIRO_TEST_HEALTH_REVISION || "no-server-yet"}","build_dirty":${process.env.KAOIRO_TEST_HEALTH_DIRTY || "false"}}`, { mode: 0o600 });
+  if (process.env.KAOIRO_TEST_HEALTH_CURL_FAIL) writeFileSync(curlBin + ".fail", "1", { mode: 0o600 });
+  else rmSync(curlBin + ".fail", { force: true });
   try {
     return fn();
   } finally {
+    for (const [path, bytes] of sidecars) {
+      if (bytes === undefined) rmSync(path, { force: true });
+      else writeFileSync(path, bytes);
+    }
     if (priorWorkDir === undefined) delete process.env.KAOIRO_TEST_WORK_DIR;
     else process.env.KAOIRO_TEST_WORK_DIR = priorWorkDir;
     if (priorDocker === undefined) delete process.env.KAOIRO_DEPLOY_DOCKER_BIN;
@@ -965,6 +967,163 @@ function withScenario(scenario, fn) {
     else process.env.FAKE_DOCKER_SCENARIO = prior;
   }
 }
+
+test("fake curl uses only sidecars and preserves absent-file defaults", () => {
+  const env = { ...process.env, KAOIRO_TEST_HEALTH_REVISION: "ignored",
+    KAOIRO_TEST_HEALTH_DIRTY: "true", KAOIRO_TEST_HEALTH_CURL_FAIL: "1" };
+  const invoke = () => execFileSync(curlBin, [], { encoding: "utf8", env });
+  assert.equal(invoke(), '{"build_revision":"no-server-yet","build_dirty":false}');
+  writeFileSync(curlBin + ".response", '{"build_revision":"from-file","build_dirty":true}');
+  writeFileSync(curlBin + ".fail", "");
+  assert.equal(invoke(), '{"build_revision":"from-file","build_dirty":true}');
+  writeFileSync(curlBin + ".fail", "1");
+  assert.throws(invoke, error => error.status === 7 && /Failed to connect/.test(error.stderr));
+});
+
+test("health sidecar adapter restores nested bytes and prior absence", () => {
+  withOverrideEnv(() => {
+    const response = readFileSync(curlBin + ".response");
+    assert.equal(JSON.parse(response).build_revision, headSha);
+    writeFileSync(curlBin + ".fail", "outer");
+    assert.throws(() => withOverrideEnv(() => {
+      assert.equal(existsSync(curlBin + ".fail"), false);
+      writeFileSync(curlBin + ".response", "inner");
+      throw new Error("inner callback failed");
+    }), /inner callback failed/);
+    assert.deepEqual(readFileSync(curlBin + ".response"), response);
+    assert.equal(readFileSync(curlBin + ".fail", "utf8"), "outer");
+  });
+  assert.equal(existsSync(curlBin + ".response"), false);
+  assert.equal(existsSync(curlBin + ".fail"), false);
+});
+
+function observeDeployChildren(records, fn, beforeExec = () => {}) {
+  const original = childProcess.execFileSync;
+  const keys = ["KAOIRO_CHILD_SENTINEL", "GH_TOKEN"];
+  const prior = keys.map(key => process.env[key]);
+  for (const key of keys) process.env[key] = "inert-child-sentinel";
+  childProcess.execFileSync = (file, args, options) => {
+    if (file === "git" || file === curlBin || (file === "tar" && args[0] === "tzf")) {
+      const env = options?.env ?? process.env;
+      let profile;
+      try { profile = childEnvironmentProfile(env); } catch { profile = "raw"; }
+      records.push({ file, args: [...args], profile, path: env.PATH, locale: env.LC_ALL,
+        homePresent: typeof env.HOME === "string" && env.HOME.length > 0,
+        homeMatches: !process.env.HOME || env.HOME === process.env.HOME,
+        sentinel: Object.hasOwn(env, "KAOIRO_CHILD_SENTINEL"), token: Object.hasOwn(env, "GH_TOKEN"),
+        global: env.GIT_CONFIG_GLOBAL, system: env.GIT_CONFIG_SYSTEM,
+        noSystem: env.GIT_CONFIG_NOSYSTEM, prompt: env.GIT_TERMINAL_PROMPT });
+      beforeExec(records.at(-1));
+    }
+    return original(file, args, options);
+  };
+  syncBuiltinESMExports();
+  try { return fn(); } finally {
+    childProcess.execFileSync = original;
+    syncBuiltinESMExports();
+    keys.forEach((key, index) => {
+      if (prior[index] === undefined) delete process.env[key];
+      else process.env[key] = prior[index];
+    });
+  }
+}
+
+function assertPreparedChildren(records) {
+  assert.ok(records.length > 0, "the actual product launch must be observed");
+  for (const call of records) {
+    const label = `${call.file} ${call.args[0]}`;
+    assert.equal(call.sentinel, false, label + " leaked the sentinel");
+    assert.equal(call.token, false, label + " leaked the token");
+    assert.equal(call.profile, call.file === "git" ? "git" : "authority", label);
+    assert.equal(call.path, CHILD_PATH, label);
+    assert.equal(call.locale, "C", label);
+    assert.equal(call.homePresent, true, label);
+    assert.equal(call.homeMatches, true, label);
+    if (call.file === "git") {
+      assert.equal(call.global, "/dev/null");
+      assert.equal(call.system, "/dev/null");
+      assert.equal(call.noSystem, "1");
+      assert.equal(call.prompt, "0");
+    }
+  }
+}
+
+test("deploy child environments: build advances real Git through a closed environment", () => {
+  writeFileSync(join(sourceDir, "next.txt"), "next revision\n");
+  execFileSync("git", ["-C", sourceDir, "add", "next.txt"]);
+  execFileSync("git", ["-C", sourceDir, "commit", "-q", "-m", "next"]);
+  const target = execFileSync("git", ["-C", sourceDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  tagFixtureLanding(sourceDir, target, 2);
+  execFileSync("git", ["-C", sourceDir, "push", "-q", bareDir, "main", "--tags"]);
+  const records = [];
+  const result = observeDeployChildren(records, () => withOverrideEnv(() =>
+    runBuild({ repo: workDir, target }, configWithOverride())));
+  assert.equal(result.identity.revision, target);
+  assert.notEqual(target, headSha);
+  assert.equal(execFileSync("git", ["-C", workDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(), target);
+  for (const verb of ["status", "fetch", "merge"]) assert.ok(records.some(call => call.args[0] === verb), verb);
+  assertPreparedChildren(records);
+});
+
+test("deploy child environments: dry-run local lookup is closed and does not fetch", () => {
+  const before = execFileSync("git", ["-C", workDir, "show-ref"], { encoding: "utf8" });
+  const records = [];
+  for (const [target, known] of [[headSha, true], ["1".repeat(40), false]]) {
+    const result = observeDeployChildren(records, () => withScenario("running", () =>
+      runUpdate({ repo: workDir, target, dryRun: true }, configWithOverride())));
+    assert.equal(result.targetKnownLocally, known);
+    assert.equal(result.fetched, false);
+  }
+  assert.equal(records.filter(call => call.args[0] === "cat-file").length, 2);
+  assert.ok(!records.some(call => ["fetch", "merge"].includes(call.args[0])));
+  assert.equal(execFileSync("git", ["-C", workDir, "show-ref"], { encoding: "utf8" }), before);
+  assert.equal(existsSync(configWithOverride().backup_root), false);
+  assertPreparedChildren(records);
+});
+
+test("deploy child environments: update preserves recovery bytes and health response", () => {
+  const expected = execFileSync("git", ["-C", workDir, "show", `${headSha}:server/docker-compose.yaml`]);
+  const records = [];
+  const result = observeDeployChildren(records, () => withScenario("running-clean-stop", () =>
+    runUpdate({ repo: workDir, target: headSha, maintenanceApproved: true }, configWithCleanStopMeasured())));
+  assert.equal(result.phase, "done");
+  assert.ok(result.health);
+  assert.deepEqual(records.filter(call => call.file === "git" && call.args[0] === "show").map(call => call.args), [
+    ["show", `${headSha}:server/docker-compose.yaml`],
+    ["show", `${headSha}:server/docker-compose.yaml`],
+  ]);
+  assert.ok(records.some(call => call.file === curlBin));
+  assert.deepEqual(readFileSync(join(configWithOverride().backup_root, result.transactionId, "recovery-compose.yaml")), expected);
+  assertPreparedChildren(records);
+  const statusRecords = [];
+  const status = observeDeployChildren(statusRecords, () => withScenario("running", () =>
+    runStatus({ repo: workDir }, configWithOverride())));
+  assert.equal(status.health.build_revision, headSha);
+  assert.equal(status.health.build_dirty, false);
+  assert.ok(statusRecords.some(call => call.file === curlBin));
+  assertPreparedChildren(statusRecords);
+});
+
+test("deploy child environments: third traversal failure stops before wipe", () => {
+  const config = configWithCleanStopMeasured();
+  const update = withScenario("running-clean-stop", () =>
+    runUpdate({ repo: workDir, target: headSha, maintenanceApproved: true }, config));
+  const records = [], logPath = join(root, "rollback-calls.log");
+  process.env.KAOIRO_TEST_CALL_LOG = logPath;
+  let traversals = 0;
+  try {
+    assert.throws(() => observeDeployChildren(records, () => withScenario("running-clean-stop", () =>
+      runRollback({ repo: workDir, transaction: update.transactionId, confirmRestore: true }, config)), call => {
+      if (call.file === "tar" && call.args[0] === "tzf" && ++traversals === 3) throw new Error("third traversal failure");
+    }), /third traversal failure/);
+  } finally { delete process.env.KAOIRO_TEST_CALL_LOG; }
+  assert.equal(traversals, 3);
+  assertPreparedChildren(records);
+  const journal = readJournal(join(config.backup_root, update.transactionId));
+  assert.equal(journal.phase, "rollback_forensic_archived");
+  const calls = readCallLog(logPath);
+  assert.ok(!calls.some(call => call.includes("find /data -mindepth") || call.includes("tar xzf")));
+});
 
 function composePlanJson(name, source = "kaoiro_kaoiro-state") {
   return JSON.stringify({
@@ -5053,16 +5212,25 @@ test("runRollback (destructive) runs the full stop/forensic/restore/retag/up/hea
   const logPath = join(root, "docker-calls.log");
   process.env.KAOIRO_TEST_CALL_LOG = logPath;
   let result;
+  const children = [];
   try {
-    result = withScenario("running-clean-stop", () =>
+    result = observeDeployChildren(children, () => withScenario("running-clean-stop", () =>
       runRollback(
         { repo: workDir, transaction: transactionId, confirmRestore: true },
         configWithCleanStopMeasured(),
       ),
-    );
+    ));
   } finally {
     delete process.env.KAOIRO_TEST_CALL_LOG;
   }
+  const dir = join(backupRoot, transactionId);
+  assert.deepEqual(children.filter(call => call.file === "tar").map(call => call.args), [
+    ["tzf", join(dir, "archive.tar.gz")],
+    ["tzf", join(dir, "rollback-forensic.tar.gz")],
+    ["tzf", join(dir, "archive.tar.gz")],
+  ]);
+  assert.ok(children.some(call => call.file === curlBin));
+  assertPreparedChildren(children);
   assert.equal(result.destructive, true);
   assert.equal(result.phase, "rolled_back");
   assert.equal(result.restoredImageId, OLD_IMAGE_ID);

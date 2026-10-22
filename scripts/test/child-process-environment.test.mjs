@@ -82,8 +82,8 @@ test("existing authority and new repair SSH launches both exclude ambient secret
 
 test("coverage check rejects separate existing and new bypasses and its own disabled guard", () => {
   const green = checkReleaseChildEnvironments(root);
-  assert.equal(green.files, 17); assert.ok(green.calls >= 25);
-  assert.equal(green.unchanged_legacy_calls, 11);
+  assert.equal(green.files, 18); assert.ok(green.calls >= 35);
+  assert.equal(green.unchanged_legacy_calls, 4);
   for (const target of ["scripts/production-release-authority.mjs", "scripts/landing-repair-ssh.mjs",
     "server/deploy/kaoiro-server-deploy.mjs"]) {
     assert.throws(() => checkReleaseChildEnvironments(root, (path, encoding) => {
@@ -98,12 +98,14 @@ test("coverage pins import-only, spawn/fork, exact legacy count and both scope-p
     const source = readFileSync(path, encoding);
     return path.endsWith(target) ? transform(source) : source;
   });
-  for (const extra of ["import cp from 'node:child_process';", "spawn('unsafe', []);", "fork('unsafe');"]) {
-    assert.throws(mutate("scripts/landing-repair-ssh.mjs", source => source + "\n" + extra), /unmanaged/);
+  for (const target of ["scripts/landing-repair-ssh.mjs", "server/deploy/kaoiro-server-deploy.mjs"]) {
+    for (const extra of ["import cp from 'node:child_process';", "spawn('unsafe', []);", "fork('unsafe');"]) {
+      assert.throws(mutate(target, source => source + "\n" + extra), /unmanaged/);
+    }
+    assert.throws(mutate(target, source => source.replace("child-process-environment.mjs", "missing-helper.mjs")), /helper import missing/);
+    assert.throws(mutate(target, source => source.replaceAll("spawnChildSync", "unusedChild").replaceAll("execChildSync", "unusedExec")), /no checked call/);
   }
   assert.throws(mutate("runner/deploy/codex-service.mjs", source => source + "\nexecFileSync('unsafe', []);"), /unmanaged/);
-  assert.throws(mutate("scripts/landing-repair-ssh.mjs", source => source.replace("child-process-environment.mjs", "missing-helper.mjs")), /helper import missing/);
-  assert.throws(mutate("scripts/landing-repair-ssh.mjs", source => source.replaceAll("spawnChildSync", "unusedChild")), /no checked call/);
 });
 
 test("gh keyring session values reach a real child without SSH or loader authority", () => {

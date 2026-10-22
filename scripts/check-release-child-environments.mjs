@@ -8,7 +8,6 @@ const LEGACY_CHILD_CALLS = {
   "scripts/check-github-issue-import.mjs": 1,
   "scripts/github-issue-import.mjs": 1,
   "server/deploy/kaoiro-deploy-docker.mjs": 1,
-  "server/deploy/kaoiro-server-deploy.mjs": 7,
 };
 const nativeCalls = /\b(?:execFileSync|execFile|execSync|spawnSync|spawn|fork)\s*\(/g;
 
@@ -20,7 +19,7 @@ export const CHILD_ENVIRONMENT_SCOPE = [
   "scripts/production-release-tags.mjs", "scripts/production-release-unit.mjs",
   "scripts/production-release-workflow.mjs", "scripts/production-runner-worker.mjs",
   "scripts/with-build-identity.mjs", "runner/deploy/release-gate.mjs",
-  "server/deploy/kaoiro-release-reconciliation.mjs",
+  "server/deploy/kaoiro-release-reconciliation.mjs", "server/deploy/kaoiro-server-deploy.mjs",
 ];
 
 export function checkReleaseChildEnvironments(root, read = readFileSync) {

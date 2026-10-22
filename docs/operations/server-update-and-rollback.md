@@ -2,7 +2,7 @@
 title: Server update and rollback
 description: Updating an existing server deployment through the deploy CLI (kaoiro-server-deploy.mjs), preconditions, failure handling, and operational-success verification.
 status: accepted
-last_updated: 2026-10-20
+last_updated: 2026-10-23
 related: [deployment]
 ---
 
@@ -105,6 +105,25 @@ Satisfy all of the following before starting.
   `--config` file's `backup_root` the same across every invocation on a host
   (the default, `~/kaoiro-deploy`, already satisfies this without a config
   file at all).
+
+#### Child tool environments
+
+The CLI's Git commands use the closed `git` profile; health curl and archive
+tar commands use `authority`. Their `CHILD_PATH` starts with the current Node
+executable's directory, followed by `/usr/local/bin:/usr/bin:/bin`; locale is C.
+See the [child environment contract](build-identity-and-release-tags.md) for
+profile authority. Git keeps repository-local configuration and normal
+HOME/session-based SSH access, while global/system Git configuration,
+ambient Git overrides and HTTP tokens are excluded.
+
+Health curl keeps normal HOME-based configuration and system CA lookup.
+`KAOIRO_DEPLOY_CURL_BIN` can select an absolute executable; default tool names
+must resolve on `CHILD_PATH`, including tar's gzip dependency. Ambient proxy,
+`CURL_HOME` and custom-CA variables are excluded. Environments requiring those
+variables will fail health polling until configured compatibly with the
+existing profile. Configuration files and explicitly selected tools retain
+their own authority. Docker selection and configuration remain in the
+separate Docker helper.
 
 ### 4.3 Update procedure
 
