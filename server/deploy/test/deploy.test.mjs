@@ -6310,7 +6310,7 @@ for (const change of ["removed", "invalid", "different", "selectors"]) {
     process.env.KAOIRO_TEST_CALL_LOG = logPath;
     try {
       const result = withScenario("running-clean-stop", () => runRollback({ repo: workDir,
-        transaction: update.transactionId, confirmRestore: true }, configWithCleanStopMeasured()));
+        transaction: update.transactionId, confirmRestore: true }, { ...configWithCleanStopMeasured(), health_url: null }));
       assert.equal(result.phase, "rolled_back");
     } finally {
       delete process.env.KAOIRO_TEST_CALL_LOG;
