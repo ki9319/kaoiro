@@ -11,9 +11,13 @@ Each page records one **production release**: the changes between the
 previous production release and this one, the operator steps the upgrade
 needs, and the issues found during or right after it.
 
-A version tag is created on every develop landing (see
+Until cutover C of the [issue 709 plan](../plans/issue-709-release-reduction.md),
+a version tag is created on every develop landing (see
 [Build identity and release tags](../operations/build-identity-and-release-tags.md)),
-so most tags never reach production on their own. A release note covers the
+so most tags never reach production on their own. After it, the release
+operator creates one release tag per production release with
+`scripts/release-tag.mjs plan`
+([Release tags](../operations/build-identity-and-release-tags.md#release-tags)). A release note covers the
 whole range of tags that went to production together and is named after the
 tag that was deployed: `docs/release/<tag>.md`.
 

@@ -236,13 +236,13 @@ describe("kaoiro-runner-switch.sh (issue #219)", () => {
       expect(readlinkSync(join(root, "current"))).toBe(`releases/${A}`);
     });
 
-    it("requires a landing tag for production activation while allowing explicit development activation", () => {
+    it("requires a landing or release tag for production activation while allowing explicit development activation", () => {
       seed(A);
       writeReleaseTree(join(root, "releases", B), B, {buildVersion:"untagged",buildBranch:"develop"});
       symlinkSync(`releases/${A}`, join(root, "current"));
       const refused = run(B);
       expect(refused.status).toBe(78);
-      expect(refused.stderr).toContain("completed landing tag");
+      expect(refused.stderr).toContain("completed landing or release tag");
       expect(readlinkSync(join(root, "current"))).toBe(`releases/${A}`);
       expect(run(B,"--allow-dirty").status).toBe(0);
       expect(readlinkSync(join(root, "current"))).toBe(`releases/${B}`);

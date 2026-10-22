@@ -107,7 +107,7 @@ fi
 export KAOIRO_BUILD_IDENTITY_SHA256
 KAOIRO_BUILD_IDENTITY_SHA256=$(node -e 'console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"))' "$KAOIRO_BUILD_IDENTITY_FILE")
 if $require_tagged; then
-  node --input-type=module -e 'import {consumeBuildIdentity,parseLandingVersion} from "./scripts/build-identity.mjs"; const i=consumeBuildIdentity(); if(i.dirty || i.revision==="unknown" || i.branch==="unknown" || !parseLandingVersion(i.version) || !i.landing) process.exit(78);'
+  node --input-type=module -e 'import {consumeBuildIdentity,parseLandingVersion} from "./scripts/build-identity.mjs"; const i=consumeBuildIdentity(); if(i.dirty || i.revision==="unknown" || i.branch==="unknown" || !parseLandingVersion(i.version) || (!i.landing && !i.release)) process.exit(78);'
 fi
 node --input-type=module -e 'import {consumeBuildIdentity,assertSourceIdentity} from "./scripts/build-identity.mjs"; assertSourceIdentity(process.cwd(),consumeBuildIdentity());'
 

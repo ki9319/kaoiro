@@ -2,7 +2,7 @@
 title: Runner update and rollback
 description: The runner-side steps interleaved with a server update, migrating a checkout-direct host to the release profile, and subsequent release-profile updates and rollback.
 status: accepted
-last_updated: 2026-10-09
+last_updated: 2026-10-22
 related: [deployment]
 ---
 
@@ -26,7 +26,8 @@ links back here for the commands.
 
 ## Build identity preconditions
 
-Forward production updates require an exact completed landing tag; `--from-repo`
+Forward production updates require an exact completed landing tag or schema-2
+release tag ([Release tags](build-identity-and-release-tags.md#release-tags)); `--from-repo`
 builds use `--require-tagged` by default. Tagged and `untagged` candidates also
 check the current server's advertised `build_identity_formats` before stopping
 the old unit. A failed check leaves the old runner running. Updater success uses

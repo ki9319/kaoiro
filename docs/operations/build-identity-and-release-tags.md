@@ -2,7 +2,7 @@
 title: Build identity and release tags
 description: Immutable landing identities, common production checkpoints and guarded release automation.
 status: accepted
-last_updated: 2026-10-10
+last_updated: 2026-10-22
 related: [deployment, protocol]
 ---
 
@@ -31,6 +31,47 @@ not claim a tagged production build. Labels are `vYYYY.MM.DD.N / branch / hash`
 or `untagged / branch / hash`; the label hash has seven characters. Machine
 records retain the full 40-character revision and dirty flag. `channel` remains
 for old readers and does not authorize a production release.
+
+## Release tags
+
+The reader also accepts a schema-2 release tag
+([ADR-0069](../adr/0069-reduce-release-publication-and-native-state-protection.md)),
+created at release time on the released commit. Creating one is **not
+approved** until cutover C of the
+[issue 709 plan](../plans/issue-709-release-reduction.md) is complete
+(enrollment check, tag-creation measurement, landing allocation stopped);
+until then landing tags remain the only production version source.
+
+A release tag is an annotated, unsigned `vYYYY.MM.DD.N` tag whose message is
+exactly one compact JSON object with exactly these keys:
+`{"schema":2,"kind":"release","repository_id":1343265983,"revision":"<40-hex>","branch":"develop","version":"YYYY.MM.DD.N"}`.
+The tag object is at most 4,096 bytes, its `object` and `tag` header lines
+must equal `revision` and `v<version>`, and no
+`identity/landing/<revision>` claim may exist. The selection of tags at HEAD
+is unchanged: only `v<YYYY.MM.DD>.*` names count, and two of them refuse.
+A lightweight or signed tag, an unknown schema or kind, an extra or missing
+key, or a claim beside the tag degrades the identity, so `--require-tagged`
+refuses. `--require-tagged` also reads the tag back from origin and refuses if
+a claim appears there. A commit that already has a landing pair is released
+under that tag. Frozen identities carry `release` instead of `landing`, never
+both; the version string and `build_identity_formats` are unchanged, so
+runtime readers need no bridge.
+
+Plan the next tag with the read-only helper. It never creates, pushes or
+fetches; it refuses a dirty checkout, a commit that already has a calver tag
+or a landing claim locally or on origin, and it prints the commands for the
+release operator:
+
+```sh
+node scripts/release-tag.mjs plan [--revision <40-hex>] [--day YYYY-MM-DD]
+```
+
+`N` is one more than the highest number among origin's tags of that UTC day.
+A local-only tag of the same name on another commit makes the printed
+`git tag` fail rather than create a second tag; remove the stray local tag
+after checking it. Once schema-2 tags exist, do not re-enable landing
+allocation: the pinned allocator treats an unpaired `v*` tag as a broken
+inventory.
 
 ## Coordinated production builds
 

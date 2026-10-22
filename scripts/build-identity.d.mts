@@ -13,6 +13,7 @@ export interface BuildIdentity {
   channel: "dev" | "release";
   branch: string;
   landing?: LandingRecord;
+  release?: ReleaseRecord;
   degraded: boolean;
   degradeReason: string | null;
 }
@@ -27,6 +28,14 @@ export interface LandingRecord {
   original_run_id: number;
   created_at: string;
 }
+export interface ReleaseRecord {
+  schema: 2;
+  kind: "release";
+  repository_id: number;
+  revision: string;
+  branch: "develop";
+  version: string;
+}
 export interface FrozenBuildIdentity {
   revision: string;
   dirty: boolean;
@@ -36,6 +45,7 @@ export interface FrozenBuildIdentity {
   built_at: string;
   build_identity_formats: string[];
   landing?: LandingRecord;
+  release?: ReleaseRecord;
 }
 export interface IdentityOptions {
   buildRef?: string;
@@ -52,6 +62,11 @@ export function parseLandingVersion(value: unknown): { day: string; number: numb
 export function formatLandingVersion(day: string, number: number): string;
 export function validateLandingRecord(value: unknown, repositoryId?: number): LandingRecord;
 export function readLandingTag(cwd: string, tag: string, repositoryId?: number): { record: LandingRecord; object: string; tag: string };
+export function validateReleaseRecord(value: unknown, repositoryId?: number): ReleaseRecord;
+export function readReleaseTag(cwd: string, tag: string, repositoryId?: number): { record: ReleaseRecord; object: string; tag: string };
+export function readVersionTag(cwd: string, tag: string, repositoryId?: number):
+  | { kind: "landing"; record: LandingRecord; object: string; tag: string }
+  | { kind: "release"; record: ReleaseRecord; object: string; tag: string };
 export function artifactBuildIdentity(identity: BuildIdentity, builtAt?: string): FrozenBuildIdentity;
 export function readFrozenBuildIdentity(file: string, expectedDigest?: string): FrozenBuildIdentity;
 export function consumeBuildIdentity(cwd?: string, env?: Record<string, string | undefined>): FrozenBuildIdentity;

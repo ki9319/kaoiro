@@ -78,14 +78,31 @@ export function validateLandingRecord(record, repositoryId = BUILD_REPOSITORY_ID
   return record;
 }
 
-export function readLandingTag(cwd, tag, repositoryId = BUILD_REPOSITORY_ID, { gitReader = gitOutput } = {}) {
+const RELEASE_RECORD_KEYS = ["branch", "kind", "repository_id", "revision", "schema", "version"];
+
+/** Validates a schema-2 release tag record (docs/plans/issue-709-release-reduction.md
+ *  section 3.3). The key set is exact. */
+export function validateReleaseRecord(record, repositoryId = BUILD_REPOSITORY_ID) {
+  if (!record || typeof record !== "object" || Array.isArray(record) ||
+      Object.keys(record).sort().join() !== RELEASE_RECORD_KEYS.join() ||
+      record.schema !== 2 || record.kind !== "release" || record.repository_id !== repositoryId ||
+      !Number.isSafeInteger(repositoryId) || repositoryId < 1 ||
+      typeof record.revision !== "string" || record.revision.length !== 40 || !/^[0-9a-f]{40}$/.test(record.revision) ||
+      record.branch !== "develop" || !parseLandingVersion(record.version)) throw new Error("malformed release annotation");
+  return record;
+}
+
+function readTagObject(cwd, tag, kind, gitReader) {
   const object = gitReader(["rev-parse", "--verify", `refs/tags/${tag}`], cwd);
-  if (!object || gitReader(["cat-file", "-t", object], cwd) !== "tag") throw new Error("landing tag must be annotated");
+  if (!object || gitReader(["cat-file", "-t", object], cwd) !== "tag") throw new Error(`${kind} tag must be annotated`);
   const raw = gitReader(["cat-file", "-p", object], cwd);
   const separator = raw?.indexOf("\n\n") ?? -1;
-  if (separator < 0 || Buffer.byteLength(raw) > 4_096) throw new Error("invalid landing tag object");
-  const header = raw.slice(0, separator).split("\n");
-  const record = validateLandingRecord(JSON.parse(raw.slice(separator + 2)), repositoryId);
+  if (separator < 0 || Buffer.byteLength(raw) > 4_096) throw new Error(`invalid ${kind} tag object`);
+  return { object, header: raw.slice(0, separator).split("\n"), message: raw.slice(separator + 2) };
+}
+
+function landingFromTag(cwd, { object, header, message }, repositoryId, gitReader) {
+  const record = validateLandingRecord(JSON.parse(message), repositoryId);
   const publicName = `v${record.version}`;
   if (header[0] !== `object ${record.revision}` || header[1] !== "type commit" ||
       header[2] !== `tag ${publicName}` ||
@@ -94,6 +111,40 @@ export function readLandingTag(cwd, tag, repositoryId = BUILD_REPOSITORY_ID, { g
     throw new Error("landing public tag, claim and annotation disagree");
   }
   return { record, object, tag: publicName };
+}
+
+function releaseFromTag(cwd, { object, header, record }, gitReader) {
+  const publicName = `v${record.version}`;
+  if (header[0] !== `object ${record.revision}` || header[1] !== "type commit" ||
+      header[2] !== `tag ${publicName}` ||
+      gitReader(["rev-parse", "--verify", `refs/tags/${publicName}`], cwd) !== object) {
+    throw new Error("release tag and annotation disagree");
+  }
+  // for-each-ref prints nothing for an absent ref but fails as null, so an
+  // unreadable claim namespace refuses instead of passing as "no claim".
+  const claim = gitReader(["for-each-ref", "--format=%(objectname)", `refs/tags/identity/landing/${record.revision}`], cwd);
+  if (claim !== "") throw new Error("release tag must not carry a landing claim");
+  return { record, object, tag: publicName };
+}
+
+export function readLandingTag(cwd, tag, repositoryId = BUILD_REPOSITORY_ID, { gitReader = gitOutput } = {}) {
+  return landingFromTag(cwd, readTagObject(cwd, tag, "landing", gitReader), repositoryId, gitReader);
+}
+
+export function readReleaseTag(cwd, tag, repositoryId = BUILD_REPOSITORY_ID, { gitReader = gitOutput } = {}) {
+  const parsed = readTagObject(cwd, tag, "release", gitReader);
+  return releaseFromTag(cwd, { ...parsed, record: validateReleaseRecord(JSON.parse(parsed.message), repositoryId) }, gitReader);
+}
+
+/** Reads the one selected `v<YYYY.MM.DD>.*` tag at HEAD as a schema-1 landing
+ *  pair or a schema-2 release tag, dispatching on the record's `schema`. */
+export function readVersionTag(cwd, tag, repositoryId = BUILD_REPOSITORY_ID, { gitReader = gitOutput } = {}) {
+  const parsed = readTagObject(cwd, tag, "version", gitReader);
+  const record = JSON.parse(parsed.message);
+  if (record?.schema === 2) {
+    return { kind: "release", ...releaseFromTag(cwd, { ...parsed, record: validateReleaseRecord(record, repositoryId) }, gitReader) };
+  }
+  return { kind: "landing", ...landingFromTag(cwd, parsed, repositoryId, gitReader) };
 }
 
 export function computeBuildIdentity(cwd = repoRoot, options = {}) {
@@ -120,9 +171,9 @@ export function computeBuildIdentity(cwd = repoRoot, options = {}) {
   if (tags.length === 0 && !claim) return identity;
   try {
     if (tags.length !== 1) throw new Error("landing has zero or multiple canonical public tags");
-    const landing = readLandingTag(cwd, tags[0], options.repositoryId ?? BUILD_REPOSITORY_ID);
-    if (landing.record.revision !== revision) throw new Error("landing tag does not name this source revision");
-    return { ...identity, version: landing.record.version, branch: landing.record.branch, landing: landing.record };
+    const selected = readVersionTag(cwd, tags[0], options.repositoryId ?? BUILD_REPOSITORY_ID);
+    if (selected.record.revision !== revision) throw new Error(`${selected.kind} tag does not name this source revision`);
+    return { ...identity, version: selected.record.version, branch: selected.record.branch, [selected.kind]: selected.record };
   } catch (error) {
     return { ...identity, degraded: true, degradeReason: error.message };
   }
@@ -155,17 +206,27 @@ export function requireTaggedIdentity(cwd = repoRoot, options = {}) {
       }
       return identity;
     }
+    if (parseLandingVersion(identity.version) && identity.release) {
+      const release = readReleaseTag(cwd, `v${identity.version}`, options.repositoryId ?? BUILD_REPOSITORY_ID);
+      const refs = [`refs/tags/${release.tag}`, `refs/tags/identity/landing/${identity.revision}`];
+      const readback = gitOutput(["ls-remote", "--refs", "origin", ...refs], cwd);
+      if (readback === null || JSON.stringify(rows(readback)) !== JSON.stringify([`${release.object}\t${refs[0]}`])) {
+        throw new Error("selected release tag differs from origin read-back or carries a landing claim");
+      }
+      return identity;
+    }
     if (Date.now() >= deadline) break;
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(250, deadline - Date.now()));
   } while (Date.now() < deadline);
-  throw new Error("production requires a completed exact landing tag/claim before building");
+  throw new Error("production requires a completed exact landing tag/claim or release tag before building");
 }
 
 export function artifactBuildIdentity(identity, builtAt = new Date().toISOString()) {
   return { revision: identity.revision, dirty: identity.dirty, version: identity.version,
     branch: identity.branch, channel: identity.channel, built_at: builtAt,
     build_identity_formats: [...BUILD_IDENTITY_FORMATS],
-    ...(identity.landing ? { landing: identity.landing } : {}) };
+    ...(identity.landing ? { landing: identity.landing } : {}),
+    ...(identity.release ? { release: identity.release } : {}) };
 }
 
 export function validateFrozenBuildIdentity(identity) {
@@ -174,7 +235,10 @@ export function validateFrozenBuildIdentity(identity) {
       (identity.channel === "release" && (identity.dirty || identity.revision === "unknown" ||
         ["unknown", "untagged"].includes(identity.version)))) throw new Error("invalid frozen identity");
   if (parseLandingVersion(identity.version)) {
-    const record = validateLandingRecord(identity.landing);
+    if (Object.hasOwn(identity, "landing") === Object.hasOwn(identity, "release")) {
+      throw new Error("frozen calver identity needs exactly one landing or release record");
+    }
+    const record = Object.hasOwn(identity, "landing") ? validateLandingRecord(identity.landing) : validateReleaseRecord(identity.release);
     if (identity.dirty || record.revision !== identity.revision || record.version !== identity.version ||
         record.branch !== identity.branch) throw new Error("frozen landing identity disagrees with its record");
   } else if (!["untagged", "unknown"].includes(identity.version)) throw new Error("new frozen builds cannot invent a legacy version");

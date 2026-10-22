@@ -196,7 +196,7 @@ describe("kaoiro-runner-update.sh (issue #219)", () => {
     const archive = makeReleaseTarball(work, B, {buildVersion:"untagged",buildBranch:"develop"});
     const result = runUpdate(["--tarball",archive], {KAOIRO_SYSTEMCTL:systemctlStub({execStart:goodExecStart()})});
     expect(result.status, result.stderr).toBe(78);
-    expect(result.stderr).toContain("completed landing tag");
+    expect(result.stderr).toContain("completed landing or release tag");
     expect(readCalls().some(line=>line.includes(" stop "))).toBe(false);
     expect(readlinkSync(join(root,"current"))).toBe(`releases/${A}`);
   });
