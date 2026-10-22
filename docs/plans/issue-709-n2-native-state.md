@@ -598,7 +598,7 @@ import { randomUUID } from 'node:crypto';
 const repo = process.argv[2] || '/w/repo';
 const modulePath = join(repo, 'runner/deploy/codex-snapshot.mjs');
 const s = await import(modulePath);
-const dir = fs.mkdtempSync('/tmp/kogane-n2-lifetime-');
+const dir = fs.mkdtempSync('/tmp/n2-lifetime-');
 const home = join(dir,'home'), backup = join(dir,'backup'), stage = join(dir,'restore'), aside = join(dir,'aside'), record = join(dir,'record.json'), lock = join(dir,'.lock.update');
 const emit = (event, data) => console.log(JSON.stringify({event,...data}));
 const exists = p => fs.existsSync(p);
