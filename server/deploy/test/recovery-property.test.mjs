@@ -171,6 +171,7 @@ function makeWorld(t, { fleet = { schema: 1, hosts: [], wrappers: [] }, override
       const r = spawnSync(program === "node" ? process.execPath : program, rest, { env, encoding: "utf8" });
       return { status: r.status, signal: r.signal, stdout: r.stdout, stderr: r.stderr };
     },
+    compose: (...args) => spawnSync(process.execPath, [docker, "compose", ...args], { cwd: join(work, "server"), env, encoding: "utf8" }),
     cliRun: (command, ...args) => world.exec(["node", cli, command, "--repo", work, "--config", config, ...args]),
     update: (...args) => world.cliRun("update", "--target", target, ...args),
     txId() {
@@ -725,6 +726,36 @@ for (const overrideMount of [false, true]) {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(world.journal().phase, PHASE.DONE);
     assert.equal(world.state().images[world.serviceContainer().image].revision, world.target);
+    if (overrideMount) {
+      const manifest = JSON.parse(readFileSync(join(world.backupRoot, world.txId(), "manifest.json"), "utf8"));
+      for (const plan of [manifest.recovery_plan, manifest.target_plan]) {
+        assert.ok(plan.identity.service_mounts.some(mount => mount.type === "bind" && mount.source === "/srv/overlay"));
+      }
+      rmSync(join(world.work, "server", "docker-compose.override.yaml"));
+      const rollback = world.cliRun("rollback", "--transaction", world.txId(), "--confirm-restore");
+      assert.equal(rollback.status, 0, rollback.stderr);
+      assert.equal(world.journal().phase, PHASE.ROLLED_BACK);
+    }
     assertNextUpdateAdmitted(world);
+  });
+}
+
+for (const mode of ["yml", "both", "directory"]) {
+  test(`recovery property: stateful Compose discovery fixture ${mode}`, t => {
+    const world = makeWorld(t, { overrideMount: true });
+    const path = join(world.work, "server", "docker-compose.override.yml");
+    if (mode === "directory") mkdirSync(path);
+    else writeFileSync(path, JSON.stringify({ services: { kaoiro: { volumes: [{ type: "bind", source: "/srv/preferred", target: "/overlay" }] } } }));
+    if (mode === "yml") rmSync(join(world.work, "server", "docker-compose.override.yaml"));
+    const result = world.compose("config", "--format", "json");
+    if (mode === "directory") {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /EISDIR/);
+    } else {
+      assert.equal(result.status, 0, result.stderr);
+      const mounts = JSON.parse(result.stdout).services.kaoiro.volumes;
+      assert.ok(mounts.some(mount => mount.source === "/srv/preferred"));
+      assert.ok(!mounts.some(mount => mount.source === "/srv/overlay"));
+    }
   });
 }

@@ -1252,9 +1252,10 @@ test("runBuild dry-run reports the plan without touching git or docker", () => {
 });
 
 test("runBuild builds, tags and reads back the image id through the gated fake docker", () => {
-  const result = withOverrideEnv(() =>
-    runBuild({ repo: workDir, target: headSha }, configWithOverride()),
-  );
+  const calls = [];
+  const result = observeDockerCalls((args, output) => { if (args[0] === "compose") calls.push(args); return output; }, () =>
+    withOverrideEnv(() => runBuild({ repo: workDir, target: headSha }, configWithOverride())));
+  assert.deepEqual(calls, [["compose", "build"]]);
   assert.equal(result.dryRun, false);
   assert.equal(result.docker, "fake");
   assert.equal(result.identity.revision, headSha);
@@ -6188,7 +6189,13 @@ function assertForwardComposeArgs(calls, dir, override, ambientRenders, recovery
     if (line.startsWith("compose version ")) continue;
     if (line === `${recovery}config --format json`) { relocated++; continue; }
     assert.ok(line.startsWith(target), line);
-    operations.add(line.slice(target.length).split(" ")[0]);
+    const operation = line.slice(target.length).split(" ")[0];
+    if (operation === "config") assert.equal(line, `${target}config --format json`);
+    if (operation === "stop") assert.equal(line, `${target}stop -t 30`);
+    if (operation === "up") assert.equal(line, `${target}up -d --no-build`);
+    if (operation === "port") assert.equal(line, `${target}port kaoiro 4000`);
+    if (operation === "build") assert.equal(line, `${target}build`);
+    operations.add(operation);
   }
   assert.equal(ambient, ambientRenders, "only the forward equality checks may use default discovery");
   assert.equal(relocated, recoveryRenders, "only recovery-plan renders may use R");
@@ -6199,7 +6206,8 @@ test("Compose inputs: fresh forward binds every transaction Compose call to T or
   writeComposeOverride();
   let captured = false;
   const calls = [];
-  const result = observeDockerCalls((args, output) => {
+  const result = observeDockerCalls((args, output, options) => {
+    if (args[0] === "compose" && !args.includes("version")) assert.equal(options.cwd, join(workDir, "server"));
     if (args[0] === "compose" && args.some(arg => arg.endsWith("/recovery-compose.yaml"))) captured = true;
     if (captured) calls.push(args.join(" "));
     return output;
@@ -6207,6 +6215,26 @@ test("Compose inputs: fresh forward binds every transaction Compose call to T or
     maintenanceApproved: true }, { ...configWithCleanStopMeasured(), health_url: null })));
   assert.equal(result.phase, "done");
   assertForwardComposeArgs(calls, join(root, "kaoiro-deploy", result.transactionId), "yaml", 5, 2);
+});
+
+test("Compose inputs: fresh forward binds policy and accepted new-store reads to T", () => {
+  writeComposeOverride();
+  withPolicyPlacement({ newStore: true, mounts: [
+    { Type: "volume", Name: "kaoiro_kaoiro-state", Destination: "/var/lib/kaoiro", RW: false },
+    { Type: "bind", Source: "/srv/yaml", Destination: "/overlay", RW: false },
+  ] }, () => {
+    let captured = false;
+    const calls = [];
+    const result = observeDockerCalls((args, output, options) => {
+      if (args[0] === "compose" && !args.includes("version")) assert.equal(options.cwd, join(workDir, "server"));
+      if (args[0] === "compose" && args.some(arg => arg.endsWith("/recovery-compose.yaml"))) captured = true;
+      if (captured) calls.push(args.join(" "));
+      return output;
+    }, () => runUpdate({ repo: workDir, target: headSha, maintenanceApproved: true,
+      acceptNewStores: new Set([POLICY_ENV]) }, { ...configWithCleanStopMeasured(), health_url: null }));
+    assert.equal(result.phase, "done");
+    assertForwardComposeArgs(calls, join(root, "kaoiro-deploy", result.transactionId), "yaml", 5, 2);
+  });
 });
 
 for (const mode of ["none", "yaml", "yml", "both"]) {
@@ -6292,7 +6320,7 @@ for (const name of ["compose.yaml", "compose.yml", "docker-compose.yml", "compos
   });
 }
 
-for (const change of ["removed", "invalid", "different", "selectors"]) {
+for (const change of ["removed", "invalid", "different", "selectors", "fleet-stopped"]) {
   test(`Compose inputs: destructive rollback uses the saved copy with live override ${change}`, () => {
     const override = writeComposeOverride();
     const update = withScenario("running-clean-stop", () => runUpdate({ repo: workDir,
@@ -6310,13 +6338,16 @@ for (const change of ["removed", "invalid", "different", "selectors"]) {
     process.env.KAOIRO_TEST_CALL_LOG = logPath;
     try {
       const result = withScenario("running-clean-stop", () => runRollback({ repo: workDir,
-        transaction: update.transactionId, confirmRestore: true }, { ...configWithCleanStopMeasured(), health_url: null }));
+        transaction: update.transactionId, confirmRestore: true, fleetStopped: change === "fleet-stopped" }, { ...configWithCleanStopMeasured(), health_url: null }));
       assert.equal(result.phase, "rolled_back");
     } finally {
       delete process.env.KAOIRO_TEST_CALL_LOG;
       if (prior === undefined) delete process.env.COMPOSE_FILE; else process.env.COMPOSE_FILE = prior;
     }
-    const composeCalls = readCallLog(logPath).filter(line => line.startsWith("compose "));
+    const rollbackCalls = readCallLog(logPath);
+    assert.deepEqual(rollbackCalls.filter(line => line.startsWith("run ") && line.endsWith(" /app/build-info.json")),
+      [`run --rm --network none --entrypoint cat ${OLD_IMAGE_ID} /app/build-info.json`]);
+    const composeCalls = rollbackCalls.filter(line => line.startsWith("compose "));
     assert.ok(composeCalls.length > 0);
     for (const line of composeCalls) {
       assert.ok(line.includes(`-f ${join(txDir, "compose-override.yaml")}`), line);
@@ -6325,12 +6356,29 @@ for (const change of ["removed", "invalid", "different", "selectors"]) {
   });
 }
 
+test("Compose inputs: rollback refuses multiple live containers before stop", () => {
+  writeComposeOverride();
+  const update = withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha,
+    maintenanceApproved: true }, configWithCleanStopMeasured()));
+  const mutations = [];
+  assert.throws(() => observeDockerCalls((args, output) => {
+    const operation = normalizedComposeCall(args.join(" "));
+    if (/^compose (?:stop|up)/.test(operation)) mutations.push(operation);
+    if (operation === "compose ps -q kaoiro") return `${"f".repeat(64)}\n${"e".repeat(64)}`;
+    return output;
+  }, () => withScenario("running-clean-stop", () => runRollback({ repo: workDir,
+    transaction: update.transactionId, confirmRestore: true }, configWithCleanStopMeasured()))),
+  /build identity guard requires one live server container/);
+  assert.deepEqual(mutations, []);
+  assert.equal(currentComposeJournal().phase, "done");
+});
+
 function observeDockerCalls(after, fn, before = () => {}) {
   const original = childProcess.execFileSync;
   childProcess.execFileSync = (file, args, options) => {
     if (file === bin) before(args);
     const output = original(file, args, options);
-    return file === bin ? after(args, output) : output;
+    return file === bin ? after(args, output, options) : output;
   };
   syncBuiltinESMExports();
   try { return fn(); } finally { childProcess.execFileSync = original; syncBuiltinESMExports(); }
@@ -6423,6 +6471,25 @@ test("Compose inputs: Q0 compares relocated recovery render when source bytes ma
   assert.equal(mutations.length, 0);
 });
 
+test("Compose inputs: Q0 compares relocated recovery env hash before capture is recorded", () => {
+  let recoveryRendered = false;
+  let envChanged = false;
+  const mutations = [];
+  assert.throws(() => observeDockerCalls((args, output) => {
+    const operation = normalizedComposeCall(args.join(" "));
+    if (/^(?:tag|compose build)/.test(operation)) mutations.push(operation);
+    if (args.includes("config") && args.some(arg => arg.endsWith("/recovery-compose.yaml"))) recoveryRendered = true;
+    if (recoveryRendered && !envChanged && args.includes("config") && args.includes(join(workDir, "server", "docker-compose.yaml"))) {
+      envChanged = true;
+      writeFileSync(join(workDir, "server", ".env"), "# changed after recovery render\n");
+    }
+    return output;
+  }, () => withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha }, configWithCleanStopMeasured()))),
+  /relocated recovery render differs from the explicit checkout render/);
+  assert.equal(envChanged, true);
+  assert.deepEqual(mutations, []);
+});
+
 function removeComposeMetadata(tx, missingIdentity = false) {
   const journal = readJournal(tx.dir);
   for (const entry of journal.history) {
@@ -6479,6 +6546,22 @@ for (const corruption of ["path", "hash", "missing"]) {
     assert.equal(calls.length, 0);
   });
 }
+
+test("Compose inputs: failed-build resume completes using the recorded target inputs", () => {
+  writeComposeOverride();
+  assert.throws(() => observeDockerCalls((args, output) => output, () => withScenario("running-clean-stop", () =>
+    runUpdate({ repo: workDir, target: headSha }, configWithCleanStopMeasured())), args => {
+    if (normalizedComposeCall(args.join(" ")) === "compose build") throw new Error("injected build refusal");
+  }), /injected build refusal/);
+  const dir = join(root, "kaoiro-deploy", currentComposeJournal().transaction_id);
+  const calls = [];
+  const result = observeDockerCalls((args, output) => { calls.push(args.join(" ")); return output; }, () =>
+    withScenario("running-clean-stop", () => runUpdate({ repo: workDir, target: headSha,
+      transaction: currentComposeJournal().transaction_id, maintenanceApproved: true },
+      { ...configWithCleanStopMeasured(), health_url: null })));
+  assert.equal(result.phase, "done");
+  assertForwardComposeArgs(calls, dir, "yaml", 5, 2);
+});
 
 test("Compose inputs: failed-build resume checks captured override before any build or retag", () => {
   writeComposeOverride();

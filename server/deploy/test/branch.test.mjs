@@ -1,11 +1,11 @@
 import "../../../scripts/test/fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 
-import { BRANCH, classify } from "../kaoiro-deploy-branch.mjs";
+import { BRANCH, classify, requireRunningContainer } from "../kaoiro-deploy-branch.mjs";
 
 // A fake docker whose behavior is picked by FAKE_DOCKER_SCENARIO, so one
 // small script drives every classify() branch without a real daemon.
@@ -13,6 +13,7 @@ import { BRANCH, classify } from "../kaoiro-deploy-branch.mjs";
 // (or none); `inspect <container> --format {{.State.Status}}` -> the
 // status string for that scenario's single container.
 const FAKE_DOCKER = `#!/bin/sh
+if [ -n "$FAKE_DOCKER_CALL_LOG" ]; then printf '%s\\n' "$*" >> "$FAKE_DOCKER_CALL_LOG"; fi
 case "$FAKE_DOCKER_SCENARIO" in
   stopped)
     if [ "$1" = "compose" ]; then printf 'kaoiro-c1\\n'
@@ -80,3 +81,21 @@ test("classify returns branch D for a container in an unexpected status", () => 
   const result = withScenario("wrong-status", () => classify(bin, dir, "kaoiro", false));
   assert.equal(result.branch, BRANCH.DIAGNOSE);
 });
+
+for (const bound of [false, true]) {
+  test(`Compose inputs: branch consumers preserve ${bound ? "bound" : "default"} arguments`, () => {
+    const log = join(dir, "calls.log");
+    const prior = process.env.FAKE_DOCKER_CALL_LOG;
+    process.env.FAKE_DOCKER_CALL_LOG = log;
+    const args = bound ? ["-f", join(dir, "compose.yaml"), "--project-directory", dir] : undefined;
+    try {
+      assert.equal(withScenario("stopped", () => classify(bin, dir, "kaoiro", false, args)).branch, BRANCH.STOPPED_CONTAINER);
+      assert.equal(withScenario("wrong-status", () => requireRunningContainer(bin, dir, "kaoiro", args)), "kaoiro-c1");
+    } finally {
+      if (prior === undefined) delete process.env.FAKE_DOCKER_CALL_LOG; else process.env.FAKE_DOCKER_CALL_LOG = prior;
+    }
+    const compose = readFileSync(log, "utf8").trim().split("\n").filter(line => line.startsWith("compose "));
+    const expected = ["compose", ...(args ?? []), "ps", "-a", "--format", "{{.Name}}", "kaoiro"].join(" ");
+    assert.deepEqual(compose, [expected, expected]);
+  });
+}

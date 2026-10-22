@@ -329,6 +329,7 @@ test("Compose inputs: strict plan field domains reject malformed values", () => 
     p => { p.compose_sha256 = [p.compose_sha256]; }, p => { p.env_sha256 = [p.env_sha256]; },
     p => { p.compose_sha256 = "bad"; }, p => { p.env_sha256 = "bad"; },
     p => { p.identity = null; }, p => { p.identity = false; },
+    p => { p.identity = Object.assign(() => {}, p.identity); },
     p => { p.identity.project_name = 1; }, p => { p.identity.project_name = ""; },
     p => { p.identity.services = null; }, p => { p.identity.services = [1]; }, p => { p.identity.services = [""]; },
     p => { p.identity.service_mounts = null; }, p => { p.identity.service_mounts = [null]; },
