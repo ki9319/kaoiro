@@ -31,7 +31,9 @@ The maintenance contract is cooperative: the updater exclusively owns the
 managed service's stop/start and managed home mutations until recovery ends.
 Independent Codex writers, manual starts during maintenance, modifications
 of an operation's files, and concurrent use of an old tool are unsupported.
-An empty managed cgroup does not establish absence of independent writers.
+Boot starts of the enabled unit are in scope: a persisted intent must precede
+exposing a release/home pair that may run. An empty managed cgroup does not
+establish absence of independent writers.
 The existing warning and fresh-setup exit remain. No new launch barrier,
 distributed lock, compatibility orchestrator, or credential backup is added.
 
@@ -57,9 +59,9 @@ retained snapshot is allowed when no other operation is unfinished.
 | `phase` | One of the eight states in section 4 |
 | `snapshot` | `{path, staging, status, manifestHash}`; status `planned`, `retained`, `prune-intent`, or `retired`; hash absent until published |
 | `tool`, `updaterPid`, `created` | Physical tool release for in-flight protection; PID/timestamp are diagnostic, and PID never authorizes recovery |
-| `returnToPreV2` | Whether the invoking command explicitly authorized retiring this operation's snapshot for a pre-v2 source return; no evidence document |
 | `cleanup` (optional) | Exact staging path, logical bytes counted, and whether its removal remains pending |
 | `replacement` (only for restore) | `{attempt, from, priorPhase, staging, aside, credentials, promoted, stateDigest, startRequested}` |
+| `asides` | Append-only list of `{attempt, aside}` for every admitted restore; entries survive cancellation, subsequent attempts and snapshot prune |
 | `prune` (only during/after prune) | Exact snapshot path and its root device/inode, pre-removal size, removal result |
 
 `replacement.from` is the release at restore admission. Its target is always
@@ -69,8 +71,11 @@ sibling staging/aside names, so repeated restores do not reuse a quarantine.
 contents, hashes, or sizes. `stateDigest` hashes the normalized manifest's
 state entries, excluding credentials. `promoted` is a durable checkpoint of
 filesystem completion, not a second lineage history. `startRequested` is
-saved before starting the restored release; it prevents a retry from
-replacing state again after that native may have written it.
+saved while the configured home is absent, before switching to source and
+publishing the restored home; section 5 distinguishes a pending promotion from a home that may have run.
+Append the attempt/aside entry atomically with restore admission, before any
+rename can create it. An entry whose attempt never reached replacement may
+name an absent path; absence does not remove the entry.
 
 Reuse the existing snapshot manifest classification and payload format;
 write minimal metadata (UUID, canonical home, source/target native identity).
@@ -118,6 +123,9 @@ path check in `codex-service.mjs`:
 
 1. Compute the next-start home from the installed unit environment and the
    launch shim's `runner.env` resolution, using the existing literal parser.
+   For every state-aware forward, restore, resume or recover, require a
+   non-empty explicit `CODEX_HOME` in this next-start environment before
+   stopping; the requested `--codex-home` alone is insufficient.
    Keep the supported-unit restrictions required to compute that path,
    private ownership, and `KillMode=control-group`. Drop recorded fragment
    hashes, environment-file hashes/inodes, manager-environment snapshots,
@@ -151,19 +159,50 @@ Retain normal updater options. Add mutually exclusive
 `--recover-codex-transaction <uuid>`, usable with `--detach` and the same
 physical tool-path pinning. Resume continues the chosen operation; recover
 returns a never-started forward to its source or restores its snapshot when
-start was requested. They never reinstall or build an artifact. The helper's
+start became possible. They never reinstall or build an artifact. The helper's
 `summary` shows phase, snapshot retention and the operation UUID only.
+N2 refusal/failure text already names the applicable physical updater with
+`--resume-codex-transaction <uuid>` or `--recover-codex-transaction <uuid>`.
+A stale-lock error names these commands **after** inspection/removal of the
+stale lock; it never recommends bypassing a live owner. N3 centralizes this
+rendering, rather than supplying missing R1/R3/R6 exits.
 
 | Durable state | May have happened | Resume / recovery exit |
 |---|---|---|
 | `prepared` | Stop, partial copy, or complete snapshot publication; candidate never started | Resume snapshot while stopped, or recover unchanged source; remove only owned partial staging and record `failed` |
-| `snapshot-verified` | Snapshot durable; links may name source or target; candidate never started | Resume checks stopped state against snapshot, switches target, writes `start-intent`; recover restores source link on untouched home, writes `failed`, then starts source |
-| `start-intent` | Candidate start may or may not have happened | Resume only the recorded target and post-start checks, then `completed`; recover performs snapshot restore; code-only source return refuses |
+| `snapshot-verified` | Snapshot durable; current still source; candidate never started | Resume checks stopped state against snapshot, writes `start-intent`, then switches target; recover writes `failed`, then starts unchanged source |
+| `start-intent` | Current may be source or target; candidate start may or may not have happened | Resume only the recorded target and post-start checks, then `completed`; recover performs snapshot restore; code-only source return refuses |
 | `completed` | Forward post-start checks passed | No acceptance step; new update allowed; explicit restore or prune allowed |
 | `failed` | Forward ended before any candidate start request | Does not block another update; pending staging cleanup warns. Recover may retry the unchanged source start only if current still equals source; no historical downgrade authorization |
 | `restore-prepared` | Restore admitted; old home untouched; staging absent/partial/complete | Resume rebuilds/verifies only the owned staging and enters `replace-intent`; cancellation before replacement returns to `priorPhase` and restarts unchanged `replacement.from` if appropriate |
 | `replace-intent` | Some/all home and credential renames, and possibly source start | Resume the same replacement using section 5; once promoted, start only snapshot source and check it, then `restored` |
 | `restored` | Restored source passed post-start checks | Snapshot remains retained until explicit prune; new update, another explicitly named restore, or prune allowed |
+
+Before mutation on resume/recover, re-read current, live/next home agreement
+and service activity. In pre-start forward or restore-prepared, a boot may
+have restarted the unchanged source/from release. Stop it again and assert
+B5 before copy, verification or renames; failure or a populated cgroup leaves
+all links/home objects untouched. An inactive service still requires B5.
+A pre-start forward with current other than source refuses as inconsistent;
+it cannot authorize a code-only return. On resume, a published snapshot that
+no longer matches source state (source may have written after boot) refuses
+forward with a recover command. Recover settles it and leaves the running
+source's state intact; a new update can take a fresh snapshot.
+
+Persist `start-intent` **before** switching current to target, while holding
+the links lock; a failed write prevents the switch. This conservatively
+routes even a failure before the switch through restore. It is preferable
+to deriving startup history from current: the same phase rule covers explicit
+start, enabled-unit boot start and a failed link switch. The service template
+has [`WantedBy=default.target`](../../runner/deploy/kaoiro-runner.service),
+and the [installation runbook](../operations/runner-install.md) enables the
+unit and user lingering; a stopped service does not remain stopped across
+reboot.
+A `start-intent` resume with current still source first stops/asserts B5
+and verifies that the stopped state still matches the snapshot; otherwise
+it refuses forward and names recover. Then it switches to target and starts
+it. If current already equals target, resume may finish its startup checks; recover always stops/asserts B5 and
+restores before source activation.
 
 `failed` is written only from the two pre-start forward phases. For source
 return, restore the source link and save `failed` **before** requesting its
@@ -176,8 +215,16 @@ ordered: create/copy/sync stage, verify, rename to destination, publish the
 manifest hash plus `retained` and `snapshot-verified` in one record write.
 After a crash with a complete destination but a `prepared` record, compare
 its manifest UUID, source/target and home with the selected record, verify
-the payload, and adopt it. If invalid, keep the candidate unstarted and
-offer unchanged-source recovery; do not silently adopt or delete it.
+the payload, and adopt it on either resume or recover. Recovery stores the
+verified manifest hash and `retained` before settling `failed`: it remains
+prunable and protects source like any retained snapshot. For an invalid
+owned destination, resume refuses; recover leaves `snapshot.status=planned`,
+saves `failed`, reports the unverifiable path, and starts unchanged source.
+A terminal `planned` destination may be explicitly pruned by UUID using path
+ownership/root identity checks, without requiring a valid manifest. Never
+silently delete it. A planned snapshot is not restorable and does not protect
+source once the operation is terminal. If destination is absent, recovery
+marks it `retired`; owned partial staging follows the cleanup rule below.
 If the destination is missing although the record says verified, continuing
 forward refuses, but pre-start source recovery still works. Mark the missing
 snapshot retired when explicitly resolving that recovery. A directory with
@@ -208,13 +255,16 @@ of overlapping mutations, not historical lineage.
 Recovery from a pre-start forward uses the never-started source-return path,
 not restore admission. Thus cancellation of `restore-prepared` cannot
 restart an unstarted candidate while reverting its record to a pre-start
-phase. For `priorPhase=start-intent`, cancellation may restart only that
-recorded candidate; for a terminal prior phase it may restart only the
-unchanged `replacement.from`. It never selects a new release on cancellation.
+phase. Cancellation may restart only unchanged `replacement.from`, including
+when `priorPhase` is `start-intent` and its switch has not yet happened. The
+restored start-intent still requires snapshot recovery for a later return;
+cancellation never selects a new release or makes a never-started claim.
 Cancellation records the owned restore-staging path and size, removes it
 using the same retryable cleanup rule as a failed forward, clears the
-cancelled replacement fields, then restores `priorPhase`. It is unavailable
-after `replace-intent`; credentials may already have moved at that point.
+cancelled replacement fields, then restores `priorPhase`. Recover selects
+this cancellation exit in `restore-prepared`. After `replace-intent`, both
+resume and recover finish the same replacement; cancellation is unavailable
+because credentials may already have moved.
 
 Save `restore-prepared`, the previous phase, the current release, and new
 attempt-specific sibling paths. Stop and assert B5. Prepare/verify state-only
@@ -223,58 +273,88 @@ staging. Record the present credential names, `stateDigest`, and
 private, owned, disjoint from releases/snapshots and siblings on one
 filesystem. Preserve the original home as `aside`; never delete it.
 
-Let H = configured home, S = restore staging, Q = aside. With
-`startRequested=false`, the following observations determine the next step:
+Let H = configured home, S = restore staging, Q = aside. On each resume,
+stop the managed service again if active and assert B5 before filesystem
+work. Only the recorded from/source releases are admissible as current.
+The boot-safe order is H→Q, credentials Q→S, durable start intent, source
+link, S→H, startup check. In particular, publishing H before selecting its
+native is forbidden.
 
-| H | S | Q | Action on the same record |
-|---|---|---|---|
-| present | present | absent | Verify S's state; rename H to Q and sync parent |
-| absent | present | present | Finish credential moves below; rename S to H and sync parent |
-| present | absent | present | Promotion already happened; verify restored state and required credential locations; save `promoted=true` |
-| any other combination | | | Refuse further changes; preserve all objects and report fresh setup/manual repair as the remaining exit |
+| H | S | Q | Durable intent | Action on the same record |
+|---|---|---|---|---|
+| present | present | absent | false | Verify S; rename H to Q and sync parent |
+| absent | present | present | false | Finish credential moves; verify S; save `startRequested=true` |
+| absent | present | present | true | Verify S and credential locations; idempotently switch to source under links lock, then rename S to H and sync parent; save `promoted=true` |
+| present | absent | present | true | Require current=source; promotion happened, possibly followed by boot start; save `promoted=true` if missing, then finish source startup checks |
+| any other combination | | | | Refuse further changes; preserve all objects and report fresh setup/manual repair as the remaining exit |
 
 For each recorded credential name, exactly one of Q/name and S/name must
 exist before promotion: Q-only → rename to S; S-only → already moved.
 Both or neither refuses without overwrite. A name not recorded must be
-absent from both. After promotion the same check uses H instead of S, and Q
-must contain none of the moved names. Directories are moved intact; contents
-are not read. Snapshot and stage payload verification exclude credentials.
+absent from both. Directories are moved intact; contents are not read.
+Snapshot and staging payload verification exclude credentials.
 
-After promotion, save `promoted=true` before switching to snapshot source.
-Switch using the N2 tool, verify state once more against `stateDigest`, and
-save `startRequested=true` before the service start. If that flag is true,
-resume does not compare mutable live contents to the old snapshot or repeat
-credential/home moves: finish/retry only that source's startup checks. This
-handles a crash after source startup but before saving `restored`. To perform
-a second restore after a successful one, create a new `attempt` in the same
-record with fresh paths; do not re-enter the old replacement.
+`startRequested` means source activation has been authorized, including a
+boot start, not that `systemctl start` returned. Persist it only after all
+credential moves and S's `stateDigest` check, while H is absent. Then select
+source before promoting S. The restore switch guard admits this exact
+`replace-intent`, H-absent, verified-S, credentials-moved observation with
+intent true; it does not require the home to have been promoted already.
+Hold the links lock through source selection and promotion, syncing the
+link parent before publishing H. With explicit `CODEX_HOME`, a boot between
+home removal and promotion cannot launch Codex; a boot after promotion can run
+only source, and the intent is already durable. If H is present and S absent
+with intent true, do not compare mutable H with the old digest or require
+pre-start credential locations again: source may have refreshed credentials
+or written state. Never repeat home replacement in that observation.
+Before H is published, S still must verify even when intent is true.
+A second explicit restore uses a fresh attempt and fresh paths in the same
+record; it does not re-enter the previous replacement.
 
-The managed service remains stopped throughout renames. B1 already refuses
-an explicitly configured missing home; it is not a transaction-aware launch
-barrier and is not claimed as one. Starts before the home disappears or
-after it reappears still rely on the maintenance contract in section 1.
-At this baseline `codexHomeProblem` also returns no problem when `CODEX_HOME`
-is unset/empty; it does not refuse a missing default home. Therefore the
-parent's statement that the runner refuses launches "meanwhile" must not be
-read as coverage of every replacement interruption. See decision 4 below.
+B1 uses the existing `codexHomeProblem` missing-directory refusal for an
+explicit home; it is not a transaction-aware launch barrier. No new barrier
+is added. The parent B1 text must say state-aware operations require explicit
+next-start `CODEX_HOME`, and the missing-home interval prevents Codex launch;
+it does not prevent the runner service itself from booting.
+
+The runbook includes a one-time preparation for a default-home installation:
+resolve the live process's actual home and the next-start default, obtain
+operator approval to configure that **same canonical path** explicitly in
+the installed environment, then check live/next/requested agreement before
+maintenance. Do not relocate data or change production configuration as part
+of N2 implementation. Unset/empty next-start `CODEX_HOME` refuses before stop.
+
+No N2 command deletes an aside. The operator owns its eventual cleanup via
+the runbook: list `asides` from all records (including pruned snapshots), wait
+until the record is terminal (or the attempt has been superseded after
+settlement) and no unfinished replacement refers to that path, inspect the
+exact directory for state worth retaining, and explicitly remove only that path after choosing to discard it. Do not use wildcard
+cleanup or infer permission from snapshot prune. Interrupted replacement
+asides may still contain credentials and must remain private. Keep entries
+after manual cleanup so repeated restore never loses an earlier aside's name.
 
 ## 6. Prune and release protection (R7)
 
 Expose `prune <root> <uuid>`, with no evidence file. No-op on an already
-retired snapshot except retrying recorded partial staging cleanup. Normally
-require a terminal phase and no replacement using that snapshot. Under both
-locks, record `prune-intent` with the exact snapshot path, size and root
+retired snapshot except retrying recorded partial staging cleanup. Require
+a terminal phase and no unfinished replacement using that snapshot. Under
+both locks, record `prune-intent` with the exact snapshot path, size and root
 device/inode before deletion. Initial pruning checks path ownership and
 disjointness; it does not require an intact payload to relinquish a corrupt
 backup. On retry, an absent directory completes retirement, a partial
 directory with the recorded identity is removed, and a changed identity or
 symlink refuses. Do not call `verifySnapshot` after deletion has begun.
 Only after removal and parent sync save `retired`. Record files remain.
+This also accepts an owned terminal `planned` destination left by recovery
+of an unverifiable snapshot; missing destinations settle retired. Device/inode
+is an accidental-replacement guard, not eternal identity: inode reuse at the
+same UUID path could evade it. Concurrent external path replacement is outside
+the cooperative contract; no stronger filesystem identity is claimed.
 
 `protected` lists source releases of `retained` and `prune-intent` snapshots.
 An unfinished operation additionally keeps the releases needed to finish its
-current replacement (source, target/from and physical tool). Once terminal,
-the tool and target cease to be state-derived protection. Current/previous
+operation: source/target/tool for forward, source/from/tool for restore.
+Once terminal, the tool and target cease to be state-derived protection. Current/previous
 protection remains the install/updater's independent rule. Do not protect
 every release ever mentioned by a historical record.
 
@@ -282,11 +362,6 @@ Record publication and removal of protection happen under `.lock.links`,
 the same lock held by install replacement and release prune. Exercise two
 real concurrent contenders, including install versus snapshot publication,
 before landing; single-threaded mocked lock calls are not sufficient.
-
-The explicit pre-v2 return in section 7 is the only exception to terminal
-phase admission: it may prune its own pre-start forward snapshot, or its own
-fully promoted restore snapshot. It holds both locks across pruning and
-activation and must leave the saved recovery exit usable if interrupted.
 
 ## 7. Cutover and returning to old tools
 
@@ -303,66 +378,47 @@ authorize nor block an operation.
 Use the last deployed pre-N2 physical tool release for those old records,
 before any v2 operation. The deployment release note must name its immutable
 SHA and verified tool path; this cannot be a guessed future tag in this
-design. U3 remains a deployment check, not an agent production probe. The
-operator's one-installation statement removes the unknown fleet count; it
-does not replace checking that installation's records at cutover.
+design. U3 remains a per-installation deployment check, not an agent
+production probe: check its records at cutover before creating v2 state.
 The old tool still has the interrupted-restore and partial-staging defects
 listed in issue #695. If its existing recovery/accept/retire/abandon commands
 cannot resolve a record, cutover remains refused: preserve the old state and
 request operator recovery/fresh setup under the old runbook. N2 does not
 pretend that its new exits repair old schema-1 records or rewrite their phase
-to bypass admission. The known all-retired installation needs no migration.
+to bypass admission. An all-terminal/all-retired installation needs no
+record migration.
 
-N2 adds a literal exported `CODEX_STATE_SCHEMA = 2` to its helper. Read that
-capability from the verified target deploy file without executing arbitrary
-target code. Missing marker means pre-N2. This narrowly distinguishes tools
-that can protect v2 records; native hash equality alone cannot do that.
+N2 adds exactly this standalone UTF-8 line to its helper (LF or CRLF):
+
+```js
+export const CODEX_STATE_SCHEMA = 2;
+```
+
+Read the verified target deploy file without executing it; accept exactly
+one line matching `^export const CODEX_STATE_SCHEMA = 2;\r?$` in multiline
+mode. No matching line (including a differently formatted or unsupported
+version) means pre-N2; duplicate matching lines refuse. This is a capability convention in a
+verified artifact, not an authentication or JavaScript parser boundary.
+
+Before stopping, refuse a state-aware forward whose source is pre-N2:
+"Update to an N2 release with the same native first". B9 holds because the
+source remains running. A state-aware target must also be N2-capable before
+stop: an old tool must not be activated on newly retained v2 state.
+There is no automatic snapshot-discard option, pre-v2 return field or nonterminal prune exception.
 
 | Return path | Executing tool | Rule |
 |---|---|---|
-| Automatic never-started recovery | Pinned N2 physical updater | Source N2-aware: ordinary recovery. Pre-N2 source: use only the explicitly authorized selected-snapshot retirement below; otherwise refuse activation |
-| Automatic/explicit snapshot recovery | Pinned N2 physical updater | A pre-N2 target cannot be started while any v2 snapshot is retained or a home replacement is incomplete; explicit return retires the selected snapshot first |
-| Manual `switch --rollback` | N2 switch | Equal native hash plus no unfinished operation; if target is pre-N2, also require no retained/pruning v2 snapshot |
-| Source-code revert / reinstall old tarball | N2 installation and switch tools until transition ends | Same conditions; never invoke old install/prune on a v2-bearing installation |
+| Never-started recovery | Pinned N2 physical updater | Recorded source is necessarily N2-capable; settle failed and restart it |
+| Snapshot recovery | Pinned N2 physical updater | Restore only the recorded N2-capable source, preserving its snapshot |
+| Manual `switch --rollback` | N2 switch | Equal native hash and no unfinished operation; a pre-N2 target additionally requires no retained/pruning v2 snapshot |
+| Source-code revert / reinstall old tarball | N2 installation and switch tools until transition ends | Same conditions; do not invoke old install/prune while v2 retention or an unfinished operation remains |
 | Old-record recovery | Last deployed pre-N2 physical tools | Only before v2 creation; old directories remain untouched by N2 |
 
-**Proposed explicit exit for the first N2 update's pre-N2 source:** add
-`--return-to-pre-v2` to a state-aware forward, named `recover`, or restore
-command. It authorizes
-discarding that operation's snapshot after its recovery has made the home
-safe, not discarding other rollback points. First explicitly prune other
-retained snapshots. For a never-started return, prune its snapshot under
-the locks before switching back. For restore, finish promotion and save
-`promoted=true` and `stateDigest`; only then permit pruning its own snapshot
-while source startup is still pending. At that point no filesystem
-replacement remains in flight, even though the phase is `replace-intent`.
-Recheck that no retained/pruning snapshots or incomplete replacements remain,
-then use the N2 tool to switch/start pre-N2 source. Keep the N2 tool until the
-operation ends, using the unfinished-operation protection above. No tool
-copy or second installation is required. This option is never inferred or
-enabled by default. When a state-aware forward has a pre-N2 source, require
-the option and zero pre-existing v2 snapshots **before stop**; otherwise
-refuse while the source is still running. Persist the explicit choice in
-`returnToPreV2`, so an interrupted or failed forward can use the same selected
-snapshot retirement for automatic recovery. A successful forward keeps its
-snapshot. This preserves B9 instead of discovering after stopping the source
-that its restart needs a new decision. An ordinary same-pin update that
-creates no v2 record needs no such option.
-Clear this choice on terminal settlement. A later independently requested
-restore takes its choice from that command, never from an earlier successful
-forward's permission. Resuming an unfinished operation preserves its saved
-choice; it cannot grant itself permission to discard other snapshots.
-
-A crash during this exit resumes with the same N2 tool and option. Before
-`startRequested`, verify the promoted home against the saved state digest
-even if the snapshot has already been pruned. Afterwards only the recorded
-source startup is resumed. The old code cannot recover an interrupted v2
-operation; removing a stale lock is not permission to use it. Explicit
-snapshot loss on this path is a decision for design review, listed below.
-For a never-started return, leave `prepared`/`snapshot-verified` unchanged
-while pruning, then switch source, save `failed`, and start it. Resume-forward
-with the now-retired snapshot refuses, but recover-source remains valid;
-neither snapshot existence nor a live former owner proves never-started.
+The first N2 deployment is planned as a same-pin update and creates no v2
+record. The dependency is `@openai/codex` `0.161.0` at `3eaf5c99`, `a470e90b`
+and this design's baseline; admission still compares actual native hashes,
+not the version string. If the pin must change before N2 deployment, stop
+and design that transition separately. N2 does not add a bridge release.
 
 Every resumable switch accepts only its recorded before/after release IDs
 as current; a third release refuses. Switching to an already-current ID is
@@ -380,23 +436,38 @@ tool protection cannot disappear while the worker still uses that tool.
 | `codex-snapshot.mjs` | Retain classification/manifest verification/capacity; reduce binding metadata; durable copy publication; replace phase-per-credential callbacks with resumable replacement observation |
 | `kaoiro-runner-update.sh` | Resume/recover options, durable start ordering, source-restart settlement, active/MainPID post-check, remove acceptance guidance and owner-proof cleanup |
 | `kaoiro-runner-switch.sh`, `kaoiro-runner-install.sh` | v2 switch authorization and old-tool refusal; projection-based protection under links lock |
-| `codexReceipt`, `codexLineage`, `codexLineagePending`, `codexLegacy` tests and lineage harness | Delete after reference sweep; keep minimal old-record cutover tests in `codexState` |
-| `codexStateWorkflow`, `codexState`, snapshot/home classification tests | Replace retired-contract cases with the retained invariants and interruption exits; keep tests independently of the eventual N3 table |
+| `codexReceipt`, `codexLineage`, `codexLineagePending`, `codexLegacy` tests and lineage harness | Delete only after the case inventory below is fulfilled; keep old-record cutover tests in `codexState` |
+| `codexStateWorkflow`, `codexState` tests | Follow the case inventory; add interruption exits independently of the eventual N3 table. Keep `codexHomeClassification` and wrapper home tests |
 
 Update only affected sections of `runner-update-and-rollback.md`,
 `codex-home.md`, `runner-install.md`,
 `reference/deployment/transactions-and-identity.md`, and ADR-0069. Remove
 acceptance/receipt/lineage/abandon/evidence-retirement instructions and inbound
 links. N2 documents its recovery commands; N3 consolidates their hints/table.
+At N2 landing also amend the parent's B1 row as specified in section 5 and
+its S16 row to explicitly include the tool and target of an unfinished
+forward in in-flight protection (source-only once terminal).
 No server recovery, publication workflow, enrollment, native pin, package
 lock or production configuration is changed by N2.
+
+The [case-level test migration inventory](issue-709-n2-test-inventory.md)
+is required before deleting/replacing tests. Each retained row names a
+surviving test group and its guard mutation; create those replacements first,
+then delete old cases/harness imports. Reconcile the inventory with N1/P3 at
+implementation start, especially the S13 cases rescued by N1. Record exact
+candidate, test names and red mutation results; green suite totals alone do
+not establish coverage. Remove old harness only after every retained row
+has a replacement and every guard whose sole coverage was removed has a
+red mutation result. Unchanged primitive checks retain their existing tests;
+do not turn this migration into a re-audit of unrelated guards.
 
 Implementation acceptance, run on the exact committed candidate through the
 project's runner typecheck and full test suite in the remote test environment:
 
 - Real shipped updater through its physical/symlink entry, disposable
   installation/home: cross-native forward, post-start completion, restore,
-  same-pin update with a retained snapshot, and explicit old-tool return.
+  same-pin update with a retained snapshot, and permitted/refused old-tool
+  returns.
   Keep service-manager fakes for deterministic faults, and separately run
   disposable real-systemd start/stop/cgroup/path agreement controls before
   deployment. Never count synthetic service replies as systemd evidence.
@@ -405,21 +476,45 @@ project's runner typecheck and full test suite in the remote test environment:
   before completion. Dead-owner recovery must not depend on the original
   PID. At every cut, assert actual current link, service calls, record, home,
   snapshot/staging presence, and a completing recovery command.
+- Fake-manager boot cases use the shipped updater and an enabled-unit boot
+  action that resolves current and writes a native-specific state marker;
+  it must run independently of updater `start` calls. Cut after forward link
+  switch before explicit start: record is already `start-intent`, target
+  boot writes state, recover must restore before any source launch. Cut
+  before link switch with intent saved: conservative restore still works.
+  Boot in prepared/snapshot-verified on source: resume/recover stops again,
+  asserts B5, and rejects stale snapshot reuse while recover remains usable.
+  On restore, boot at every H→Q, credential, intent, source-link, S→H and
+  promoted checkpoint boundary. H absent must reject Codex launch through
+  the real missing-home guard; H published can start only source. Have that
+  boot mutate H and refresh credentials before resume; require completion
+  without digest/location refusal or a second replacement. Assert source/target calls and H/S/Q, not just
+  exit status. Separately move each intent write after its exposure step;
+  each mutant must fail the corresponding boot case. This deterministic
+  control does not substitute for the disposable real-systemd check above.
 - Interrupt before/after every home/credential rename and source-start
   request. Resume twice; no old credential bytes appear, current credential
   file/directory identities are preserved, and aside state is untouched.
-  Missing/both credential locations refuse without overwrites.
+  Before promotion, missing/both credential locations refuse without
+  overwrites. Restore the same snapshot twice, then cancel another attempt
+  and prune: every `{attempt, aside}` entry remains discoverable and no
+  command removes the earlier aside directories.
 - R2: partial staging, complete snapshot with `prepared` record, verified
-  record without snapshot, and orphan snapshot. R7: kill during recursive
-  deletion, retry after root disappearance, and reused root/symlink refusal.
+  record without snapshot, and orphan snapshot. Recover a valid complete
+  destination into retained/failed then prune; recover an invalid one into
+  planned/failed then explicitly prune without payload verification. R7:
+  kill during recursive deletion, retry after root disappearance, and reused
+  root/symlink refusal.
 - B2/B5/B6/B8 controls: unbacked cross-pin switch, populated cgroup after
   stop, corrupted snapshot, live home A versus next-start B, and next-start
   path changed after preparation. Refuse in the actual control flow and
   count zero subsequent switch/start/replacement calls where applicable.
 - Same-path environment edit and inode change pass; real child `/proc`
   environment supplies the live path and fallback HOME, not fixture data.
-  Defaults receive a production-composition lifecycle test as well as
-  injected deterministic tests.
+  An unset/empty next-start home refuses before stop, while a live default
+  plus explicit next-start identical path passes. The missing explicit home
+  test exercises the real runner/Codex launch path after boot. Production
+  defaults receive a lifecycle test independently of injected service fakes.
 - Cutover: every old unfinished phase/unretired reference refuses; all
   terminal/retired old records pass despite obsolete receipt metadata.
   Legacy and v2 directories' bytes stay unchanged on refusal.
@@ -430,7 +525,7 @@ project's runner typecheck and full test suite in the remote test environment:
 - Mutate one new guard/phase-ordering branch or caller wiring at a time;
   corresponding tests must fail, then restore and rerun. At minimum remove
   the durable-intent write, the path comparison, the prune identity guard,
-  and the pre-v2 activation check separately. Run mutations remotely.
+  and the pre-v2 source/activation checks separately. Run mutations remotely.
 
 ## 9. Observation and limits
 
@@ -471,35 +566,19 @@ existing stopped-service/path contracts are retained, and integration checks
 remain implementation/deployment acceptance work. No claim about power-loss
 survival follows from a process-kill experiment.
 
-## 10. Decisions for review
+## 10. Design choices and remaining validation
 
-1. **Explicit old-tool return:** prefer `--return-to-pre-v2`, required before
-   a state-aware forward from a pre-N2 source, permitting retirement of only
-   that operation's snapshot if source recovery is needed. Alternative: no
-   automated pre-N2 return while v2 state exists and documented manual
-   recovery; that would weaken B9 for the first N2 transition and must not be
-   adopted implicitly. A mixed-code/native bridge release would add a new
-   deployment topology and is outside N2. The preferred option needs the
-   director's acceptance before implementation.
-2. **One record per snapshot:** prefer replacing its restore-attempt fields
-   for a new explicit restore, preserving earlier aside directories.
-   Alternative: a separate restore record referring to the snapshot record;
-   that needs cross-record settlement and buys history this scope retires.
-3. **Temporary release protection:** keep physical tool/from/target only for
-   an unfinished operation; retain only source for an idle snapshot. This
-   interprets S16's in-flight replacement protection to include a forward
-   operation's executing tool. If S16 is intended to exclude that lifetime,
-   the director must settle the discrepancy before implementation.
-4. **B1 during replacement:** prefer explicitly retaining the cooperative
-   stopped-service contract, with the B1 limitation above corrected in the
-   parent text. Alternative: require an explicit `CODEX_HOME` for state-aware
-   operations (still not a full launch barrier). A new transaction-aware
-   launch barrier would enlarge N2 and reintroduce a retired mechanism; do
-   not silently add it. Resolve this wording/guarantee boundary before
-   implementation.
+The design uses pre-stop refusal for a pre-N2 state-aware source, one record
+per snapshot with an append-only aside list, temporary forward tool/target
+protection, and explicit next-start `CODEX_HOME`. These are the director's
+2026-10-22 decisions. No snapshot-discard return mechanism or new launch
+barrier is proposed. The implementation remains L and needs its independent
+review after design approval; the director owns dispatch and landing.
 
-None of these provisional choices authorizes new guarantees or production
-changes. The director owns review dispatch and the eventual landing.
+The primitive observation below remains evidence of filesystem/lock lifetime,
+not a passed v2 boot test. The revised ordering, case migration and new
+negative controls are implementation acceptance requirements, not measured
+behavior of code that has yet to be written. No production action is included.
 
 ## Appendix: disposable primitive observation
 
