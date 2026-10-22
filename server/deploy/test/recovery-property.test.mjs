@@ -19,6 +19,7 @@ import { hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { execChildSync } from "../../../runner/deploy/child-process-environment.mjs";
 
 import { PHASE } from "../kaoiro-deploy-phase.mjs";
 import { newTransactionId } from "../kaoiro-deploy-transaction.mjs";
@@ -141,6 +142,7 @@ function makeWorld(t, { fleet = { schema: 1, hosts: [], wrappers: [] }, override
     nextId: 16,
     calls: [],
   }));
+  writeFileSync(curl + ".state", statePath, { mode: 0o600 });
   const backupRoot = join(root, "backup");
   const config = join(root, "deploy.json");
   writeFileSync(config, JSON.stringify({
@@ -187,6 +189,25 @@ function makeWorld(t, { fleet = { schema: 1, hosts: [], wrappers: [] }, override
   };
   return world;
 }
+
+test("stateful curl reads its sidecar under authority and ignores a conflicting legacy environment", (t) => {
+  const world = makeWorld(t), curl = join(world.root, "bin", "curl");
+  const readHealth = () => JSON.parse(execChildSync("authority", curl, [], { encoding: "utf8" }));
+  assert.equal(readHealth().build_revision, world.oldSha);
+  const conflicting = join(world.root, "wrong-state.json");
+  writeFileSync(conflicting, JSON.stringify({
+    containers: [{ service: "kaoiro", status: "running", image: "wrong" }],
+    images: { wrong: { revision: "wrong-revision" } },
+  }));
+  const env = { ...process.env, FAKE_DOCKER_STATE: conflicting };
+  assert.equal(JSON.parse(execFileSync(curl, [], { encoding: "utf8", env })).build_revision, world.oldSha);
+  world.edit(state => { state.healthFailRevision = world.oldSha; });
+  assert.equal(readHealth().build_revision, "starting");
+  world.edit(state => { state.containers = []; });
+  assert.throws(readHealth, error => error.status === 7 && /Failed to connect/.test(error.stderr));
+  rmSync(curl + ".state");
+  assert.throws(() => execFileSync(curl, [], { env, stdio: "pipe" }), error => error.status !== 0);
+});
 
 function tokenize(text) {
   const words = [];

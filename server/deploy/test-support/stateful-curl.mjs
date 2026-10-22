@@ -4,7 +4,8 @@
 // or as unhealthy for the revision the model marks as failing.
 import { readFileSync } from "node:fs";
 
-const state = JSON.parse(readFileSync(process.env.FAKE_DOCKER_STATE, "utf8"));
+const statePath = readFileSync(process.argv[1] + ".state", "utf8");
+const state = JSON.parse(readFileSync(statePath, "utf8"));
 const running = state.containers.find((c) => c.service === "kaoiro" && c.status === "running");
 if (!running) {
   process.stderr.write("curl: (7) Failed to connect\n");
