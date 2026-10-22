@@ -13,7 +13,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/generate-build-info.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm build && vitest run"
+    "test": "pnpm build && KAOIRO_RUNNER_TIER=complete vitest run",
+    "test:fast": "pnpm build && KAOIRO_RUNNER_TIER=fast vitest run",
+    "test:integration": "pnpm build && KAOIRO_RUNNER_TIER=integration vitest run",
+    "test:native": "pnpm build && KAOIRO_RUNNER_TIER=native vitest run"
   },
   "devDependencies": {
     "@kaoiro/protocol": "workspace:*",
