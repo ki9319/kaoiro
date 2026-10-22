@@ -70,6 +70,13 @@ describe("schema-2 release tag reader", () => {
     ["a landing claim on the commit", () => { release(); git(["update-ref", `refs/tags/identity/landing/${revision}`, revision]); }],
     ["a record naming another revision", () => release({ revision: "f".repeat(40) })],
     ["a tag name that differs from the record version", () => release({ version: "2026.10.22.8" }, { name: "v2026.10.22.7" })],
+    ["a header tag line that differs from the ref and the record", () => {
+      // Only the object's own `tag` header line disagrees: the record and the
+      // ref name both say v2026.10.22.7.
+      release({ version: "2026.10.22.7" }, { name: "v2026.10.22.8" });
+      git(["update-ref", "refs/tags/v2026.10.22.7", git(["rev-parse", "refs/tags/v2026.10.22.8"])]);
+      git(["update-ref", "-d", "refs/tags/v2026.10.22.8"]);
+    }],
     ["an additional key", () => release({ released_at: "2026-10-22T00:00:00Z" })],
     ["a missing key", () => release({ repository_id: undefined })],
     ["schema 3", () => release({ schema: 3 })],
