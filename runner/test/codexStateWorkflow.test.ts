@@ -371,11 +371,14 @@ else if (args.includes('show')) {
     } finally { nodeOptions = previousOptions; }
   });
   it("starts with a SQLite state database without writing migration diagnostics", async () => {
-    const { DatabaseSync } = await import("node:sqlite");
     const databasePath = join(home, "state_5.sqlite");
-    const database = new DatabaseSync(databasePath);
-    database.exec("CREATE TABLE _sqlx_migrations(version INTEGER, success INTEGER); INSERT INTO _sqlx_migrations VALUES(58,1);");
-    database.close();
+    const database = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      import { DatabaseSync } from 'node:sqlite';
+      const db = new DatabaseSync(process.argv[1]);
+      db.exec("CREATE TABLE _sqlx_migrations(version INTEGER, success INTEGER); INSERT INTO _sqlx_migrations VALUES(58,1);");
+      db.close();
+    `, databasePath], { encoding: "utf8" });
+    expect(database.status, database.stderr).toBe(0);
     const result = update();
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(calls, "utf8")).toBe("stop\nstart\n");
