@@ -6519,7 +6519,7 @@ for (const flag of ["-f", "--file"]) {
     const cli = fileURLToPath(new URL("../kaoiro-server-deploy.mjs", import.meta.url));
     const result = spawnSync(process.execPath, [cli, "update", "--repo", workDir, "--target", headSha, flag, "other.yaml"], { encoding: "utf8" });
     assert.equal(result.status, 64);
-    assert.match(result.stderr, /unknown argument/);
+    assert.ok(result.stderr.includes(`unknown argument: ${flag}`), result.stderr);
     assert.equal(existsSync(join(root, "kaoiro-deploy")), false);
   });
 }
