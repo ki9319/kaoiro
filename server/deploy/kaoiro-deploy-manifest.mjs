@@ -199,7 +199,7 @@ export function isComposePlan(value) {
 
 // Historical plans were not validated during scans; reject unusable legacy plans only at use time.
 export function isComposePlanIfRecorded(value) {
-  return typeof value !== "object" || value === null || !Object.hasOwn(value, "compose_files") || isComposePlan(value);
+  return !Object.hasOwn(value ?? {}, "compose_files") || isComposePlan(value);
 }
 
 /** Validates the shape the operator decisions on #303 fixed. STRICT, like

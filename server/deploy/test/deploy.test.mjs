@@ -15,7 +15,7 @@ import fs, {
 } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, test } from "node:test";
 import { CHILD_PATH } from "../../../runner/deploy/child-process-environment.mjs";
@@ -30,6 +30,7 @@ import { newTransactionId } from "../kaoiro-deploy-transaction.mjs";
 import { POLICY_ENV, PLACEMENT_FILE } from "../kaoiro-delivery-policy-placement.mjs";
 import {
   DeployError,
+  checkForwardCompose,
   deploymentLockKey,
   hasPriorTransactions,
   listArchiveVerbose,
@@ -806,7 +807,7 @@ function initRepo(dir) {
   // `git status --porcelain` then reports it and runBuild's dirty-tree
   // guard fires for the wrong reason (measured: PR #312 round-3 style
   // node:22 repro, 2026-09-06).
-  writeFileSync(join(dir, ".gitignore"), ".env\n/server/docker-compose.override.yaml\n/server/docker-compose.override.yml\n");
+  writeFileSync(join(dir, ".gitignore"), readFileSync(new URL("../../../.gitignore", import.meta.url)));
   execFileSync("git", ["-C", dir, "add", "-A"]);
   execFileSync("git", ["-C", dir, "commit", "-q", "-m", "init"]);
   const revision = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
@@ -6188,6 +6189,7 @@ for (const mode of ["none", "yaml", "yml", "both"]) {
     if (mode !== "none") {
       const source = mode === "both" ? "yml" : mode;
       assert.equal(recovery.compose_files[1].source, `docker-compose.override.${source}`);
+      assert.equal(recovery.compose_files[1].path, join(tx.dir, `compose-override.${source}`));
       assert.equal(fs.statSync(recovery.compose_files[1].path).mode & 0o777, 0o600);
       assert.equal(readFileSync(recovery.compose_files[1].path, "utf8"), readFileSync(join(workDir, "server", recovery.compose_files[1].source), "utf8"));
     }
@@ -6521,3 +6523,20 @@ for (const flag of ["-f", "--file"]) {
     assert.equal(existsSync(join(root, "kaoiro-deploy")), false);
   });
 }
+
+
+test("Compose inputs: use-time validation rejects malformed new metadata before rendering", () => {
+  const invalid = { compose_sha256: "a".repeat(64), env_sha256: "b".repeat(64),
+    identity: { project_name: "kaoiro", services: ["kaoiro"], service_mounts: [] }, compose_files: [] };
+  assert.throws(() => withScenario("running-clean-stop", () =>
+    checkForwardCompose(bin, join(workDir, "server"), root, invalid)), /invalid compose_files/);
+});
+
+test("Compose inputs: relative repo paths still bind absolute explicit files", () => {
+  writeComposeOverride();
+  const result = withScenario("running-clean-stop", () => runUpdate({ repo: relative(process.cwd(), workDir),
+    target: headSha, maintenanceApproved: true }, configWithCleanStopMeasured()));
+  assert.equal(result.phase, "done");
+  assert.equal(readManifest(join(root, "kaoiro-deploy", result.transactionId)).target_plan.compose_files[0].path,
+    join(workDir, "server", "docker-compose.yaml"));
+});

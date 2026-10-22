@@ -19,7 +19,7 @@ import {
   rmSync,
   statfsSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { artifactBuildIdentity, assertSourceIdentity, computeBuildIdentity, requireTaggedIdentity } from "../../scripts/build-identity.mjs";
 import { fsyncExistingPath, writeFileDurably } from "./kaoiro-deploy-atomic-write.mjs";
@@ -1523,7 +1523,7 @@ function normalizeBuildFlags(flags) {
 
 function buildUnderLock({ repo, target }, config, composeArgs = []) {
   const { bin, overridden } = resolveDockerBin(config);
-  const serverDir = join(repo, "server");
+  const serverDir = resolve(repo, "server");
 
   const status = gitOutput(["status", "--porcelain"], repo);
   if (status !== "") {
@@ -1636,7 +1636,7 @@ export function runBuild(flags, config) {
     };
   }
 
-  const serverDir = join(repo, "server");
+  const serverDir = resolve(repo, "server");
   const backupRoot = resolveBackupRoot(config);
   const lockPath = acquireLock(backupRoot, deploymentLockKey(serverDir));
   let releaseActivityLock;
@@ -1667,7 +1667,7 @@ export function runBuild(flags, config) {
  *  refuses and reports the reason; a human decides. */
 export function runStart(flags, config) {
   const repo = flags.repo ?? process.cwd();
-  const serverDir = join(repo, "server");
+  const serverDir = resolve(repo, "server");
   const { bin, overridden } = resolveDockerBin(config);
   const backupRoot = resolveBackupRoot(config);
 
@@ -2117,7 +2117,7 @@ export function runUpdate(flags, config) {
     fail("--target <full 40-hex SHA> is required for update", 64);
   }
   const target = flags.target;
-  const serverDir = join(repo, "server");
+  const serverDir = resolve(repo, "server");
   const { bin, overridden } = resolveDockerBin(config);
   const backupRoot = resolveBackupRoot(config);
   const dryRun = flags.dryRun === true;
@@ -2970,7 +2970,7 @@ function readRollbackDecision(dir, transactionId) {
 
 export function runRollback(flags, config) {
   const repo = flags.repo ?? process.cwd();
-  const serverDir = join(repo, "server");
+  const serverDir = resolve(repo, "server");
   const { bin, overridden } = resolveDockerBin(config);
   const backupRoot = resolveBackupRoot(config);
 
@@ -3463,7 +3463,7 @@ function listDoneTransactionSummaries(backupRoot) {
  *  states exactly what this command reads and does not. */
 export function runStatus(flags, config) {
   const repo = flags.repo ?? process.cwd();
-  const serverDir = join(repo, "server");
+  const serverDir = resolve(repo, "server");
   const { bin, overridden } = resolveDockerBin(config);
   const backupRoot = resolveBackupRoot(config);
   const hasState = hasPriorTransactions(bin, serverDir, backupRoot);

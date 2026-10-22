@@ -89,7 +89,7 @@ function makeWorld(t, { fleet = { schema: 1, hosts: [], wrappers: [] }, override
   git(source, "config", "user.name", "Test");
   writeFileSync(join(source, "server", "docker-compose.yaml"), "# fixture\n");
   // As in the real repository, the release authority descriptor is ignored.
-  writeFileSync(join(source, ".gitignore"), ".env\n/server/.kaoiro-release-authority.json\n/server/docker-compose.override.yaml\n/server/docker-compose.override.yml\n");
+  writeFileSync(join(source, ".gitignore"), readFileSync(join(repoRoot, ".gitignore")));
   copyCode(source);
   git(source, "add", "-A");
   git(source, "commit", "-q", "-m", "old");
