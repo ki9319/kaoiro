@@ -9,6 +9,7 @@
 // yuta 2026-09-06).
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { execChildSync } from "../../runner/deploy/child-process-environment.mjs";
 import {
   existsSync,
   mkdirSync,
@@ -3576,9 +3577,8 @@ function splitTarEntryName(typeChar, rawName) {
  *  rollback refuses it at preflight, before any stop or wipe. Manifests
  *  recorded after this change match, and ASCII names are unaffected. */
 export function listArchiveVerbose(archivePath) {
-  return execFileSync("tar", ["tvzf", archivePath, "--numeric-owner"], {
+  return execChildSync("authority", "tar", ["tvzf", archivePath, "--numeric-owner"], {
     encoding: "utf8",
-    env: { ...process.env, LC_ALL: "C" },
   });
 }
 

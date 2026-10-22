@@ -1,5 +1,6 @@
 import "../../../scripts/test/fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
+import childProcess from "node:child_process";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs, {
@@ -18,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, test } from "node:test";
+import { CHILD_PATH } from "../../../runner/deploy/child-process-environment.mjs";
 
 import { DEFAULT_CONFIG } from "../kaoiro-deploy-config.mjs";
 import { readJournal, writeJournal } from "../kaoiro-deploy-journal.mjs";
@@ -3142,45 +3144,37 @@ test("parseTarEntries refuses a listing line with an unsupported entry type", ()
   assert.ok(!caught.message.includes("archive verification failed"));
 });
 
-// Tar listing locale (issue #552). Test A is always run: a `tar` shim
-// records the LC_ALL that each listing receives. B is the premise for C: it
-// checks that this host's ja locale really localizes tar's hardlink line.
-// C runs the hardlink case under that locale, and is skipped with the
-// reason when B does not hold.
-const REAL_TAR = execFileSync("which", ["tar"], { encoding: "utf8" }).trim();
+// Tar listing locale (issue #552). Test A is always run: it records the LC_ALL
+// passed to each real tar listing. B is the premise for C: it checks that this
+// host's ja locale really localizes tar's hardlink line. C runs the hardlink
+// case under that locale, and is skipped with the reason when B does not hold.
 const JA_LOCALE = "ja_JP.UTF-8";
+const AUTHORITY_SENTINEL = "KAOIRO_TEST_AUTHORITY_SENTINEL";
 
-// Runs fn with a `tar` shim first on PATH. Each shim call appends one line:
-// the LC_ALL it received, a tab, then its arguments. It then execs the real
-// tar. Returns fn's result and the recorded calls.
-function withTarShim(fn) {
-  const shimDir = mkdtempSync(join(tmpdir(), "kaoiro-552-tar-shim-"));
-  const logPath = join(shimDir, "calls.log");
-  writeFileSync(
-    join(shimDir, "tar"),
-    `#!/bin/sh\nprintf '%s\\t%s\\n' "\${LC_ALL-<unset>}" "$*" >> '${logPath}'\nexec '${REAL_TAR}' "$@"\n`,
-    { mode: 0o755 },
-  );
-  const priorPath = process.env.PATH;
-  process.env.PATH = `${shimDir}:${priorPath}`;
+// The authority profile owns PATH, so capture the product's tar options and
+// pass the same command through to the real child-process implementation.
+function withTarCapture(fn) {
+  const originalExecFileSync = childProcess.execFileSync;
+  const calls = [];
+  childProcess.execFileSync = (file, args, options) => {
+    if (file === "tar" && args?.[0] === "tvzf") {
+      const env = options?.env ?? {};
+      calls.push({
+        argv: [...args],
+        lcAll: env.LC_ALL,
+        path: env.PATH,
+        sentinelPresent: Object.hasOwn(env, AUTHORITY_SENTINEL),
+      });
+    }
+    return originalExecFileSync(file, args, options);
+  };
+  syncBuiltinESMExports();
   try {
-    const result = fn();
-    return { result, calls: readTarShimCalls(logPath) };
+    return { result: fn(), calls };
   } finally {
-    process.env.PATH = priorPath;
-    rmSync(shimDir, { recursive: true, force: true });
+    childProcess.execFileSync = originalExecFileSync;
+    syncBuiltinESMExports();
   }
-}
-
-function readTarShimCalls(logPath) {
-  if (!existsSync(logPath)) return [];
-  return readFileSync(logPath, "utf8")
-    .split("\n")
-    .filter((line) => line !== "")
-    .map((line) => {
-      const [lcAll, args] = line.split("\t");
-      return { lcAll, argv: args.split(" ") };
-    });
 }
 
 // Runs fn with LC_ALL set to locale and LANGUAGE removed, then restores both.
@@ -3224,7 +3218,7 @@ const JA_PROBE = probeJaLocalization();
 
 test("tar listing for the backup verification runs under LC_ALL=C, whatever the caller's locale", () => {
   const { result, calls } = withLocaleEnv(JA_LOCALE, () =>
-    withTarShim(() =>
+    withTarCapture(() =>
       withScenario("running-clean-stop-torture", () =>
         runUpdate({ repo: workDir, target: headSha, maintenanceApproved: true }, configWithCleanStopMeasured()),
       ),
@@ -3234,11 +3228,12 @@ test("tar listing for the backup verification runs under LC_ALL=C, whatever the 
   const backup = calls.filter((c) => c.argv[0] === "tvzf" && c.argv[1].endsWith("/archive.tar.gz"));
   assert.equal(backup.length, 1, "expected exactly one backup verification listing");
   assert.equal(backup[0].lcAll, "C");
+  assert.equal(backup[0].path, CHILD_PATH, "tar must resolve through the authority profile's PATH");
 });
 
 test("tar listing for the rollback restore verification runs under LC_ALL=C, whatever the caller's locale", () => {
   const { result, calls } = withLocaleEnv(JA_LOCALE, () =>
-    withTarShim(() => {
+    withTarCapture(() => {
       const update = withScenario("running-clean-stop", () =>
         runUpdate({ repo: workDir, target: headSha, maintenanceApproved: true }, configWithCleanStopMeasured()),
       );
@@ -3255,6 +3250,30 @@ test("tar listing for the rollback restore verification runs under LC_ALL=C, wha
   const restore = calls.filter((c) => c.argv[0] === "tvzf" && c.argv[1].endsWith("/rollback-restore-verify.tar.gz"));
   assert.equal(restore.length, 1, "expected exactly one rollback restore-verification listing");
   assert.equal(restore[0].lcAll, "C");
+  assert.equal(calls.length, 3, "expected backup, rollback preflight, and restore-verification listings");
+  assert.ok(calls.every((call) => call.lcAll === "C"), "every update and rollback listing must use LC_ALL=C");
+  assert.ok(calls.every((call) => call.path === CHILD_PATH), "every listing must resolve through the authority profile's PATH");
+});
+
+test("archive listing uses the authority profile and excludes arbitrary caller environment values", () => {
+  const dir = mkdtempSync(join(tmpdir(), "kaoiro-711-authority-"));
+  const priorSentinel = process.env[AUTHORITY_SENTINEL];
+  try {
+    writeFileSync(join(dir, "real.txt"), "archive entry");
+    const archive = join(dir, "archive.tar.gz");
+    execFileSync("tar", ["czf", archive, "-C", dir, "real.txt"]);
+    process.env[AUTHORITY_SENTINEL] = "present";
+    const { result, calls } = withTarCapture(() => listArchiveVerbose(archive));
+    assert.match(result, /real\.txt/);
+    assert.equal(calls.length, 1, "expected the archive listing to reach execFileSync");
+    assert.equal(calls[0].lcAll, "C");
+    assert.equal(calls[0].sentinelPresent, false, "authority must not copy arbitrary caller variables");
+    assert.equal(calls[0].path, CHILD_PATH);
+  } finally {
+    if (priorSentinel === undefined) delete process.env[AUTHORITY_SENTINEL];
+    else process.env[AUTHORITY_SENTINEL] = priorSentinel;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // A reporter, not a check: it records the probe result as a skip (premise

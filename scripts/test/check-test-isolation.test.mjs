@@ -279,7 +279,7 @@ test("a package without Vitest installed cannot be observed and is reported", ()
 const REPOSITORY = fileURLToPath(new URL("../..", import.meta.url));
 const REAL_WORKFLOW = readFileSync(join(REPOSITORY, ".github/workflows/ci.yml"), "utf8");
 const CLI_STEP = "      - run: node scripts/test-isolation/check.mjs\n";
-const TEST_STEP = "      - run: node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs\n";
+const TEST_STEP = "      - run: node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs scripts/test/child-process-environment.test.mjs\n";
 
 test("the real workflow runs the checker and its tests in the test-isolation job", () => {
   assert.deepEqual(ciWiringProblems(REAL_WORKFLOW), []);
@@ -295,7 +295,8 @@ const wiringMutations = {
     text => text.replace(CLI_STEP, "").replace("  server:\n    runs-on: ubuntu-latest\n    steps:\n", `  server:\n    runs-on: ubuntu-latest\n    steps:\n${CLI_STEP}`),
     /missing the step `- run: node scripts\/test-isolation\/check\.mjs`/],
   "the test step is removed": [text => text.replace(TEST_STEP, ""), /missing the step `- run: node --test scripts\/test\/test-isolation\.test\.mjs/],
-  "the test step drops the checker tests": [text => text.replace(" scripts/test/check-test-isolation.test.mjs\n", "\n"), /missing the step `- run: node --test scripts\/test\/test-isolation\.test\.mjs/],
+  "the test step drops the checker tests": [text => text.replace(" scripts/test/check-test-isolation.test.mjs", ""), /missing the step `- run: node --test scripts\/test\/test-isolation\.test\.mjs/],
+  "the test step drops the child environment test": [text => text.replace(" scripts/test/child-process-environment.test.mjs\n", "\n"), /missing the step `- run: node --test scripts\/test\/test-isolation\.test\.mjs/],
   "the job is renamed": [text => text.replace("  test-isolation:\n", "  test-isolation-renamed:\n"), /job test-isolation not found/],
 };
 
@@ -310,12 +311,13 @@ for (const [name, [mutate, expected]] of Object.entries(wiringMutations)) {
 
 const JOB = (...steps) => `jobs:\n  test-isolation:\n    runs-on: ubuntu-latest\n    steps:\n${steps.map(step => `      ${step}\n`).join("")}`;
 const CLI_JOB_STEP = "- run: node scripts/test-isolation/check.mjs";
-const TEST_JOB_STEP = "- run: node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs";
+const TEST_JOB_STEP = "- run: node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs scripts/test/child-process-environment.test.mjs";
 
-// The fixture repository plus the two entries the job's test step names.
+// The fixture repository plus the three entries the job's test step names.
 function connectedRepository() {
   const root = fixtureRepository();
-  for (const path of ["scripts/test/test-isolation.test.mjs", "scripts/test/check-test-isolation.test.mjs"]) write(root, path, entry(path));
+  for (const path of ["scripts/test/test-isolation.test.mjs", "scripts/test/check-test-isolation.test.mjs",
+    "scripts/test/child-process-environment.test.mjs"]) write(root, path, entry(path));
   write(root, ".github/workflows/ci.yml", JOB(CLI_JOB_STEP, TEST_JOB_STEP));
   return root;
 }

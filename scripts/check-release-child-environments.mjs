@@ -8,7 +8,7 @@ const LEGACY_CHILD_CALLS = {
   "scripts/check-github-issue-import.mjs": 1,
   "scripts/github-issue-import.mjs": 1,
   "server/deploy/kaoiro-deploy-docker.mjs": 1,
-  "server/deploy/kaoiro-server-deploy.mjs": 9,
+  "server/deploy/kaoiro-server-deploy.mjs": 7,
 };
 const nativeCalls = /\b(?:execFileSync|execFile|execSync|spawnSync|spawn|fork)\s*\(/g;
 

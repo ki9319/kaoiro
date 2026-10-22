@@ -113,7 +113,7 @@ variable alone never relaxes a root: the opt-in needs the call as well.
 pnpm install --frozen-lockfile && pnpm -C dashboard install --frozen-lockfile
 pnpm -C wrapper build && pnpm -C runner build
 node scripts/test-isolation/check.mjs
-node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs
+node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs scripts/test/child-process-environment.test.mjs
 ```
 
 These are the CI job's steps. The checker prints each problem on stderr and
@@ -131,11 +131,12 @@ owns a different guarantee:
 | `node scripts/test-isolation/check.mjs` (CI step) | The real repository satisfies the contract. Its exit status is the step status |
 | `check-test-isolation.test.mjs`, rule cases | Each rule of the checker (guard loading, discovery, setup order, launch lines, permit allow-list) fails on a minimal fixture |
 | `check-test-isolation.test.mjs`, command cases | The checker command, started as the workflow starts it, exits 1 with the rule's message on stderr and the summary line when a fixture breaks a rule |
-| `check-test-isolation.test.mjs`, workflow cases | The job's checker step and test step are present exactly, with no `continue-on-error` or `if:`. The checker (as its own problem) and this test each check the other's step, so removing either one fails the one that remains |
+| `check-test-isolation.test.mjs`, workflow cases | The job's checker and node:test commands are present exactly, including the complete test-file list, with no `continue-on-error` or `if:`. The checker (as its own problem) and this test each check the other's command, so removing either one fails the one that remains |
 | `test-isolation.test.mjs` | The guard's refusals, network rules and permits |
+| `child-process-environment.test.mjs` | The child environment profiles and raw child-process call-site pins reject unmanaged launches and ambient credentials |
 
-The workflow cases read the two steps as exact lines: change them together
-with `ciWiringProblems` in the checker.
+The workflow cases pin both CI commands exactly, including the node:test file
+list. Update them together with `ciWiringProblems` in the checker.
 
 ## Residual risks
 

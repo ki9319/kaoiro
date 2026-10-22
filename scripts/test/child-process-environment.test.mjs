@@ -83,8 +83,9 @@ test("existing authority and new repair SSH launches both exclude ambient secret
 test("coverage check rejects separate existing and new bypasses and its own disabled guard", () => {
   const green = checkReleaseChildEnvironments(root);
   assert.equal(green.files, 17); assert.ok(green.calls >= 25);
-  assert.equal(green.unchanged_legacy_calls, 13);
-  for (const target of ["scripts/production-release-authority.mjs", "scripts/landing-repair-ssh.mjs"]) {
+  assert.equal(green.unchanged_legacy_calls, 11);
+  for (const target of ["scripts/production-release-authority.mjs", "scripts/landing-repair-ssh.mjs",
+    "server/deploy/kaoiro-server-deploy.mjs"]) {
     assert.throws(() => checkReleaseChildEnvironments(root, (path, encoding) => {
       const source = readFileSync(path, encoding);
       return path.endsWith(target) ? source + "\nspawnSync('unsafe', []);\n" : source;
