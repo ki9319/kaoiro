@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { nativeIdentity } from "./codex-native.mjs";
 import { verifyRelease } from "./verify-release.mjs";
 import { atomicJSON, capacity, digest, hasEntry, identity, inside, inventory, must, prepareRestore, promoteRestore, sameState, snapshot, verifySnapshot } from "./codex-snapshot.mjs";
-import { assertStopped, captureBinding, checkBinding, runnerActivity, staticBinding } from "./codex-service.mjs";
+import { assertStopped, captureBinding, checkBinding, requireCgroupV2, runnerActivity, staticBinding } from "./codex-service.mjs";
 
 const ID = /^[a-f0-9]{40}(?:-dirty)?$|^unknown$/;
 const UUID = /^[a-f0-9-]{36}$/;
@@ -268,6 +268,7 @@ async function prepare(root, target, home, destination, service, tool, owner) {
   must(!inside(home, destination) && !inside(destination, home) && !inside(join(root, "releases"), destination) && !inside(destination, root), "Backup destination overlaps protected state/releases");
   const entries = inventory(home);
   const estimate = { backup: capacity(dirname(destination), entries), restore: capacity(dirname(home), entries) };
+  requireCgroupV2();
   if (entries.some((e) => e.path.endsWith(".sqlite"))) await import("node:sqlite");
   const p = init(root);
   const uuid = randomUUID();
@@ -340,6 +341,7 @@ async function prepareRollback(root, snapshotPath, home, service, tool, owner, n
   const target = await releaseIdentity(root, old.source.id);
   must(target.sha256 === old.source.sha256, "Backup source native changed");
   capacity(dirname(home), original.entries);
+  requireCgroupV2();
   const uuid = randomUUID();
   const tx = { schema: 1, bindingReceiptVersion: 1, uuid, root, mode: neverStartedUUID ? "code-recovery" : "restore", order: Math.max(0, ...records(root, "transactions").map((r) => r.order || 0)) + 1, owner: liveOwner(owner), source, target, tool, binding: { ...binding, live: old.binding.live }, service, backupUUID: old.uuid, snapshot: snapshotPath, staging: join(dirname(home), `.restore.codex-${uuid}`), quarantine: join(dirname(home), `.failed.codex-${uuid}`), phase: neverStartedUUID ? "code-recovery-prepared" : "restore-prepared", created: new Date().toISOString() };
   atomicJSON(join(root, ".lock.update", "codex-owner.json"), { schema: 1, uuid, owner: tx.owner });

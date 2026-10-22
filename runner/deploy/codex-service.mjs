@@ -140,9 +140,12 @@ export function runnerActivity(service) {
   must(["inactive", "failed"].includes(state) && pid === "0", "Runner activity is transitional or unknown");
   return "inactive";
 }
+export function requireCgroupV2() {
+  must(process.platform === "linux" && hasEntry("/sys/fs/cgroup/cgroup.controllers"), "State-aware operation requires unified cgroup v2");
+}
 export function assertStopped(service, home) {
   must(["inactive", "failed"].includes(prop(service, "ActiveState")) && prop(service, "MainPID") === "0", "Runner is not fully stopped");
-  must(hasEntry("/sys/fs/cgroup/cgroup.controllers"), "State-aware operation requires unified cgroup v2");
+  requireCgroupV2();
   const group = prop(service, "ControlGroup");
   if (group && hasEntry(join("/sys/fs/cgroup", group, "cgroup.events"))) {
     must(/^populated 0$/m.test(readFileSync(join("/sys/fs/cgroup", group, "cgroup.events"), "utf8")), "Runner descendants remain");
