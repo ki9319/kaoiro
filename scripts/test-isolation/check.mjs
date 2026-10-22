@@ -368,9 +368,41 @@ export function checkTestIsolation(root, { observe = observeVitest } = {}) {
   }
 }
 
+const CI_WORKFLOW = ".github/workflows/ci.yml";
+const CI_JOB = "test-isolation";
+// The job's two steps must stay connected: the checker is the one real
+// observation, and the tests keep its CLI and this reader honest. Each side
+// checks the other, so dropping either step fails the one that remains.
+const CI_STEPS = ["- run: node scripts/test-isolation/check.mjs",
+  "- run: node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs"];
+const CI_UNSAFE_KEY = /^(?:-\s+)?(?:continue-on-error|if)\s*:/;
+
+/** Returns how the test-isolation job of a workflow fails to run the checker and its tests. */
+export function ciWiringProblems(text) {
+  const lines = text.split("\n");
+  const start = lines.indexOf(`  ${CI_JOB}:`);
+  if (start < 0) return [`${CI_WORKFLOW}: job ${CI_JOB} not found`];
+  const next = lines.findIndex((line, index) => index > start && /^ {0,2}\S/.test(line));
+  const job = lines.slice(start + 1, next < 0 ? undefined : next).map(line => line.trim());
+  const problems = CI_STEPS.filter(step => !job.includes(step))
+    .map(step => `${CI_WORKFLOW} job ${CI_JOB}: missing the step \`${step}\``);
+  for (const line of job.filter(line => CI_UNSAFE_KEY.test(line))) {
+    problems.push(`${CI_WORKFLOW} job ${CI_JOB}: \`${line}\` can skip a step or let it fail without failing the job`);
+  }
+  return problems;
+}
+
+/** The checker's own problems plus the workflow wiring problems of the same tree. */
+export function checkRepository(root, options) {
+  const { entries, problems } = checkTestIsolation(root, options);
+  const workflow = join(root, CI_WORKFLOW);
+  problems.push(...(existsSync(workflow) ? ciWiringProblems(readFileSync(workflow, "utf8")) : [`${CI_WORKFLOW}: missing`]));
+  return { entries, problems };
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const root = resolve(process.argv[2] ?? fileURLToPath(new URL("../..", import.meta.url)));
-  const { entries, problems } = checkTestIsolation(root);
+  const { entries, problems } = checkRepository(root);
   for (const problem of problems) console.error(problem);
   console.log(JSON.stringify({ entries, problems: problems.length }));
   process.exitCode = problems.length === 0 ? 0 : 1;

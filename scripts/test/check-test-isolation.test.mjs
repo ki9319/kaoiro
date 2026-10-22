@@ -1,12 +1,12 @@
 import "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { checkTestIsolation, MODULE, observeVitest, VITEST_PACKAGES } from "../test-isolation/check.mjs";
+import { checkRepository, checkTestIsolation, ciWiringProblems, MODULE, observeVitest, VITEST_PACKAGES } from "../test-isolation/check.mjs";
 
 const REAL_MODULE = fileURLToPath(new URL("./fixtures/test-isolation.mjs", import.meta.url));
 // Built by concatenation so this file is not itself a permit call site.
@@ -273,8 +273,101 @@ test("a package without Vitest installed cannot be observed and is reported", ()
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("the real repository satisfies the contract", () => {
-  const { entries, problems } = checkTestIsolation(fileURLToPath(new URL("../..", import.meta.url)));
-  assert.deepEqual(problems, []);
-  assert.ok(entries > 0);
+// The real repository is observed once, by the CLI step of the CI job
+// (docs/contributing/test-isolation.md). What follows keeps that step
+// connected to the job and keeps the CLI's own failure path honest.
+const REPOSITORY = fileURLToPath(new URL("../..", import.meta.url));
+const REAL_WORKFLOW = readFileSync(join(REPOSITORY, ".github/workflows/ci.yml"), "utf8");
+const CLI_STEP = "      - run: node scripts/test-isolation/check.mjs\n";
+const TEST_STEP = "      - run: node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs\n";
+
+test("the real workflow runs the checker and its tests in the test-isolation job", () => {
+  assert.deepEqual(ciWiringProblems(REAL_WORKFLOW), []);
 });
+
+const wiringMutations = {
+  "the checker step is removed": [text => text.replace(CLI_STEP, ""), /missing the step `- run: node scripts\/test-isolation\/check\.mjs`/],
+  "the checker step runs another file": [text => text.replace(CLI_STEP, CLI_STEP.replace("check.mjs", "other.mjs")), /missing the step `- run: node scripts\/test-isolation\/check\.mjs`/],
+  "the checker step cannot fail": [text => text.replace(CLI_STEP, CLI_STEP.replace("\n", " || true\n")), /missing the step `- run: node scripts\/test-isolation\/check\.mjs`/],
+  "the checker step is continue-on-error": [text => text.replace(CLI_STEP, `${CLI_STEP}        continue-on-error: true\n`), /`continue-on-error: true` can skip a step/],
+  "the checker step has a false condition": [text => text.replace(CLI_STEP, `${CLI_STEP.replace("      - run:", "      - if: false\n        run:")}`), /`- if: false` can skip a step/],
+  "the checker step moves to another job": [
+    text => text.replace(CLI_STEP, "").replace("  server:\n    runs-on: ubuntu-latest\n    steps:\n", `  server:\n    runs-on: ubuntu-latest\n    steps:\n${CLI_STEP}`),
+    /missing the step `- run: node scripts\/test-isolation\/check\.mjs`/],
+  "the test step is removed": [text => text.replace(TEST_STEP, ""), /missing the step `- run: node --test scripts\/test\/test-isolation\.test\.mjs/],
+  "the test step drops the checker tests": [text => text.replace(" scripts/test/check-test-isolation.test.mjs\n", "\n"), /missing the step `- run: node --test scripts\/test\/test-isolation\.test\.mjs/],
+  "the job is renamed": [text => text.replace("  test-isolation:\n", "  test-isolation-renamed:\n"), /job test-isolation not found/],
+};
+
+for (const [name, [mutate, expected]] of Object.entries(wiringMutations)) {
+  test(`the workflow check is red when ${name}`, () => {
+    const mutated = mutate(REAL_WORKFLOW);
+    assert.notEqual(mutated, REAL_WORKFLOW, "the mutation did not change the workflow");
+    const problems = ciWiringProblems(mutated);
+    assert.ok(problems.some(problem => expected.test(problem)), problems.join("\n") || "no problems reported");
+  });
+}
+
+const JOB = (...steps) => `jobs:\n  test-isolation:\n    runs-on: ubuntu-latest\n    steps:\n${steps.map(step => `      ${step}\n`).join("")}`;
+const CLI_JOB_STEP = "- run: node scripts/test-isolation/check.mjs";
+const TEST_JOB_STEP = "- run: node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs";
+
+// The fixture repository plus the two entries the job's test step names.
+function connectedRepository() {
+  const root = fixtureRepository();
+  for (const path of ["scripts/test/test-isolation.test.mjs", "scripts/test/check-test-isolation.test.mjs"]) write(root, path, entry(path));
+  write(root, ".github/workflows/ci.yml", JOB(CLI_JOB_STEP, TEST_JOB_STEP));
+  return root;
+}
+
+test("checkRepository reports a connected repository without problems", () => {
+  const root = connectedRepository();
+  try {
+    assert.deepEqual(checkRepository(root, { observe: () => [] }).problems, []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("checkRepository adds the workflow problems to the checker's own, and only there", () => {
+  const root = connectedRepository();
+  try {
+    write(root, ".github/workflows/ci.yml", JOB(CLI_JOB_STEP));
+    const { problems } = checkRepository(root, { observe: () => [] });
+    assert.equal(problems.length, 1, problems.join("\n"));
+    assert.match(problems[0], /missing the step `- run: node --test /);
+    assert.deepEqual(checkTestIsolation(root, { observe: () => [] }).problems, []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// The CLI as the workflow starts it: a relative path from the repository root.
+// A fixture has no installed Vitest, so these runs always report it; each case
+// asserts its own diagnosis, the exit status and the summary line.
+function cli(root) {
+  const result = spawnSync(process.execPath, ["scripts/test-isolation/check.mjs", root], { cwd: REPOSITORY, encoding: "utf8" });
+  return { status: result.status, summary: JSON.parse(result.stdout.trim().split("\n").at(-1)), stderr: result.stderr };
+}
+
+const cliMutations = {
+  "an entry loses the guard": [root => write(root, "scripts/test/a.test.mjs", 'import { test } from "node:test";\ntest("x", () => {});\n'),
+    "scripts/test/a.test.mjs: first import is not scripts/test/fixtures/test-isolation.mjs"],
+  "a package loses its canary": [root => rmSync(join(root, "wrapper/core/test/test-isolation.canary.test.ts")),
+    "wrapper/core: missing test/test-isolation.canary.test.ts"],
+  "a test file sits outside every declared tree": [root => write(root, "server/deploy/new.test.mjs", entry("server/deploy/new.test.mjs")),
+    "server/deploy/new.test.mjs: test file outside every declared tree"],
+  "the workflow has no test-isolation job": [root => write(root, ".github/workflows/ci.yml", "jobs:\n  other:\n    steps:\n      - run: node --test scripts/test/a.test.mjs\n"),
+    ".github/workflows/ci.yml: job test-isolation not found"],
+  "the job does not run the checker tests": [root => write(root, ".github/workflows/ci.yml", JOB(CLI_JOB_STEP)),
+    `.github/workflows/ci.yml job test-isolation: missing the step \`${TEST_JOB_STEP}\``],
+};
+
+for (const [name, [mutate, diagnosis]] of Object.entries(cliMutations)) {
+  test(`the checker command exits 1 and says why when ${name}`, () => {
+    const root = connectedRepository();
+    try {
+      mutate(root);
+      const result = cli(root);
+      assert.equal(result.status, 1, result.stderr);
+      assert.ok(result.summary.problems > 0, JSON.stringify(result.summary));
+      assert.ok(result.stderr.split("\n").includes(diagnosis), result.stderr);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+}

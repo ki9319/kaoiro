@@ -2,7 +2,7 @@
 title: Test isolation
 description: What a test may not reach on the host, how the shared isolation guard enforces it, and how to add a suite or an opt-in native probe.
 status: accepted
-last_updated: 2026-10-19
+last_updated: 2026-10-22
 related: [runner-development]
 ---
 
@@ -103,8 +103,39 @@ variable alone never relaxes a root: the opt-in needs the call as well.
   installed and what the accepted scripts build (CI builds `wrapper` and
   `runner` first); without them it reports that it cannot observe.
 - A new package, tree, or launch line (workflow step or `package.json`
-  script) must be added to the checker's inventory first. Otherwise
-  `node scripts/test-isolation/check.mjs` fails in CI.
+  script) must be added to the checker's inventory first. Otherwise the
+  `node scripts/test-isolation/check.mjs` step of the CI job `test-isolation`
+  fails.
+
+## Running the checks
+
+```sh
+pnpm install --frozen-lockfile && pnpm -C dashboard install --frozen-lockfile
+pnpm -C wrapper build && pnpm -C runner build
+node scripts/test-isolation/check.mjs
+node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs
+```
+
+These are the CI job's steps. The checker prints each problem on stderr and
+one JSON line, `{"entries":N,"problems":N}`, on stdout; it exits 0 only with no
+problems. Its problems are the contract violations above plus the workflow
+wiring below.
+
+The checker's observation of the real repository (minutes, because it starts
+every `node --test` entry and lists every Vitest package) runs once per CI
+candidate, as the `check.mjs` step. No test repeats it. Each remaining check
+owns a different guarantee:
+
+| Check | Guarantee |
+|---|---|
+| `node scripts/test-isolation/check.mjs` (CI step) | The real repository satisfies the contract. Its exit status is the step status |
+| `check-test-isolation.test.mjs`, rule cases | Each rule of the checker (guard loading, discovery, setup order, launch lines, permit allow-list) fails on a minimal fixture |
+| `check-test-isolation.test.mjs`, command cases | The checker command, started as the workflow starts it, exits 1 with the rule's message on stderr and the summary line when a fixture breaks a rule |
+| `check-test-isolation.test.mjs`, workflow cases | The job's checker step and test step are present exactly, with no `continue-on-error` or `if:`. The checker (as its own problem) and this test each check the other's step, so removing either one fails the one that remains |
+| `test-isolation.test.mjs` | The guard's refusals, network rules and permits |
+
+The workflow cases read the two steps as exact lines: change them together
+with `ciWiringProblems` in the checker.
 
 ## Residual risks
 
