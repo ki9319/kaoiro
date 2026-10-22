@@ -87,8 +87,7 @@ describe("production-shaped Codex home classification", () => {
     expect.soft(existsSync(join(dir, "backup/state", sqliteLock)), "snapshot payload must omit the disposable SQLite lock").toBe(false);
     expect.soft(existsSync(join(fixture.home, sqliteLock)), "restored home must omit the disposable SQLite lock").toBe(false);
     expect(readFileSync(join(dir, "quarantine", sqliteLock), "utf8")).toBe("IGNORED_LOCK_CONTENT");
-    expect(Object.keys(output.manifest.migrationLevels)).toHaveLength(6);
-    for (const rows of Object.values(output.manifest.migrationLevels)) expect(rows).toEqual([{ version: 1, success: 1 }]);
+    expect(output.manifest).not.toHaveProperty("migrationLevels");
     for (const [name, hash] of Object.entries(before)) {
       expect(createHash("sha256").update(readFileSync(join(fixture.home, name))).digest("hex")).toBe(hash);
     }

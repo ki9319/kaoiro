@@ -15,6 +15,25 @@ const wrapperCorePidHelper = fileURLToPath(new URL("../../wrapper/core/dist/pid.
 describe.skipIf(process.platform !== "linux")("state-aware updater control flow", () => {
   let dir: string, root: string, home: string, ordinary: string, conf: string, calls: string, ctl: string, child: ChildProcess, archive: string, nodeOptions: string;
   const A = revisionOf("state-workflow-a"), B = revisionOf("state-workflow-b");
+  const fakeForeignProc = () => {
+    const pid = 900002, proc = join(dir, "fake-proc", String(pid));
+    const uid = process.getuid!() === 0 ? 1 : 0;
+    mkdirSync(proc, { recursive: true });
+    const fields = Array<string>(20).fill("0"); fields[0] = "S"; fields[19] = "1";
+    writeFileSync(join(proc, "stat"), `${pid} (fixture) ${fields.join(" ")}`);
+    writeFileSync(join(proc, "cgroup"), "0::/kaoiro-test\n");
+    writeFileSync(join(proc, "status"), `Name:\tforeign-helper\nUid:\t${uid}\t${uid}\t${uid}\t${uid}\n`);
+    const preload = join(dir, "fake-proc-preload.mjs");
+    writeFileSync(preload, `
+import fs from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
+const prefix='/proc/${pid}', base=${JSON.stringify(proc)}, original=fs.readFileSync;
+fs.readFileSync=(path,...args)=>typeof path==='string' && (path===prefix || path.startsWith(prefix+'/'))
+  ? original(base+path.slice(prefix.length),...args) : original(path,...args);
+syncBuiltinESMExports();
+`);
+    return preload;
+  };
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "kogane468-workflow-"));
     const { preload } = cgroupFixture(dir);
@@ -49,7 +68,7 @@ const signalPidIfStartMatches = ${signalPidIfStartMatches.toString()};
 const publishPidMarker = ${publishPidMarker.toString()};
 const owner = JSON.parse(fs.readFileSync(dir+'/mainpid','utf8'));
 const ownerPid = requirePositiveSafePid(owner.pid);
-if (args.includes('stop')) { fs.appendFileSync(dir+'/calls','stop\\n'); if(fs.existsSync(dir+'/reject-stop')) process.exit(77); if(!fs.existsSync(dir+'/remain-active')) { try { signalPidIfStartMatches(ownerPid, owner.start, requirePositiveSafePid, pid=>fs.readFileSync('/proc/'+pid+'/stat','utf8'), (pid, value)=>process.kill(pid, value)); } catch(e) { if(!['ENOENT','ESRCH'].includes(e.code)) throw e; } } fs.writeFileSync(dir+'/active',fs.existsSync(dir+'/remain-active')?'active':'inactive'); if(fs.existsSync(dir+'/late-unknown')) fs.writeFileSync(${JSON.stringify(home)}+'/unknown-token','secret'); if(fs.existsSync(dir+'/late-config')) fs.appendFileSync(${JSON.stringify(conf)}+'/runner.env','TOKEN=changed\\n'); }
+if (args.includes('stop')) { fs.appendFileSync(dir+'/calls','stop\\n'); if(fs.existsSync(dir+'/reject-stop')) process.exit(77); if(!fs.existsSync(dir+'/remain-active')) { try { signalPidIfStartMatches(ownerPid, owner.start, requirePositiveSafePid, pid=>fs.readFileSync('/proc/'+pid+'/stat','utf8'), (pid, value)=>process.kill(pid, value)); } catch(e) { if(!['ENOENT','ESRCH'].includes(e.code)) throw e; } } fs.writeFileSync(dir+'/active',fs.existsSync(dir+'/remain-active')?'active':'inactive'); fs.writeFileSync(dir+'/fake-cgroup/kaoiro-test/cgroup.procs',''); fs.writeFileSync(dir+'/fake-cgroup/kaoiro-test/cgroup.events','populated 0\\n'); if(fs.existsSync(dir+'/late-unknown')) fs.writeFileSync(${JSON.stringify(home)}+'/unknown-token','secret'); if(fs.existsSync(dir+'/late-config')) fs.appendFileSync(${JSON.stringify(conf)}+'/runner.env','TOKEN=changed\\n'); if(fs.existsSync(dir+'/late-populated')) { fs.writeFileSync(dir+'/fake-cgroup/kaoiro-test/cgroup.procs','900002\\n'); fs.writeFileSync(dir+'/fake-cgroup/kaoiro-test/cgroup.events','populated 1\\n'); } }
 else if (args.includes('start')) {
  fs.appendFileSync(dir+'/calls','start\\n');
  const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{env:{PATH:process.env.PATH,HOME:${JSON.stringify(ordinary)},CODEX_HOME:${JSON.stringify(home)}},stdio:'ignore'});
@@ -332,6 +351,53 @@ else if (args.includes('show')) {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(child.exitCode).toBeNull();
     expect(child.signalCode).toBeNull();
+  });
+  it("starts after stopping a service with a pre-existing foreign-UID cgroup member", () => {
+    const previousOptions = nodeOptions;
+    const preload = fakeForeignProc();
+    nodeOptions += ` --import=${preload}`;
+    writeFileSync(join(dir, "fake-cgroup/kaoiro-test/cgroup.procs"), "900002\n");
+    writeFileSync(join(dir, "fake-cgroup/kaoiro-test/cgroup.events"), "populated 1\n");
+    try {
+      expect(readFileSync(join(dir, "fake-cgroup/kaoiro-test/cgroup.procs"), "utf8").trim()).toBe("900002");
+      const uid = /^Uid:\s*([0-9]+)/m.exec(readFileSync(join(dir, "fake-proc/900002/status"), "utf8"))?.[1];
+      expect(uid).toMatch(/^\d+$/);
+      expect(Number(uid)).not.toBe(process.getuid!());
+      const result = update();
+      expect(result.status, result.stderr).toBe(0);
+      expect(readFileSync(calls, "utf8")).toBe("stop\nstart\n");
+      expect(readlinkSync(join(root, "current"))).toBe(`releases/${B}`);
+      expect(forwardTransaction()).toMatchObject({ mode: "forward", phase: "awaiting-acceptance" });
+    } finally { nodeOptions = previousOptions; }
+  });
+  it("starts with a SQLite state database without writing migration diagnostics", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const databasePath = join(home, "state_5.sqlite");
+    const database = new DatabaseSync(databasePath);
+    database.exec("CREATE TABLE _sqlx_migrations(version INTEGER, success INTEGER); INSERT INTO _sqlx_migrations VALUES(58,1);");
+    database.close();
+    const result = update();
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(calls, "utf8")).toBe("stop\nstart\n");
+    expect(readlinkSync(join(root, "current"))).toBe(`releases/${B}`);
+    const tx = forwardTransaction();
+    expect(tx).toMatchObject({ mode: "forward", phase: "awaiting-acceptance" });
+    expect(tx.estimate).not.toHaveProperty("throughput");
+    expect(JSON.parse(readFileSync(join(tx.snapshot, "manifest.json"), "utf8"))).not.toHaveProperty("migrationLevels");
+  });
+  it("resumes the unchanged source when the runner cgroup repopulates after stop", async () => {
+    writeFileSync(join(dir, "late-populated"), "trigger");
+    const homeInode = statSync(home).ino;
+    const result = update();
+    expect(result.status).toBe(78);
+    expect(result.stderr).toContain("Runner descendants remain");
+    expect(result.stderr).toContain("unchanged source was resumed");
+    expect(readFileSync(calls, "utf8")).toBe("stop\nstart\n");
+    expect(readFileSync(join(dir, "active"), "utf8")).toBe("active");
+    expect(statSync(home).ino).toBe(homeInode);
+    expect(readlinkSync(join(root, "current"))).toBe(`releases/${A}`);
+    expect(forwardTransaction()).toMatchObject({ mode: "forward", phase: "prepared" });
+    expect(existsSync(join(dir, "backup"))).toBe(false);
   });
   it.each(["before-move", "after-move", "start-attempted", "recovery-failure"])("handles switch failure %s without starting the candidate", (mode) => {
     const original = readFileSync(join(root, "releases", B, "deploy/kaoiro-runner-switch.sh"), "utf8");
