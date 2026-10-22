@@ -17,6 +17,12 @@ pnpm -C runner build
 Every test process runs under the shared isolation guard; see
 [Test isolation](test-isolation.md).
 
+For the local stack, [`scripts/dev.sh`](../../scripts/dev.sh) launches the
+server / dashboard / runner together. The runner runs under `tsx watch`, and
+when the environment variable `KAOIRO_WRAPPER_DEV=1` is set, **spawned wrappers
+also launch with `tsx watch`**, so edits to wrapper source are hot-reloaded into
+running agents (production launches dist directly, ADR-0018).
+
 ## Test tiers
 
 `pnpm -C runner test` is the landing command: it runs every test file. Three
@@ -80,12 +86,6 @@ them failed (initial failure rate 3/40); two of those 3 have an attempt-2 record
 that passed (candidate flakes, confirmed only if the code is unchanged) and one an
 attempt-2 record that failed again (a persistent failure). A failure rate is not a
 flake rate, and a short sample is not a reliability claim.
-
-For the local stack, [`scripts/dev.sh`](../../scripts/dev.sh) launches the
-server / dashboard / runner together. The runner runs under `tsx watch`, and
-when the environment variable `KAOIRO_WRAPPER_DEV=1` is set, **spawned wrappers
-also launch with `tsx watch`**, so edits to wrapper source are hot-reloaded into
-running agents (production launches dist directly, ADR-0018).
 
 ## See Also
 
