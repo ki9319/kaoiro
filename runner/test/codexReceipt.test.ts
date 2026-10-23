@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

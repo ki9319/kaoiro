@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createConnection } from "node:net";

@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // issue #227 review round 1 must-fix 1+2: `suppressBottomRevert`
 // (AgentDetail.svelte) masks the ONE spurious "at the bottom" scroll event

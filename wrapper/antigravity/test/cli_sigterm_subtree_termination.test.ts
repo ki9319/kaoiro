@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #379 M1: without a handler, Node's default SIGTERM behavior kills
 // this process immediately (no close(), no group signal, no escalation).
 // This test proves the registered handler's FULL effect end to end: SIGTERM

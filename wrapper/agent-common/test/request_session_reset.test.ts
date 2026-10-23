@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // phase-28 C2 (#168 / ADR-0043) — request_session_reset tool + turn-boundary
 // dispatch.
 //

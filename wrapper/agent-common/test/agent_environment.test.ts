@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { expect, it } from "vitest";
 import { AGENT_MARKER_ENV, withAgentMarker } from "../src/agent_environment.js";
 

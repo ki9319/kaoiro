@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // Issue 482 through the real App: what a card says about an agent's status
 // line, the order rules of the events that update it, the change log a viewer

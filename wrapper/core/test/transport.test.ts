@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ServerLink wraps phoenix Socket/Channel; mock the module so the channel

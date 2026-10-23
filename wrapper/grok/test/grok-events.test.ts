@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import type { SessionNotification, SessionUpdate } from "@agentclientprotocol/sdk";
 import { describe, expect, it } from "vitest";
 import { updateEvents } from "../src/grok/events.js";

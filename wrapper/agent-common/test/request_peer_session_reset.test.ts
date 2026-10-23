@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #677 — request_peer_session_reset tool. The authority decision is the
 // server's; what is testable here is the input contract, that `wait` defaults
 // to true, that every closed reply reason and the unconfirmed-reply case are

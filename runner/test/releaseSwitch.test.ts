@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 // runner/deploy/kaoiro-runner-switch.sh (issue #219): moving `current`
 // between installed releases, and back again.
 //

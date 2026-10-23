@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";

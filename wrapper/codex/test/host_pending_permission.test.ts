@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // CodexHost#setPendingPermission as the waiting_permission state driver
 // (issue #347): the permission twin of setPendingQuestion, plus the guards
 // that keep a late settle from mis-stating a resting agent.

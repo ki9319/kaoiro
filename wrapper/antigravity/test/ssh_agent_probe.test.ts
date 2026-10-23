@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { execFile, execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { requirePositiveSafePid } from "@kaoiro/wrapper-core";

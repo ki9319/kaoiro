@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // Hydration handshake driver (ADR-0051 D2). Covers the plan's failure-matrix
 // rows on the wrapper side: (b) one server-allocated replay_id used across
 // reset / replay_ia / complete with no double startup replay, (c) a

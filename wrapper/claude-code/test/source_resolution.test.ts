@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import type { WrapperConfig } from "@kaoiro/protocol";
 import { resolveClaudeSources } from "../src/source_resolution.js";

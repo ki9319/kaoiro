@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #677: the Codex CLI exposes `request_peer_session_reset` on the
 // bridge behind the same wrapper-owned approval gate as request_session_reset.
 // Pins the composition (registration, approval class, hand-off of the link's

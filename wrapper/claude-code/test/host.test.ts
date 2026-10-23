@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DeliveryPolicyController } from "@kaoiro/wrapper-core";
 import { createHash } from "node:crypto";

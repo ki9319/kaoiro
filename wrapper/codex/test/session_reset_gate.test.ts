@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // Scripted SDK turns drive the production CLI, bridge and reset coordinator.
 import { createConnection, type Socket } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";

@@ -1,3 +1,4 @@
+import "../../../../scripts/test/fixtures/test-isolation.mjs";
 // Self-check of the read-only ownership tag the SIGTERM integration tests
 // rely on: it must see exactly the tagged process, skip what it cannot
 // read, and never signal anything. The sleepers are children this file

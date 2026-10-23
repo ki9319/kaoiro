@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // AgentCard の engine・model・effort / ctx・5h・7day 追加表示 (issue #183)。
 // agent_id 行は #183 以前からの既存表示でこのトグルの対象外(常時表示) —

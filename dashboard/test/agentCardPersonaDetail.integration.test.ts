@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // AgentCard のペルソナ画像クリック (issue #232 MF-2, ふじ round-1
 // must-fix): `.persona-open` は `.open` の SIBLING <button> — 画像を

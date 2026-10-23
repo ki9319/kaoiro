@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // computeResumeDrift semantics (ADR-0014 F1 追補, phase-15 D8):
 // - fields absent from BOTH sides → not drift
 // - fields with equal values → not drift

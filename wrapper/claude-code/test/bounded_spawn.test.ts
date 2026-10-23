@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { spawn } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import { spawnBoundedClaudeProcess } from "../src/bounded_spawn.js";

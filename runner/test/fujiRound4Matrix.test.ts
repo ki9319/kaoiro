@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 // Place this file under runner/test/ before running it with Vitest.
 import {
   mkdirSync,

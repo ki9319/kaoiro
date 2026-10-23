@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { expect, it, vi } from "vitest";
 import { runAntigravityCli } from "../src/cli.js";
 import type { AntigravityHost } from "../src/host.js";

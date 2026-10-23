@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 // runner/deploy/kaoiro-runner-install.sh (issue #219): a release is
 // installed as an immutable tree under releases/<id>, and installing one
 // while the runner is up must not disturb what the running process resolves

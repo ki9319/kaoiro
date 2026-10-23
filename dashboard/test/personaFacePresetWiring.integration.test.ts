@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // issue #235 fix-round (ふじ round1 must-fix, confidence 0.99): the
 // PersonaFace unit fixture (personaFace.test.ts) supplies all 6 props

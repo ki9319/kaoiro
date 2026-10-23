@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import { AppServerConnectionError } from "../src/app_server_rpc.js";
 import {

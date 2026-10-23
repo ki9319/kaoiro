@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 // runner/deploy/kaoiro-runner-launch.sh (issue #219): the shim verifies, it
 // never builds.
 //

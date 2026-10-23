@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 import type { RunnerRegister } from "@kaoiro/protocol";
 import { ServerLink } from "@kaoiro/wrapper-core";
 import { describe, expect, it } from "vitest";

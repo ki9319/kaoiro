@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #352: the runner has no per-agent conversation trace because the
 // runner journal (its own stdout/stderr, inherited from the wrapper child
 // and captured by systemd) never receives the engine-side transcript

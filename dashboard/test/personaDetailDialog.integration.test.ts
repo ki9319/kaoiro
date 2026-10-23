@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // PersonaDetailDialog (issue #232): manifest.json の全メタデータ +
 // personality.md 全文を fetchPersonaPackDetail 経由で表示する。読み込み中

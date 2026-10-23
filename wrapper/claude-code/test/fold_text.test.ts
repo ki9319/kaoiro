@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import { REPLY_AUTHORIZATION_USAGE_GUIDANCE } from "@kaoiro/agent-common";
 import { formatClaudeFoldText } from "../src/fold_text.js";

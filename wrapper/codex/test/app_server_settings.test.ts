@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { expect, it, vi } from "vitest";
 import { appServerTurnSettings } from "../src/app_server_settings.js";
 import { AppServerConnectionError, AppServerRpcError } from "../src/app_server_rpc.js";

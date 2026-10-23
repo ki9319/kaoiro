@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // ADR-0051 D4 / D3-3 追補 — driven through App.svelte's REAL handler set.
 //

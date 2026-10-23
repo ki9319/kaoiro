@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it, vi } from "vitest";
 import type { Socket } from "node:net";
 import { PermissionBroker } from "@kaoiro/agent-common";

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { expect, it, vi } from "vitest";
 import { makeLog, type WrapperConfig, type SidecarRecord } from "@kaoiro/agent-common";
 import { CodexHistoryReplay, type AppServerHistoryJob } from "../src/app_server_replay.js";

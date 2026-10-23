@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { reduceStates } from "@kaoiro/agent-common";

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { isValidBuildVersion, isValidBuildBranch } from "../src/build_identity_domain.js";

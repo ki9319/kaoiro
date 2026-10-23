@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runClaudeCli } from "../src/cli.js";
 import { AgentHost } from "../src/host.js";

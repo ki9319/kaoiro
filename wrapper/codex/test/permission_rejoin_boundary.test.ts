@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { CodexTurnDiagnostics } from "../src/turn_diagnostics.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

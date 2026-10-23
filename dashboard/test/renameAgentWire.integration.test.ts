@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // Wire-contract pin (issue #187 段階3 unit B, ふじ判定 — dashboard wire
 // test). A component test alone only proves "the UI calls

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { createHash } from "node:crypto";
 import { createReadStream, readFileSync } from "node:fs";
 import { createRequire } from "node:module";

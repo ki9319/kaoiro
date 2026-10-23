@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 import { build } from "vite";
 import { describe, expect, it } from "vitest";
 import { buildIdentity } from "../vite.config";

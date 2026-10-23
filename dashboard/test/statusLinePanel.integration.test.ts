@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // The status line block of the member detail view (issue 514): the head drawn
 // as markdown with the full profile, a way to the change log, and nothing at all

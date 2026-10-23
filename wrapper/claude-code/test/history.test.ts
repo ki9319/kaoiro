@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import { reconstructHistory, readSessionHistory, sessionSidecarPath
 } from "../src/history.js";

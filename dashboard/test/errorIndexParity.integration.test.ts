@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // issue #304 (candidate A): differential test for the incremental error
 // index (noteIfNewestError / recomputeLatestError / dropLatestError,

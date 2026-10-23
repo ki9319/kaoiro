@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // Wire-contract pin for the set_permission REPLY BODY (issue #305 D,
 // ふじ round 1 should-fix 2). The component tests drive setPermission

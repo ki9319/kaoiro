@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 import { describe, expect, it } from "vitest";
 import {
   isWaitTransition,

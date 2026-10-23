@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import { SteerRecord, type SteerOutcome, type SteerResponse, type SteerTerminal } from "../src/app_server_steer.js";
 

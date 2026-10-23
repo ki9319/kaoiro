@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { peerFixture } from "./fixtures/native_peer_opener.js";
 import { describe, expect, it } from "vitest";
 import { ReplyBasis, type DetachedReplyBasis, type Envelope } from "@kaoiro/agent-common";

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #391 M2: the pins in cli_sigterm_abort_real_process.test.ts fire
 // `process.emit("SIGTERM")` inside the SAME vitest process and only assert
 // that `runClaudeCli()`'s returned promise settles -- that proves close()

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // Issue 482. In the production Claude CLI the two status line tools reach the
 // server link through providers that `cli.ts` hands to `InterAgentTool`. Both
 // providers are optional in the type, so leaving one out compiles, and every

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #285 review round 1 (ふじ2 M1 / M2 / M3). Everything here drives a
 // REAL PermissionBroker or QuestionBroker: the hazards live in the broker's
 // registry and in the single authoritative pending slot, neither of which a

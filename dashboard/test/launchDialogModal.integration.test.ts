@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // issue #277: LaunchDialog migrated off its own hand-rolled
 // backdrop+positioned-div onto the shared Modal.svelte primitive (issue

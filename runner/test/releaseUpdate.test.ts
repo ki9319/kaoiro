@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 // runner/deploy/kaoiro-runner-update.sh (issue #219).
 //
 // WHAT IS AND IS NOT MEASURED HERE. The acceptance criterion is "stopping

@@ -1,3 +1,4 @@
+import "../../../../scripts/test/fixtures/test-isolation.mjs";
 import { expect, it } from "vitest";
 import { writeFileSync, readFileSync } from "node:fs";
 import { enumerate } from "./scenarios.js";

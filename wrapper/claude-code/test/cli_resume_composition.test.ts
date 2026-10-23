@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // ADR-0055 phase-33 Stage A (issue #200).
 //
 // A unit test that hand-builds RequestCompactOptions, or calls

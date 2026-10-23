@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Envelope } from "@kaoiro/protocol";
 import { DeliveryRecovery, type DeliveryResyncReply } from "../src/delivery_recovery.js";

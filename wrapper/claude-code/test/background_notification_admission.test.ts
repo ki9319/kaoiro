@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #595: a Bash call moved to the background by its timeout, a Workflow
 // completion, and XML-escaped notification text. Frame shapes and order copy
 // native traces from SDK 0.3.293 / CLI 2.1.293 (paths replaced).

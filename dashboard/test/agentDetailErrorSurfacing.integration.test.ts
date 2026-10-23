@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // issue #287: an authentication (or other API-level) failure surfaces on
 // the AgentDetail turn-end line. error_summary/recovery_hint are the

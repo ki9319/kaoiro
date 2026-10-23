@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { ApprovalTransition } from "../src/app_server_approval.js";
 import { harness, settle } from "./app_server_approval_harness.js";

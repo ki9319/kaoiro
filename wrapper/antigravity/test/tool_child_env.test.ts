@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import { NON_INTERACTIVE_GIT_SSH_COMMAND, nonInteractiveToolEnv } from "../src/tool_child_env.js";
 

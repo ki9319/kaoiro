@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GrokRateLimitReader, parseGrokBilling } from "../src/grok/rate_limits.js";
 

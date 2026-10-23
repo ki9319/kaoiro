@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #391 M2: cli_sigterm_exec_real_process.integration.test.ts fires
 // `process.emit("SIGTERM")` inside the SAME vitest process and only asserts
 // that `runCodexCli()`'s returned promise settles -- that proves close()

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #285 invariant: a state asserting "the SDK is working" must be
 // backed by an SDK-active turn. Without one, no frame is coming, so nothing
 // will ever leave that state and the agent reads as busy forever — the shape

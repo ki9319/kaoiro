@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import { effectiveNetworkAccess } from "@kaoiro/antigravity";
 import { resolveAntigravityCeiling } from "../src/permission_ceiling.js";

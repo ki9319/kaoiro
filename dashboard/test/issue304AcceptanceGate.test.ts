@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 import { describe, expect, it } from "vitest";
 
 // @ts-expect-error benchmark verifier is executable JavaScript, not a package API.

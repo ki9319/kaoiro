@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #391: the SIGTERM handler must register exactly once per
 // runCodexCli() invocation and be removed in `finally`, mirroring issue
 // #379's lesson (a listener left behind after `run()` settles accumulates

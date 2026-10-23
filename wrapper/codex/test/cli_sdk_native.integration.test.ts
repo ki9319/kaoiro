@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { createServer } from "node:http";
 import { randomUUID, createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";

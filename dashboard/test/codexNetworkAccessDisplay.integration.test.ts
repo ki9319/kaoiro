@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // issue #114: Codex 固有の ext.effective.network_access (true|false) を
 // AgentDetail 左ペインに表示することを検証する。gate は

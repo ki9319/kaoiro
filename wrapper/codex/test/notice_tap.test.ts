@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { afterEach, expect, it } from "vitest";
 import { tapStdout, type Tap } from "./fixtures/notice_tap.js";
 

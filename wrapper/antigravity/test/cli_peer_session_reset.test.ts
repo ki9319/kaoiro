@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #677: the Antigravity CLI exposes `request_peer_session_reset` on the
 // bridge behind the same per-call broker approval as request_session_reset
 // (no autonomous path on this engine). Pins the composition (registration,

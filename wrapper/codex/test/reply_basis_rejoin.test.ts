@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { expect, it, vi } from "vitest";
 import { ServerLink } from "@kaoiro/wrapper-core";
 import { InterAgentTool } from "@kaoiro/agent-common";

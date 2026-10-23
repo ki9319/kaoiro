@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import type { PermissionControlExt, PermissionObservation, PermissionSelection, PermissionSubmission, PermissionSyncMessage } from "@kaoiro/protocol";

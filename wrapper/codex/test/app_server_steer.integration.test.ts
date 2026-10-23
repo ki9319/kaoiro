@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { createServer } from "node:http";
 import type { ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";

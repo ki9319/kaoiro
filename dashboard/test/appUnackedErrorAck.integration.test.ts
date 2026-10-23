@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // issue #287: App.svelte's own half of the sticky error badge — setting
 // unackedErrorKey when an is_error result envelope arrives, and clearing it

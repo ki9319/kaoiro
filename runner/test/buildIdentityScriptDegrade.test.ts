@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 // Isolated from buildIdentityScript.test.ts: mocks node:child_process, so
 // it must not share a module registry with the real-subprocess tests
 // there (vitest gives each test FILE its own module graph, but a shared

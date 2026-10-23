@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
 import { connectKaoiro, type KaoiroConnection } from "../src/lib/protocol";

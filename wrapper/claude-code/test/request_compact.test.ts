@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // phase-28 B2 (#168) — request_compact tool.
 //
 // Scope note: the operator approval itself is NOT exercised here. The tool is

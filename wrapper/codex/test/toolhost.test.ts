@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { createConnection, type Socket } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolDescriptor } from "@kaoiro/agent-common";

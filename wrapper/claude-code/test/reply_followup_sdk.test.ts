@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { expect, it, vi } from "vitest";
 import { InterAgentTool, ToolOrigins, type Envelope, type ReplyAuthorization } from "@kaoiro/agent-common";
 import { buildKaoiroMcpServer } from "../src/inter_agent_sdk.js";

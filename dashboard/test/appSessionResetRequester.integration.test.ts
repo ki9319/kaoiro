@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // issue #677 through the real App: a `session_reset_started` broadcast with
 // `origin: "director"` reaches the open agent pane as "who asked", and the

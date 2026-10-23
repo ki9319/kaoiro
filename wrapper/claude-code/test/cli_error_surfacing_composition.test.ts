@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #287, ふじ2 round2 M3: round1's negative control spied
 // console.warn/console.error, but neither is AgentHost's actual production
 // sink — printLog (cli.ts) writes to process.stdout.write, and #warn

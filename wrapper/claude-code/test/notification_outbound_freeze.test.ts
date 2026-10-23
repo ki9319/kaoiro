@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { it, expect, vi } from "vitest";
 import { AgentHost } from "../src/host.js";
 import { InterAgentTool, INTER_AGENT_TOOL_FQN } from "@kaoiro/agent-common";

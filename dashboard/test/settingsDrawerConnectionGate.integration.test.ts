@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // issue #276: App.svelte wires SettingsDrawer's `connection` prop through
 // `isOperator`, the SAME client-side signal LaunchDialog already gates on

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { readFileSync } from "node:fs";
 import { describe, it, expect, vi } from "vitest";
 import { ReplyBasis, REPLY_AUTHORIZATION_USAGE_GUIDANCE, REPLY_TICKET_REQUIRED_GUIDANCE, handoffToolResult, discardToolResult } from "../src/reply_basis.js";

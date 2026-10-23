@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // ADR-0039 F9 v2 = 藤 review turn-10 must-fix 3: host.refreshCatalogFor()
 // direct tests. The prior AgentDetail integration test relied on a mock
 // that could NOT distinguish "success" from "hidden TypeError caught".

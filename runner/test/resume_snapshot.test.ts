@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 // Unit tests for the resume snapshot validate + apply helpers
 // (ADR-0014 F1 追補, resume-privilege-restoration).
 

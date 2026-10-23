@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { DeliveryPolicyController } from "@kaoiro/wrapper-core";
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";

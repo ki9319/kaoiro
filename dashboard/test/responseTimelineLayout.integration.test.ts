@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 //
 // Response-timeline layout gate pin. Mounts the SAME production

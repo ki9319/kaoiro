@@ -1,3 +1,4 @@
+import "../../../../scripts/test/fixtures/test-isolation.mjs";
 import { writeFileSync } from "node:fs";
 import { expect, it } from "vitest";
 

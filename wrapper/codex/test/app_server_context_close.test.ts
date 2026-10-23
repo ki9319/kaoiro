@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { expect, it, vi } from "vitest";
 import { AppServerRpc } from "../src/app_server_rpc.js";

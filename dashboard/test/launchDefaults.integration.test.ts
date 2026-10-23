@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // issue #88: LaunchDialog persona-scoped effort default. Component-level
 // coverage for the two ふじ-mandated pins that a pure-function unit test

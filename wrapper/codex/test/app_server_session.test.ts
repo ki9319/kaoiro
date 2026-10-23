@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { EventEmitter, once } from "node:events";
 import { createConnection } from "node:net";
 import { PassThrough, Writable } from "node:stream";

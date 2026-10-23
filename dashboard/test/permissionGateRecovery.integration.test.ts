@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // issue #612: the engine-independent stop display for ext.permission_gate.
 // The fixtures are grok-shaped (engine "grok"). A Codex status never carries

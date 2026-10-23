@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it, vi } from "vitest";
 import { PermissionBroker, type PendingPermissionExt, type WrapperConfig } from "@kaoiro/agent-common";
 import {

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { createConnection } from "node:net";
 import { once } from "node:events";
 import { expect, it, vi } from "vitest";

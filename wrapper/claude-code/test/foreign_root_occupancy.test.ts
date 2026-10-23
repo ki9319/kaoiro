@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #426 stage 1: a root interval whose opener the host cannot name
 // (a hand-back turn) holds the input barrier and grants no send authority.
 // Each control below names the guard it pins; the mutation log lists the

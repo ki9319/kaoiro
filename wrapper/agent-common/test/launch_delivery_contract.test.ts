@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { DeliveryMechanisms, LaunchDeliveryPolicyMetadata } from "@kaoiro/protocol";
 import fixture from "../../../protocol/fixtures/launch-delivery-policy.json" with { type: "json" };

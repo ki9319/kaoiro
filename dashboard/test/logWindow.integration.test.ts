@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // #174: AgentDetail render-windows the transcript to LOG_WINDOW_SIZE (200)
 // entries by default instead of DOM'ing the full history. ふじ round-1 review

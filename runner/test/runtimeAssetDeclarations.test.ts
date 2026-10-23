@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 // Keeps `kaoiro.runtimeAssets` honest (issue #219, director 裁定 2026-08-16).
 //
 // verify-release.mjs no longer reads runtime module edges out of the text of a

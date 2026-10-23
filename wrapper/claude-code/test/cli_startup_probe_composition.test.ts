@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #448 S2: the startup probe's model rows must reach the server in a
 // state envelope before the first turn, through the production composition.
 //

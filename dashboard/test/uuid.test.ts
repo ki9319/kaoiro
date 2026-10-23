@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { randomUUID } from "../src/lib/uuid";

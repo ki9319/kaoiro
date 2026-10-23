@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 // The repo-direct profile, measured on the LAYOUT PRODUCTION ACTUALLY HAS.
 //
 // verify-release.mjs supports two profiles: a built release, and a repo-direct

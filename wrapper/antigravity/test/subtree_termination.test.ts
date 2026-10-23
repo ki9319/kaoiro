@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import { ChildProcess } from "node:child_process";
 import { createSignalTarget, isSafeSignalTarget, signalSubtree, terminateWithGrace, type SignalDestination, type SignalTargetOperation, type TerminableProcess } from "../src/subtree_termination.js";

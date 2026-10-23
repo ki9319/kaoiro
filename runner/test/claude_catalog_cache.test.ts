@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import { ClaudeCatalogCache } from "../src/claude_catalog_cache.js";
 import type { ProbeOutcome } from "@kaoiro/claude-code/probe-client";

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #285 regression: a permission decision that arrives after its own
 // turn already ended. The 2026-08-31 freeze followed exactly this order —
 // canUseTool pending, turn watchdog interrupt, error/waiting_input, and 70

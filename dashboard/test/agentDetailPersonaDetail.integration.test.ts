@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // AgentDetail のペルソナ画像クリック (issue #232): `.portrait-open` は
 // `.portrait` の中の独立した <button> (AgentCard と違い、外側は <button>

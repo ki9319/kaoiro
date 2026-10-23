@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { dirname } from "node:path";
 import { describe, expect, it } from "vitest";
 import { embeddedPidMarkerWriter, publishPidMarker, readPidMarker } from "./pid_marker.js";

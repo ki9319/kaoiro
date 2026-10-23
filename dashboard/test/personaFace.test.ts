@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // PersonaFace.svelte (issue #235): shared sprite-or-CSS-face renderer
 // extracted from 4 manual copies (App.svelte's agent-strip, AgentCard,

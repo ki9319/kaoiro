@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // Regression test for issue #134: inter_agent.ts's error-code tables
 // (ERROR_CODE_GUIDANCE / ERROR_CODE_MESSAGE) and
 // docs/reference/inter-agent/errors.md's "Error codes (initial set)" table

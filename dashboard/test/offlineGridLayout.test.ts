@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 //
 // 実機検収 1 (2026-07-23 マスター指示): A1 refactor で live-grid の

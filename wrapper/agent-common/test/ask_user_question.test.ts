@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import { askUserQuestionDescriptor } from "../src/ask_user_question.js";
 import type { QuestionDecision } from "../src/question.js";

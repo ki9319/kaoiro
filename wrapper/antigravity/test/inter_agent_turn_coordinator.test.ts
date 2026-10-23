@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import { createDeliveryAcknowledgementWiring, InterAgentTool } from "@kaoiro/agent-common";
 import type { Envelope } from "@kaoiro/agent-common";

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { MAX_LOG_BYTES, makeResult } from "@kaoiro/agent-common";

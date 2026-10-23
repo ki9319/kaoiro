@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // phase-34 A12 (ADR-0057 F4/F4c): AgentDetail の permission panel を
 // antigravity にも適用する。(1) network_access 行は

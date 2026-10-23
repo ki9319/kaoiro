@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { expect, it } from "vitest";
 import { flagArgument, personaOptInSource } from "../src/persona_opt_in.js";
 

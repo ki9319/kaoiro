@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // Adapter-level integration coverage for issue #177 review M4 (AC8/AC9/
 // AC15): executes the production inbound handler (receiveInbound() ->
 // disposition branch -> conditional injection) against the REAL CodexHost + REAL

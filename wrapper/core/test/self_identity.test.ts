@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { afterEach, expect, it, vi } from "vitest";
 import { createPhoenixSocket } from "../src/phoenix_socket.js";
 import { ServerLink } from "../src/transport.js";

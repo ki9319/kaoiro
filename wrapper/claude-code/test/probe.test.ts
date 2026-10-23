@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // projectModel (src/probe.ts) の ModelInfo -> ProbeModel 射影を pin する。
 // resolved_model は read-only metadata なので「SDK が報告したときだけ載る /
 // 欠落時は property 自体 absent」を両方向で固定する (ADR-0037 追補)。

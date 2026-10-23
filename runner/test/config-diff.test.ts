@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import type { RunnerConfig } from "../src/config.js";
 import { changedFields } from "../src/config-diff.js";

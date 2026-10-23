@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EngineKind, LaunchDeliveryPolicyMetadata, RunnerRegister } from "@kaoiro/protocol";
 import { buildRegister, parseRunnerConfig } from "../src/config.js";

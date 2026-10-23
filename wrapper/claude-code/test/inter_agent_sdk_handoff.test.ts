@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { expect, it, vi } from "vitest";
 import { InterAgentTool, bindToolResultHandoff, ToolOrigins } from "@kaoiro/agent-common";
 import type { Envelope } from "@kaoiro/agent-common";

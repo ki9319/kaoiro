@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 // runner/deploy/kaoiro-runner-launch.sh (issue #218 round 2 MF-5, ふじ 差
 // し戻し): --version must be forwarded to the entry point BEFORE the
 // config-existence check, so a first-run host with no config yet can

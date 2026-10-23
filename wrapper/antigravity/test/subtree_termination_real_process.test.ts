@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // @vitest-environment node
 // issue #379: real-OS-process pins. Everything else in this package is
 // unit-tested against fake children/timers; these specifically exercise

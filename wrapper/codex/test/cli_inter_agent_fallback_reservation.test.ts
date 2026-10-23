@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // Exercise the production CLI, host, session, and coordinator over a scripted
 // app-server connection.
 import { EventEmitter } from "node:events";

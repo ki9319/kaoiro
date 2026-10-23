@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // issue #207 (code-review-assessment must-fix 2): parseUserList is
 // module-private, so a stubbed KaoiroConnection (as settingsDrawer.

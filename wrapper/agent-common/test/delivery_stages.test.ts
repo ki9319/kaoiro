@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it, vi } from "vitest";
 import { DeliveryStageReporter } from "../src/delivery_stages.js";
 import type { Envelope } from "@kaoiro/protocol";

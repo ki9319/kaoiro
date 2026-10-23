@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #677: the Claude CLI registers `request_peer_session_reset` on the
 // kaoiro SDK MCP server (behind canUseTool, never in the auto-allow default)
 // and hands a result nobody waited for to the model as a root input.

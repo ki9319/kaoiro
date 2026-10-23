@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // Modal.svelte (issue #232 MF-3): shared modal primitive built on native
 // <dialog>.showModal() — pins the mechanics every caller relies on

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import type { HookInput, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {

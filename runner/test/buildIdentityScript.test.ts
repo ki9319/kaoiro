@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 // scripts/build-identity.mjs (issue #218 round 2, ふじ MF-2/MF-5 差し戻し):
 // the repo-level shared revision/dirty computation used by BOTH
 // runner/scripts/generate-build-info.mjs and the server build's

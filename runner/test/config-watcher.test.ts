@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 import { mkdtempSync, rmSync, type FSWatcher, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

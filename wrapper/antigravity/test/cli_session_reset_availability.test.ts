@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #396: Antigravity gains the same agent-facing `request_session_reset`
 // tool Claude Code and Codex already have (ADR-0043). Pins the COMPOSITION
 // itself -- the descriptor is registered, approval-gated through the same

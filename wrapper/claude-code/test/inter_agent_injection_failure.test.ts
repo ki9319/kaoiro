@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // Regression test for issue #136: notePendingInjection()-registered
 // conversations must not leak forever when the injection itself never
 // reaches the SDK queue (host.send() rejects, e.g. MAX_QUEUED_TURNS

@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // An abandonment (interrupt / close) that lands after the SDK terminal was
 // observed — while the host is still finishing the turn (here: the
 // permission observation's retry window) — must not mark a finished turn

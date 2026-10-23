@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // issue #287: the needs-attention badge (.badge) must stay lit after an
 // error result's live `error` state moves on to `waiting_input` (protocol.md:

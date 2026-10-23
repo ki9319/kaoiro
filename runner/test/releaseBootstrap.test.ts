@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 // runner/deploy/kaoiro-runner-bootstrap.sh (issue #314): single entry point
 // for a fresh host's first-time runner install — wizard -> install ->
 // switch -> service unit -> enable/start.

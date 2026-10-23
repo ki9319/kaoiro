@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // @vitest-environment jsdom
 // Regression tests for issue #119 round 3 (macOS sleep resume auto-reconnect).
 // Runs against the REAL phoenix client — only the WebSocket transport is

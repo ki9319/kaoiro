@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // IA sidecar (ADR-0051 D3-2 / D3-5). Covers the plan's failure-matrix row
 // (k) — a truncated or corrupt line must be skipped, not abort the replay —
 // plus the pending-journal lifecycle the spec pins: namespaced by

@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 import { describe, it, expect } from "vitest";
 import rawIndexHtml from "../index.html?raw";
 import rawManifest from "../public/manifest.webmanifest?raw";

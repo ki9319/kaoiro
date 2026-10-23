@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import { MAX_LOG_BYTES } from "../src/logpayload.js";
 import {

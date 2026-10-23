@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 // issue #396 -- real lifetime semantics for request_session_reset on
 // Antigravity. Unlike cli_session_reset_availability.test.ts (which pins
 // the composition with a mock host), these pins run a REAL AntigravityHost

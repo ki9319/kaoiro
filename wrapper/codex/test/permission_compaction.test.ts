@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { mkdtemp, rm, readFile, writeFile, appendFile, readdir } from "node:fs/promises";

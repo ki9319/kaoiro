@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // The dashboard receives replayed JSONL rows through the same `envelope`
 // route as live rows. Pin the complete reset → replay → completion → live
 // sequence against the production replay-window helper used by App.svelte.

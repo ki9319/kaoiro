@@ -1,3 +1,4 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type { watch } from "node:fs";
 import { tmpdir } from "node:os";

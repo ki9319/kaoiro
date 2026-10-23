@@ -1,3 +1,4 @@
+import "./isolation.setup.ts";
 // 実機検収 3 (2026-07-23 マスター指示): 純関数 conversationEntries の
 // 分類ロジック pin。 マスター spec = 「agent の応答 + ユーザ送信
 // prompt」と IA を含み、「tool running 系」を除外。 新しい順。

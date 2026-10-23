@@ -1,3 +1,4 @@
+import "../../../scripts/test/fixtures/test-isolation.mjs";
 import { describe, expect, it } from "vitest";
 import { MONITOR_EVENT_ADVICE, parseContinuationBlocks } from "../src/continuation_markers.js";
 import { assertMonitorAdvicePosition, malformedMonitorAdvice, monitorNotification, monitorNotifications } from "./fixtures/monitor_notifications.js";
