@@ -281,6 +281,11 @@ test("a Vite config with a test section is treated as Vitest wiring", () => {
   assert.ok(problems.includes("extra: vitest package outside the declared inventory"), problems.join("\n"));
 });
 
+test("a Vitest config filename is owned without a test property", () => {
+  const problems = problemsAfter(root => write(root, "extra/vitest.config.ts", "export default {};\n"));
+  assert.ok(problems.includes("extra: vitest package outside the declared inventory"), problems.join("\n"));
+});
+
 test("package script text does not infer Vitest ownership", () => {
   const root = fixtureRepository();
   try {
