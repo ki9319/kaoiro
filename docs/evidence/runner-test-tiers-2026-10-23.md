@@ -110,6 +110,7 @@ listing (`--filesOnly`) has all 71.
 | `supervisor_grok_discovery.test.ts` | integration | 2 process starts, 0 listens (sleep(1) fake-grok-acp.mjs(1)) |
 | `test-isolation.canary.test.ts` | fast (shared by every tier) | the isolation canary; selected by every tier |
 | `testTiers.test.ts` | fast | added by issue #706 after the probe; read: temporary directories and a mocked `console.log` only |
+| `testTierSelection.test.ts` | integration | added by issue #706 after the probe; read: starts `vitest list` processes |
 | `transport.test.ts` | fast | 0 process starts, 0 listens |
 | `transport-reconnect.test.ts` | integration | 0 process starts, 6 listens |
 | `vitest_home_guard_wiring.test.ts` | fast | 0 process starts, 0 listens |

@@ -46,12 +46,19 @@ above sets the variable itself, so a value inherited from the shell cannot chang
 what `pnpm test` runs. `integration` and `native` list their files; **fast is every
 other `test/**/*.test.ts`**, so a new test file runs in fast and in the landing
 command until it is listed. The isolation canary
-(`test/test-isolation.canary.test.ts`) is selected by every tier, so the guard is
-proven in each one. The loader (`runner/scripts/tier-selection.mjs`) rejects, before
+(`test/test-isolation.canary.test.ts`) is selected by every selector, even when a
+list is empty, so the guard is proven in each one. The loader (`runner/scripts/tier-selection.mjs`) rejects, before
 any selection, an entry that is not a literal `test/<name>.test.ts` path (a glob,
 `..`, a subdirectory, a repeated entry, an entry in both lists, the canary or a
-file that does not exist). When a file is renamed or deleted, change
-`runner/test-tiers.json` in the same commit.
+file that does not exist or is not a regular file). When a file is renamed or
+deleted, change `runner/test-tiers.json` in the same commit.
+
+`test/testTierSelection.test.ts` (an integration test, because it starts Vitest)
+asks Vitest which files each selector selects and compares them with the manifest
+in both directions: a declared file that its tier does not select (for example a
+name Vitest excludes by default, such as `vite.config.test.ts`), an undeclared file
+that `integration` or `native` selects, and any difference between `fast`, the
+declarations and the complete selection fail by name.
 
 A file belongs in `integration` when, during its run, it starts a real operating
 system process or script (a `child_process` call that reaches the OS, including
@@ -59,8 +66,9 @@ the deploy shell scripts) or opens a listening socket. The measurements behind
 the current lists are in
 [runner test tiers](../evidence/runner-test-tiers-2026-10-23.md).
 
-The isolation checker observes the four supported selectors and their callers;
-see [Test isolation](test-isolation.md#running-the-checks).
+The test files added with the tiers start with the isolation module import as
+their first import, which [issue #716](https://github.com/sakuraiyuta/kaoiro/issues/716)
+makes the rule for every test file.
 
 ### Tier records
 

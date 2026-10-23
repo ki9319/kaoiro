@@ -37,6 +37,13 @@ export interface TierRunFile {
 
 export function loadTiers(runnerDir: string): TierLists;
 export function selectTier(tier: string, runnerDir: string, defaultExclude: readonly string[]): TierSelection;
+export function compareSelections(input: {
+  complete: Iterable<string>;
+  fast: Iterable<string>;
+  integration: Iterable<string>;
+  native: Iterable<string>;
+  declared: TierLists;
+}): string[];
 export function countCompleteFiles(runnerDir: string): number;
 export function buildRecord(input: {
   tier: string;

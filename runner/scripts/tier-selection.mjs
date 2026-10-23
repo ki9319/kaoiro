@@ -1,7 +1,7 @@
 // Runner test tiers (issue #706): selection from runner/test-tiers.json and the
 // record a tier run prints. docs/contributing/runner-development.md#test-tiers
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 export const TIERS = ["complete", "fast", "integration", "native"];
@@ -35,7 +35,9 @@ export function loadTiers(runnerDir) {
       }
       if (entry === CANARY) throw new Error(`test-tiers.json: ${key} lists the isolation canary, which every tier selects itself`);
       if (owner.has(entry)) throw new Error(`test-tiers.json: ${entry} is declared twice (${owner.get(entry)} and ${key})`);
-      if (!existsSync(join(runnerDir, entry))) throw new Error(`test-tiers.json: ${key} lists ${entry}, which does not exist`);
+      const stat = statSync(join(runnerDir, entry), { throwIfNoEntry: false });
+      if (!stat) throw new Error(`test-tiers.json: ${key} lists ${entry}, which does not exist`);
+      if (!stat.isFile()) throw new Error(`test-tiers.json: ${key} lists ${entry}, which is not a regular file`);
       owner.set(entry, key);
     }
   }
@@ -53,6 +55,35 @@ export function selectTier(tier, runnerDir, defaultExclude) {
   const reporters = ["default", REPORTER];
   if (tier === "fast") return { include, exclude: [...defaultExclude, ...tiers.integration, ...tiers.native], reporters };
   return { include: [...tiers[tier], CANARY], reporters };
+}
+
+/**
+ * Compares what each selector actually selects (runner-relative paths, as Vitest
+ * lists them) with the declarations. Returns one named problem per difference.
+ * The canary is selected by every tier and is not a declaration.
+ */
+export function compareSelections({ complete, fast, integration, native, declared }) {
+  const problems = [];
+  const owner = new Map([...declared.integration.map(file => [file, "integration"]), ...declared.native.map(file => [file, "native"])]);
+  const without = set => [...set].filter(file => file !== CANARY).sort();
+  const selected = { fast: new Set(without(fast)), integration: new Set(without(integration)), native: new Set(without(native)) };
+  const all = new Set(without(complete));
+  for (const tier of ["integration", "native"]) {
+    for (const file of declared[tier]) {
+      if (!selected[tier].has(file)) problems.push(`${tier} declares ${file}, which the ${tier} selection does not contain`);
+    }
+    for (const file of selected[tier]) {
+      if (!declared[tier].includes(file)) problems.push(`${tier} selects ${file}, which is not declared for ${tier}`);
+    }
+  }
+  for (const file of selected.fast) {
+    if (owner.has(file)) problems.push(`fast selects ${file}, which is declared for ${owner.get(file)}`);
+    else if (!all.has(file)) problems.push(`fast selects ${file}, which the complete selection does not contain`);
+  }
+  for (const file of all) {
+    if (!owner.has(file) && !selected.fast.has(file)) problems.push(`${file} is in the complete selection but in no tier`);
+  }
+  return problems;
 }
 
 /** How many test files the complete selection runs. */

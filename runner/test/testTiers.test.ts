@@ -1,10 +1,11 @@
+import "../../scripts/test/fixtures/test-isolation.mjs";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import TierReporter, {
-  buildRecord, CANARY, countCompleteFiles, loadTiers, REPORTER, selectTier, TIERS,
+  buildRecord, CANARY, compareSelections, countCompleteFiles, loadTiers, REPORTER, selectTier, TIERS,
 } from "../scripts/tier-selection.mjs";
 
 const RUNNER = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -39,6 +40,13 @@ describe("loadTiers", () => {
   it("reads the manifest of this package: every entry is declared once and exists", () => {
     const { integration, native } = loadTiers(RUNNER);
     expect(new Set([...integration, ...native]).size).toBe(integration.length + native.length);
+  });
+
+  it("rejects an entry that is a directory", () => {
+    const dir = runnerDir(VALID);
+    mkdirSync(join(dir, "test/folder.test.ts"));
+    writeFileSync(join(dir, "test-tiers.json"), JSON.stringify({ integration: ["test/folder.test.ts"], native: [] }));
+    expect(() => loadTiers(dir)).toThrow(/lists test\/folder\.test\.ts, which is not a regular file/);
   });
 
   const rejected: [string, unknown, RegExp][] = [
@@ -100,6 +108,43 @@ describe("selectTier", () => {
     const dir = runnerDir({ integration: ["test/b.test.ts", "test/b.test.ts"], native: [] });
     for (const tier of TIERS) expect(() => selectTier(tier, dir, defaults)).toThrow(/declared twice/);
   });
+});
+
+describe("compareSelections", () => {
+  const declared = { integration: ["test/b.test.ts"], native: ["test/n.native.test.ts"] };
+  const healthy = {
+    complete: ["test/a.test.ts", "test/b.test.ts", "test/n.native.test.ts", CANARY],
+    fast: ["test/a.test.ts", CANARY],
+    integration: ["test/b.test.ts", CANARY],
+    native: ["test/n.native.test.ts", CANARY],
+    declared,
+  };
+
+  it("finds no difference when the tiers partition the complete selection", () => {
+    expect(compareSelections(healthy)).toEqual([]);
+  });
+
+  it("accepts a tier whose list is empty, with only the canary selected", () => {
+    expect(compareSelections({
+      complete: ["test/a.test.ts", CANARY], fast: ["test/a.test.ts", CANARY], integration: [CANARY], native: [CANARY],
+      declared: { integration: [], native: [] },
+    })).toEqual([]);
+  });
+
+  const differences: [string, Partial<typeof healthy>, string][] = [
+    ["a declared file the tier does not select (an excluded name)", { integration: [CANARY] }, "integration declares test/b.test.ts, which the integration selection does not contain"],
+    ["a declared native file the tier does not select", { native: [CANARY] }, "native declares test/n.native.test.ts, which the native selection does not contain"],
+    ["an undeclared file selected by integration", { integration: ["test/b.test.ts", "test/a.test.ts", CANARY] }, "integration selects test/a.test.ts, which is not declared for integration"],
+    ["an undeclared file selected by native", { native: ["test/n.native.test.ts", "test/a.test.ts", CANARY] }, "native selects test/a.test.ts, which is not declared for native"],
+    ["a declared file that fast also selects", { fast: ["test/a.test.ts", "test/b.test.ts", CANARY] }, "fast selects test/b.test.ts, which is declared for integration"],
+    ["a file the complete selection has and no tier selects", { fast: [CANARY] }, "test/a.test.ts is in the complete selection but in no tier"],
+    ["a file fast selects that the complete selection does not", { fast: ["test/a.test.ts", "test/x.test.ts", CANARY] }, "fast selects test/x.test.ts, which the complete selection does not contain"],
+  ];
+  for (const [name, change, expected] of differences) {
+    it(`names ${name}`, () => {
+      expect(compareSelections({ ...healthy, ...change })).toEqual([expected]);
+    });
+  }
 });
 
 describe("countCompleteFiles", () => {

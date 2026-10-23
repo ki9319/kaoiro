@@ -18,8 +18,8 @@
     "test/delivery-composition.test.ts",
     "test/frozenBuildIdentity.test.ts",
     "test/fujiRound4Matrix.test.ts",
-    "test/grok-catalog.test.ts",
     "test/grok-catalog-wiring.test.ts",
+    "test/grok-catalog.test.ts",
     "test/grok_sessions.test.ts",
     "test/landingBuildIdentity.test.ts",
     "test/landingTags.test.ts",
@@ -36,6 +36,7 @@
     "test/setup.test.ts",
     "test/spawn.test.ts",
     "test/supervisor_grok_discovery.test.ts",
+    "test/testTierSelection.test.ts",
     "test/transport-reconnect.test.ts"
   ],
   "native": [
