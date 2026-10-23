@@ -345,7 +345,15 @@ test("a missing shared guard is reported", () => {
 test("package script text does not infer Vitest ownership", () => {
   const root = fixtureRepository();
   try {
-    write(root, "extras/package.json", JSON.stringify({ scripts: { test: "vitest run" } }));
+    write(root, "extra/package.json", JSON.stringify({ scripts: { test: "vitest run" } }));
+    assert.deepEqual(checkTestIsolation(root, { observe: () => [] }).problems, []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a non-Vitest config file with test syntax is not treated as Vitest wiring", () => {
+  const root = fixtureRepository();
+  try {
+    write(root, "extra/custom.config.ts", "export default { test: true };\n");
     assert.deepEqual(checkTestIsolation(root, { observe: () => [] }).problems, []);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -440,7 +448,7 @@ test("a type-only guard import is rejected", () => {
   const path = "runner/test/type-only-guard.ts";
   const specifier = posix.relative(posix.dirname(path), MODULE);
   const guard = contentProblems(path, 'import type * as isolation from "' + specifier + '";\nimport { it } from "vitest";\n');
-  assert.ok(guard.some(problem => /first import is type-only/.test(problem)), guard.join("\n"));
+  assert.ok(guard.includes(`${path}: first import is type-only; ${MODULE} must load at runtime`), guard.join("\n"));
 });
 
 test("a comment or string containing a test-module name does not select its file", () => {
