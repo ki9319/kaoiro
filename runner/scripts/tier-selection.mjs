@@ -87,7 +87,8 @@ export function compareSelections({ complete, fast, integration, native, declare
   }
   const union = new Set(Object.values(selected).flatMap(files => [...files]));
   for (const file of all) {
-    if (!union.has(file)) problems.push(`${file} is in the complete selection but in no tier`);
+    // A declared file that its tier omits is already named above.
+    if (!union.has(file) && !owner.has(file)) problems.push(`${file} is in the complete selection but in no tier`);
   }
   return problems;
 }
