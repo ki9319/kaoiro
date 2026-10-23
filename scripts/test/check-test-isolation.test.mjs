@@ -416,6 +416,12 @@ for (const tracked of [false, true]) {
   });
 }
 
+test("a test-module import after an expression statement is still checked", () => {
+  const path = "runner/test/statement-before-import.ts";
+  const problems = contentProblems(path, '"use strict";\nimport { it } from "vitest";\n');
+  assert.ok(problems.includes(`${path}: first import is not ${MODULE}`), problems.join("\n"));
+});
+
 test("content selection catches a side-effect import and ignores comments and strings", () => {
   const problems = contentProblems("runner/test/side-effect.ts", 'import "vitest";\n');
   assert.ok(problems.some(problem => /side-effect\.ts: first import is not/.test(problem)), problems.join("\n"));
