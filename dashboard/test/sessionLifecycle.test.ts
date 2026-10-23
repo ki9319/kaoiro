@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import fixture from "../../protocol/fixtures/session-lifecycle-query.json" with { type: "json" };
 import type { SessionLifecycleEventKind } from "../../protocol/src/index";

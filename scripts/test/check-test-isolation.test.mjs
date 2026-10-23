@@ -252,6 +252,18 @@ test("every declared package is observed and its problems are reported", () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("dashboard test files use the extensionless local setup as their first import", () => {
+  const root = fixtureRepository();
+  const path = "dashboard/test/extensionless-setup.test.ts";
+  try {
+    write(root, path, 'import "./isolation.setup";\nimport { it } from "vitest";\nit("x", () => {});\n');
+    assert.deepEqual(checkTestIsolation(root, { observe: () => [] }).problems, []);
+    write(root, path, 'import "./isolation.setup.ts";\nimport { it } from "vitest";\nit("x", () => {});\n');
+    assert.ok(checkTestIsolation(root, { observe: () => [] }).problems.includes(
+      `${path}: first import is not dashboard/test/isolation.setup`));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 // observeVitest against a real Vitest (wrapper/core's, linked into a small
 // package), so its verdicts come from Vitest's own config resolution.
 const REAL_VITEST_MODULES = fileURLToPath(new URL("../../wrapper/core/node_modules", import.meta.url));

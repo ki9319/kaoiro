@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // issue #305 D (ふじ round 1 S2): the operator gate on the sandbox picker
 // lives in App.svelte — `onSetPermission={isOperator && connection ? ... :

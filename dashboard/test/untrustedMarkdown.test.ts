@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 import { marked } from "marked";
 import { describe, expect, it } from "vitest";

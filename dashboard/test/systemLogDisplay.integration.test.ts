@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // phase-28 A1 (#158): log kind="system" — session-level events the wrapper
 // observed (context compaction, conversation reset), which are neither party

@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 import { describe, expect, it, vi } from "vitest";
 import {
   headOmitted,

@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 //
 // 実機検収 3 (2026-07-23 マスター指示): 右ペインは per-agent 最終応答

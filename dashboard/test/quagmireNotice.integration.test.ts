@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // issue #273: the quagmire banner is operator-only on BOTH layers. The
 // server gate is pinned in agents_channel_test.exs; this pins the client

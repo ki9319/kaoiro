@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // AgentCard の 頭上リング (issue #170, ADR-0019/0047/0048): activeTaskCount
 // > 0 のときだけ .task-ring を描画する。数値そのものはテキストとして表示

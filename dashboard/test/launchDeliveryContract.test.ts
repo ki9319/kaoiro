@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import fixture from "../../protocol/fixtures/launch-delivery-policy.json" with { type: "json" };
 import { parseLaunchDeliveryPolicy, type DeliveryMechanisms } from "../src/lib/deliveryPolicy";

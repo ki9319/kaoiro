@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // phase-34 A12 (ADR-0057 F4c): LaunchDialog で engine=antigravity のとき
 // sandbox × approval × network_access を選択でき、spawn payload に載る

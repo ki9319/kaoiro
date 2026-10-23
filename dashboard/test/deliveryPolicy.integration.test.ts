@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { DeliveryPolicyError, deliveryPolicyLabel, parseDeliveryPolicy, parseLaunchDeliveryPolicy,

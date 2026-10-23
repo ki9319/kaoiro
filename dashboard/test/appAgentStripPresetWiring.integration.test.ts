@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // issue #235 fix-round (ふじ round1 must-fix, confidence 0.99): pins
 // App.svelte's agent-strip (`.chip`) wiring to PersonaFace's size="chip"

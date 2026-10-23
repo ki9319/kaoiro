@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // Exercise the default App -> AgentCard / AgentDetail wiring with pending
 // records on a live state that has already advanced to tool_running.

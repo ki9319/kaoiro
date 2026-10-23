@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // ADR-0040 phase-21: AgentDetail の ctx 行が supports_context_usage capability
 // で pending / meter / unsupported / hidden を fail-closed に分岐することを

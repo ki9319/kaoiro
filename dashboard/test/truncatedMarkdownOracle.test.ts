@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // The trim of a truncated status line head, judged by the real renderers
 // (issue 514): at every grapheme cut of every document, in both profiles, what

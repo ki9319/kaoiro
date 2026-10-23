@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 import DOMPurify from "dompurify";
 import { marked } from "marked";

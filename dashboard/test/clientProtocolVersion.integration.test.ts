@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // ADR-0015 coverage for the client -> server hop (issue #208, extending
 // issue #172): EVERY message this client pushes carries a flat `version`

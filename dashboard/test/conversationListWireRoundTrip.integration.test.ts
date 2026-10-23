@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // issue #276 review follow-up (ふじ B2): parseConversationList is
 // module-private, so a stubbed KaoiroConnection (as settingsDrawer.

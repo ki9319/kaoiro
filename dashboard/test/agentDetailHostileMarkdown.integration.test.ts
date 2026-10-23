@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // issue #502: a reply, an operator instruction or an inter-agent message whose
 // block quotes nest without limit must not take the detail view down. The bodies

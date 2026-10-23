@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // issue #307: the rally-threshold control is operator-only, and App.svelte
 // owns that decision — `connection={isOperator ? (connection ?? undefined) :

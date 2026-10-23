@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // issue #677: while a reset is in flight AgentDetail says who started it when
 // that was a director, so the operator does not read it as their own action.

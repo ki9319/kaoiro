@@ -9,7 +9,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/agentCardStats.integration.test.ts",
@@ -17,7 +17,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/agentCardStatusLine.integration.test.ts",
@@ -25,7 +25,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/agentCardTaskRing.integration.test.ts",
@@ -33,7 +33,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/agentCardUnackedError.integration.test.ts",
@@ -41,7 +41,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/agentDetailErrorSurfacing.integration.test.ts",
@@ -49,7 +49,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/agentDetailHideNonMessage.integration.test.ts",
@@ -57,7 +57,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/agentDetailHostileMarkdown.integration.test.ts",
@@ -65,7 +65,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/agentDetailPersonaDetail.integration.test.ts",
@@ -73,7 +73,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/agentDetailResetRequester.integration.test.ts",
@@ -81,7 +81,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/agentDetailSessionResetUnsupported.integration.test.ts",
@@ -89,7 +89,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/agentDetailTaskRing.integration.test.ts",
@@ -97,7 +97,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/agentDetailTasklist.integration.test.ts",
@@ -105,7 +105,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/agentNavigation.test.ts",
@@ -113,7 +113,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/antigravityLaunchOptions.integration.test.ts",
@@ -121,7 +121,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/antigravityPermissionDisplay.integration.test.ts",
@@ -129,7 +129,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/appAgentStripPresetWiring.integration.test.ts",
@@ -137,7 +137,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/appDeliveryAction.integration.test.ts",
@@ -145,7 +145,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/appDeliveryRole.integration.test.ts",
@@ -153,7 +153,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/appPendingAttention.integration.test.ts",
@@ -161,7 +161,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/appPermissionOperatorGate.integration.test.ts",
@@ -169,7 +169,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/appSessionLifecycle.integration.test.ts",
@@ -177,7 +177,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/appSessionResetRequester.integration.test.ts",
@@ -185,7 +185,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/appStatusLine.integration.test.ts",
@@ -193,7 +193,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/appUnackedErrorAck.integration.test.ts",
@@ -201,7 +201,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/buildIdentity.test.ts",
@@ -209,7 +209,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/buildIdentityBridge.test.ts",
@@ -217,7 +217,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/buildIdentityDomain.test.ts",
@@ -225,7 +225,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/bulkOperatorReset.integration.test.ts",
@@ -233,7 +233,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/clientProtocolVersion.integration.test.ts",
@@ -241,7 +241,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/codexNetworkAccessDisplay.integration.test.ts",
@@ -249,7 +249,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/contextUsageDisplay.integration.test.ts",
@@ -257,7 +257,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/conversationList.test.ts",
@@ -265,7 +265,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/conversationListWireRoundTrip.integration.test.ts",
@@ -273,7 +273,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/conversationTimeline.test.ts",
@@ -281,7 +281,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/deliveryPolicy.integration.test.ts",
@@ -289,7 +289,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/deliveryPolicyWire.integration.test.ts",
@@ -297,7 +297,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/directoryNameProjection.integration.test.ts",
@@ -305,7 +305,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/disconnectOrigin.integration.test.ts",
@@ -313,7 +313,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/engineCatalogRefresh.integration.test.ts",
@@ -321,7 +321,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/errorIndexParity.integration.test.ts",
@@ -329,7 +329,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/expression.test.ts",
@@ -337,7 +337,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/grokPermissionPolicy.integration.test.ts",
@@ -345,7 +345,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/interAgentDeliveryStatus.integration.test.ts",
@@ -353,7 +353,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/interAgentHistory.integration.test.ts",
@@ -361,7 +361,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/issue304AcceptanceGate.test.ts",
@@ -369,7 +369,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/joinSnapshotFrames.integration.test.ts",
@@ -377,7 +377,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/launchDefaults.integration.test.ts",
@@ -385,7 +385,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/launchDelivery.integration.test.ts",
@@ -393,7 +393,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/launchDeliveryContract.test.ts",
@@ -401,7 +401,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/launchDialogBuildRevisionWarning.integration.test.ts",
@@ -409,7 +409,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/launchDialogModal.integration.test.ts",
@@ -417,7 +417,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/logWindow.integration.test.ts",
@@ -425,7 +425,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/manifestAndIcon.test.ts",
@@ -433,7 +433,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/markdown.test.ts",
@@ -441,7 +441,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/modal.integration.test.ts",
@@ -449,7 +449,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/modelSwitch.integration.test.ts",
@@ -457,7 +457,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/notify.test.ts",
@@ -465,7 +465,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/offlineGridLayout.test.ts",
@@ -473,7 +473,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/permissionGateRecovery.integration.test.ts",
@@ -481,7 +481,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/permissionSwitchDisplay.integration.test.ts",
@@ -489,7 +489,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/personaAuth.integration.test.ts",
@@ -497,7 +497,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/personaDetailDialog.integration.test.ts",
@@ -505,7 +505,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/personaFace.test.ts",
@@ -513,7 +513,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/personaFacePresetWiring.integration.test.ts",
@@ -521,7 +521,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/personaName.test.ts",
@@ -529,7 +529,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/projectionEpochWindow.integration.test.ts",
@@ -537,7 +537,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/protocol.test.ts",
@@ -545,7 +545,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/quagmireNotice.integration.test.ts",
@@ -553,7 +553,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/quagmireThresholdOperatorGate.integration.test.ts",
@@ -561,7 +561,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/rateLimitDisplay.integration.test.ts",
@@ -569,7 +569,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/reconnect.integration.test.ts",
@@ -577,7 +577,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/relativeTime.test.ts",
@@ -585,7 +585,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/renameAgent.integration.test.ts",
@@ -593,7 +593,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/renameAgentWire.integration.test.ts",
@@ -601,7 +601,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/renameUserWire.integration.test.ts",
@@ -609,7 +609,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/replayEnvelopeWire.integration.test.ts",
@@ -617,7 +617,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/responseTimeline.integration.test.ts",
@@ -625,7 +625,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/responseTimelineLayout.integration.test.ts",
@@ -633,7 +633,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/sessionLifecycle.test.ts",
@@ -641,7 +641,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/sessionLifecycleDialog.test.ts",
@@ -649,7 +649,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/sessionResetCeilingHint.integration.test.ts",
@@ -657,7 +657,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/setPermissionWire.integration.test.ts",
@@ -665,7 +665,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/settings.test.ts",
@@ -673,7 +673,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/settingsDrawer.integration.test.ts",
@@ -681,7 +681,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/settingsDrawerConnectionGate.integration.test.ts",
@@ -689,7 +689,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/settingsDrawerModal.integration.test.ts",
@@ -697,7 +697,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/snapshotIncomplete.integration.test.ts",
@@ -705,7 +705,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/statusDisplay.test.ts",
@@ -713,7 +713,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/statusLine.test.ts",
@@ -721,7 +721,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/statusLineHistoryDialog.integration.test.ts",
@@ -729,7 +729,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/statusLinePanel.integration.test.ts",
@@ -737,7 +737,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/statusLineWire.integration.test.ts",
@@ -745,7 +745,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/systemLogDisplay.integration.test.ts",
@@ -753,7 +753,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/taskRing.integration.test.ts",
@@ -761,7 +761,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/test-isolation.canary.test.ts",
@@ -785,7 +785,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/timelineScrollSuppression.integration.test.ts",
@@ -793,7 +793,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/truncatedMarkdown.test.ts",
@@ -801,7 +801,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/truncatedMarkdownOracle.test.ts",
@@ -809,7 +809,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/untrustedMarkdown.test.ts",
@@ -817,7 +817,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/untrustedMarkdownComponent.integration.test.ts",
@@ -825,7 +825,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/userListWireRoundTrip.integration.test.ts",
@@ -833,7 +833,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/uuid.test.ts",
@@ -841,7 +841,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "dashboard/test/viteBuildIdentity.test.ts",
@@ -849,7 +849,7 @@
         "vitest"
       ],
       "exception": null,
-      "firstImport": "./isolation.setup.ts"
+      "firstImport": "./isolation.setup"
     },
     {
       "path": "runner/test/antigravity-catalog.test.ts",

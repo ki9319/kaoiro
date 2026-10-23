@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // AgentDetail の 頭上リング (issue #170 follow-up, 2026-08-10): AgentCard
 // と同じ表示契約 (activeTaskCount > 0 のときだけ .task-ring を描画、数値

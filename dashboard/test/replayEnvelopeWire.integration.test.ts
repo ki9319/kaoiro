@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // Wire glue for ADR-0051 that App.svelte cannot reach on its own: the lobby
 // channel's join reply (which opens the D4 buffer window) and the

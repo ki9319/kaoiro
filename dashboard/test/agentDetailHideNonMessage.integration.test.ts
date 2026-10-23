@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // issue #228: AgentDetail のログから tool_use/tool_result kind を
 // hideNonMessageLogEntries トグルで非表示にする。system・ターン境界・

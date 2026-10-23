@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // issue #381: an exact `/new`・`/clear` (no attachments) on a session that
 // has not advertised session_reset support for that mode must not fall

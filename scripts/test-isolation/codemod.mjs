@@ -30,14 +30,19 @@ for (const row of rows.filter(candidate => candidate.imports.length > 0)) {
     continue;
   }
   selected.push(path);
-  const expected = path.startsWith("dashboard/") ? "dashboard/test/isolation.setup.ts" : checker.MODULE;
+  const expected = path.startsWith("dashboard/") ? "dashboard/test/isolation.setup" : checker.MODULE;
   const first = sourceFile.statements[0];
   const firstIsTypeOnly = first && ts.isImportDeclaration(first) && first.importClause?.isTypeOnly === true;
-  if (resolveImport(path, text) === expected && !firstIsTypeOnly) continue;
+  const current = resolveImport(path, text);
+  if (current === expected && !firstIsTypeOnly) continue;
 
   const specifier = posix.relative(posix.dirname(path), expected).replace(/^(?!\.)/, "./");
   assert(!text.startsWith("\uFEFF") && !text.startsWith("#!"), `${path}: explicit header handling required`);
-  const generated = `import ${JSON.stringify(specifier)};\n${text}`;
+  const replaceDashboardExtension = path.startsWith("dashboard/") && current === `${expected}.ts` &&
+    !firstIsTypeOnly && first && ts.isImportDeclaration(first) && first.moduleSpecifier;
+  const generated = replaceDashboardExtension
+    ? `${text.slice(0, first.moduleSpecifier.getStart(sourceFile))}${JSON.stringify(specifier)}${text.slice(first.moduleSpecifier.end)}`
+    : `import ${JSON.stringify(specifier)};\n${text}`;
   assert.equal(resolveImport(path, generated), expected, `${path}: generated first import does not resolve to the guard`);
   assert.notEqual(resolveImport(path, `import "./wrong.mjs";\n${text}`), expected,
     `${path}: normalized-path check accepts an incorrect guard path`);

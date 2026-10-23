@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // AgentDetail の todo float (issue #178 / ADR-0049): current tasklist state
 // is deliberately separate from the append-only transcript and from the

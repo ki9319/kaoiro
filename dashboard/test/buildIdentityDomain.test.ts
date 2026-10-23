@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 import fixtureText from "../../scripts/fixtures/build-identity-domain.json?raw";
 import { expect, it } from "vitest";
 import { isValidBuildVersion, isValidBuildBranch } from "../src/lib/buildIdentityDomain";

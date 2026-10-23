@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // Wire-contract pin (issue #207 code-review-assessment must-fix 3, mirrors
 // renameAgentWire.integration.test.ts exactly). A component test alone only

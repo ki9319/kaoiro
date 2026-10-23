@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // Issue 482 on the real phoenix client: the three server events reach the
 // handlers parsed, and the two requests leave with the right frame and settle on

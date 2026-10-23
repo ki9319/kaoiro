@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // The trim of a truncated status line head (issue 514), rule by rule: the
 // exact head each rule leaves, and the premises about `marked` it stands on.

@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // issue #305 D: the Codex sandbox / network_access control and the
 // permission_control state display in AgentDetail.

@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // TaskRing.svelte (issue #233, validated design in issue #233 comment
 // 5450038052): count active subagent/workflow roots each get their own

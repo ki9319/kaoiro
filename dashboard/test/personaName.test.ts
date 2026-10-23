@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 import { describe, expect, it } from "vitest";
 import {
   agentDisplayName,

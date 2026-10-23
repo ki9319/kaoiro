@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // issue #187 段階3 unit B, ふじ MF-3 レビュー指摘: a live-disconnected
 // agent has no wrapper to re-emit `state_change` after a rename, so its

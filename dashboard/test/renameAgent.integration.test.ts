@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // Component-level coverage for the rename UI (issue #187 段階3 unit B).
 // Pins the 4 points ふじ specified as sufficient for the UI side of the

@@ -208,7 +208,7 @@ function testModuleImports(root, all, problems) {
     if (row.imports.includes("vitest") && !VITEST_PACKAGES.some(pkg => within(path, pkg))) {
       problems.push(`${path}: imports vitest outside a declared package`);
     }
-    const expected = path.startsWith("dashboard/") ? "dashboard/test/isolation.setup.ts" : MODULE;
+    const expected = path.startsWith("dashboard/") ? "dashboard/test/isolation.setup" : MODULE;
     const first = firstImport(row.text);
     if (!first || resolvedImport(path, first) !== expected) {
       problems.push(`${path}: first import is not ${expected}`);

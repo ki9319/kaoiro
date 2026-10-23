@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // issue #218: LaunchDialog's build-revision mismatch warning. Component
 // coverage is needed here (not just the pure-function unit level) because

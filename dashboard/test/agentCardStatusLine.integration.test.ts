@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // The status line row on an agent card (issue 482, 514): the head as inline
 // markdown with no pressable element inside, a sibling of the detail button,

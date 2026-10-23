@@ -1,4 +1,4 @@
-import "./isolation.setup.ts";
+import "./isolation.setup";
 // @vitest-environment jsdom
 // Mount App so operator/connection/join wiring into SettingsDrawer is covered.
 import { mount, tick, unmount } from "svelte";
