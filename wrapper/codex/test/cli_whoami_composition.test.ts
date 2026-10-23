@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { ToolDescriptor, WrapperConfig } from "@kaoiro/agent-common";
 import { runCodexCli } from "../src/cli.js";
 import { ToolHost } from "../src/toolhost.js";
+import { expectWhoamiDirectoryName, expectWhoamiDirectoryNameUnavailable } from "../../agent-common/test/whoami_contract.js";
 
 const config: WrapperConfig = {
   agent_id: "self.agent",
@@ -146,11 +147,11 @@ it("whoami uses current directory names and never stale config across rename or 
     statusSnapshot: () => ({ agent_id: config.agent_id, persona: config.persona, state: "idle" as const }),
     run: async () => {
       const read = async () => JSON.parse((await handler({})).content[0]!.text);
-      expect(await read()).toMatchObject({ display_name: "Original", persona: config.persona });
+      expectWhoamiDirectoryName(await read(), "Original", config.persona, "codex/initial");
       name = "Renamed";
-      expect(await read()).toMatchObject({ display_name: "Renamed", persona: config.persona });
+      expectWhoamiDirectoryName(await read(), "Renamed", config.persona, "codex/renamed");
       name = undefined;
-      expect(await read()).not.toHaveProperty("display_name");
+      expectWhoamiDirectoryNameUnavailable(await read(), "codex/unavailable");
       expect(local.display_name).toBe("Stale config");
     },
   };

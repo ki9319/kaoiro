@@ -10,6 +10,7 @@ import { runAntigravityCli } from "../src/cli.js";
 import { loadWrapperBuildInfo } from "@kaoiro/wrapper-core";
 import { fileURLToPath } from "node:url";
 import { ToolHost } from "../src/toolhost.js";
+import { expectWhoamiDirectoryName, expectWhoamiDirectoryNameUnavailable } from "../../agent-common/test/whoami_contract.js";
 
 class FakeAgy extends EventEmitter {
   readonly stdout = new PassThrough();
@@ -119,11 +120,11 @@ describe("Antigravity CLI whoami composition (issue #418)", () => {
       // Negative control: before the first init event, session_id key is absent
       const beforeInit = await callWhoami(toolHost);
       expect(beforeInit).not.toHaveProperty("session_id");
-      expect(beforeInit).toMatchObject({ display_name: "Original", persona: config.persona });
+      expectWhoamiDirectoryName(beforeInit, "Original", config.persona, "antigravity/initial");
       displayName = "Renamed";
-      expect(await callWhoami(toolHost)).toMatchObject({ display_name: "Renamed", persona: config.persona });
+      expectWhoamiDirectoryName(await callWhoami(toolHost), "Renamed", config.persona, "antigravity/renamed");
       displayName = undefined;
-      expect(await callWhoami(toolHost)).not.toHaveProperty("display_name");
+      expectWhoamiDirectoryNameUnavailable(await callWhoami(toolHost), "antigravity/unavailable");
       expect(config.display_name).toBe("Momo");
       expect(beforeInit.build).toEqual({revision:baked.revision,dirty:baked.dirty,version:baked.version,channel:baked.channel,
         ...(baked.branch === undefined ? {} : {branch:baked.branch})});

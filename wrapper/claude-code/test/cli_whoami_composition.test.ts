@@ -8,6 +8,7 @@ import {
 } from "@kaoiro/agent-common";
 import { runClaudeCli } from "../src/cli.js";
 import { buildKaoiroMcpServer, kaoiroToolDescriptors } from "../src/inter_agent_sdk.js";
+import { expectWhoamiDirectoryName, expectWhoamiDirectoryNameUnavailable } from "../../agent-common/test/whoami_contract.js";
 
 const config: WrapperConfig = {
   agent_id: "self.agent",
@@ -202,11 +203,11 @@ it("whoami uses current directory names and never stale config across rename or 
     statusSnapshot: () => ({ agent_id: config.agent_id, persona: config.persona, state: "idle" as const }),
     run: async () => {
       const read = async () => JSON.parse((await handler({})).content[0]!.text);
-      expect(await read()).toMatchObject({ display_name: "Original", persona: config.persona });
+      expectWhoamiDirectoryName(await read(), "Original", config.persona, "claude-code/initial");
       name = "Renamed";
-      expect(await read()).toMatchObject({ display_name: "Renamed", persona: config.persona });
+      expectWhoamiDirectoryName(await read(), "Renamed", config.persona, "claude-code/renamed");
       name = undefined;
-      expect(await read()).not.toHaveProperty("display_name");
+      expectWhoamiDirectoryNameUnavailable(await read(), "claude-code/unavailable");
       expect(local.display_name).toBe("Stale config");
     },
   };

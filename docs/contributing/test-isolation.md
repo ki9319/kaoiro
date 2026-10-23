@@ -2,7 +2,7 @@
 title: Test isolation
 description: What a test may not reach on the host, how the shared isolation guard enforces it, and how to add a suite or an opt-in native probe.
 status: accepted
-last_updated: 2026-10-23
+last_updated: 2026-10-24
 related: [runner-development]
 ---
 
@@ -69,6 +69,10 @@ checker reports any other file that mentions `permitHostAccess`. An environment
 variable alone never relaxes a root: the opt-in needs the call as well.
 
 ## Adding a test or a suite
+
+Shared assertions such as `wrapper/agent-common/test/whoami_contract.ts` consume
+observed results. Each engine's composition tests own their production entry,
+tool path, fixtures, state transitions and cleanup.
 
 - Every JavaScript or TypeScript source file with a static import declaration from Vitest or node:test must load the shared isolation module as its first import. The checker selects files by parsed module content, not by filename or launch command. Multiline, side-effect, aliased, escaped and type-only imports all select a file. Text in comments or strings does not. Syntax errors fail the scan.
 - Export-from re-exports, CommonJS require, dynamic import and TypeScript import-equals acquisition of either test API are rejected. Use a static import so the checker can select and guard the file.

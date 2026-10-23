@@ -7,6 +7,7 @@ import { expect, it, vi } from "vitest";
 import { runGrokCli } from "../src/cli.js";
 import { GrokHost } from "../src/host.js";
 import { phoenixLoopback } from "./fixtures/phoenix_loopback.js";
+import { expectWhoamiDirectoryName, expectWhoamiDirectoryNameUnavailable } from "../../agent-common/test/whoami_contract.js";
 
 it("whoami uses current directory names and never stale config across rename or unavailability", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "kaoiro-grok-whoami-"));
@@ -35,11 +36,11 @@ it("whoami uses current directory names and never stale config across rename or 
       const tool = JSON.parse((envelope.payload.payload as { text: string }).text);
       return JSON.parse(tool.content[0].text);
     };
-    expect(await read()).toMatchObject({ display_name: "Original", persona });
+    expectWhoamiDirectoryName(await read(), "Original", persona, "grok/initial");
     name = "Renamed";
-    expect(await read()).toMatchObject({ display_name: "Renamed", persona });
+    expectWhoamiDirectoryName(await read(), "Renamed", persona, "grok/renamed");
     name = undefined;
-    expect(await read()).not.toHaveProperty("display_name");
+    expectWhoamiDirectoryNameUnavailable(await read(), "grok/unavailable");
     expect(config.display_name).toBe("Stale config");
   } finally {
     host?.close();
