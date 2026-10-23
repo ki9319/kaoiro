@@ -58,7 +58,12 @@ asks Vitest which files each selector selects and compares them with the manifes
 in both directions: a declared file that its tier does not select (for example a
 name Vitest excludes by default, such as `vite.config.test.ts`), an undeclared file
 that `integration` or `native` selects, and any difference between `fast`, the
-declarations and the complete selection fail by name.
+declarations and the complete selection fail by name. The union of the three tiers
+must equal the complete selection in both directions: a file that a tier selects
+and the complete selection does not, or the reverse, is also named. The same test
+runs each of the four package scripts with a different selector inherited from
+the caller and checks that it still selects its own tier, so the explicit selector
+of `pnpm -C runner test` cannot be dropped silently.
 
 A file belongs in `integration` when, during its run, it starts a real operating
 system process or script (a `child_process` call that reaches the OS, including

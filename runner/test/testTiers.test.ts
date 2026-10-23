@@ -139,6 +139,8 @@ describe("compareSelections", () => {
     ["a declared file that fast also selects", { fast: ["test/a.test.ts", "test/b.test.ts", CANARY] }, "fast selects test/b.test.ts, which is declared for integration"],
     ["a file the complete selection has and no tier selects", { fast: [CANARY] }, "test/a.test.ts is in the complete selection but in no tier"],
     ["a file fast selects that the complete selection does not", { fast: ["test/a.test.ts", "test/x.test.ts", CANARY] }, "fast selects test/x.test.ts, which the complete selection does not contain"],
+    ["an integration file that only the complete selection omits", { complete: ["test/a.test.ts", "test/n.native.test.ts", CANARY] }, "integration selects test/b.test.ts, which the complete selection does not contain"],
+    ["a native file that only the complete selection omits", { complete: ["test/a.test.ts", "test/b.test.ts", CANARY] }, "native selects test/n.native.test.ts, which the complete selection does not contain"],
   ];
   for (const [name, change, expected] of differences) {
     it(`names ${name}`, () => {

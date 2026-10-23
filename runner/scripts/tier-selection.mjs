@@ -78,10 +78,16 @@ export function compareSelections({ complete, fast, integration, native, declare
   }
   for (const file of selected.fast) {
     if (owner.has(file)) problems.push(`fast selects ${file}, which is declared for ${owner.get(file)}`);
-    else if (!all.has(file)) problems.push(`fast selects ${file}, which the complete selection does not contain`);
   }
+  // complete = fast + integration + native, in both directions.
+  for (const tier of ["fast", "integration", "native"]) {
+    for (const file of selected[tier]) {
+      if (!all.has(file)) problems.push(`${tier} selects ${file}, which the complete selection does not contain`);
+    }
+  }
+  const union = new Set(Object.values(selected).flatMap(files => [...files]));
   for (const file of all) {
-    if (!owner.has(file) && !selected.fast.has(file)) problems.push(`${file} is in the complete selection but in no tier`);
+    if (!union.has(file)) problems.push(`${file} is in the complete selection but in no tier`);
   }
   return problems;
 }
