@@ -2,7 +2,7 @@
 title: Test isolation
 description: What a test may not reach on the host, how the shared isolation guard enforces it, and how to add a suite or an opt-in native probe.
 status: accepted
-last_updated: 2026-10-22
+last_updated: 2026-10-23
 related: [runner-development]
 ---
 
@@ -70,97 +70,39 @@ variable alone never relaxes a root: the opt-in needs the call as well.
 
 ## Adding a test or a suite
 
-- `node --test` trees (`scripts/test`, `server/deploy/test`): every entry is a
-  `*.test.mjs` whose **first import** is the isolation module. Any other
-  JavaScript or TypeScript file there must be under `fixtures/` or on the
-  checker's helper list.
-- vitest packages: the config's `setupFiles` loads the module **first**,
-  directly or through a package-local setup file whose first import is the
-  module (`dashboard` does this, because a separate root cannot load an outside
-  setup file in jsdom files); with several entries, `sequence.setupFiles` is
-  `"list"`. The order cannot be observed, so it is read from the config
-  text: `setupFiles` may appear only in a declared package's own
-  `vitest.config.*` or `vite.config.*`, once, as a list of string literals.
-  Every such file is held to this; any other form (a second list merged in, a
-  spread, a variable, a change after the list, `setupFiles` in another file)
-  is reported. The package has
-  `test/test-isolation.canary.test.ts`, which calls
-  `await assertIsolationActive();` at module scope as well as in its test.
-- Vitest is reached only through a declared package's `test` script whose body
-  is exactly `vitest run`, `pnpm build && vitest run`, or
-  `python3 ../../scripts/run-grok-test-namespace.py -- vitest run`, invoked
-  with no further words (`pnpm test`, `pnpm run test`, `pnpm -C <dir> test`,
-  or the wrapper's `pnpm -r --filter … run test`). Any other mention of
-  Vitest in a workflow step or a `package.json` script, any further word after
-  an accepted invocation, `npm`/`npx`/`yarn` naming `test`, and a
-  `pnpm`/`npm`/`npx`/`yarn` line with a `$` substitution (for `node`, in the
-  program position) are reported. The checker then observes each package as
-  that launch resolves it: it runs the package's own `vitest list --json` in
-  the package directory with no arguments and requires exit 0, exactly one
-  project, and the canary among the selected files. Listing collects every
-  file, which runs `setupFiles` and module scope, so a project without the
-  guard fails at the canary. The checker therefore needs the dependencies
-  installed and what the accepted scripts build (CI builds `wrapper` and
-  `runner` first); without them it reports that it cannot observe.
-- A new package, tree, or launch line (workflow step or `package.json`
-  script) must be added to the checker's inventory first. Otherwise the
-  `node scripts/test-isolation/check.mjs` step of the CI job `test-isolation`
-  fails.
+- Every JavaScript or TypeScript source file with a static import declaration from Vitest or node:test must load the shared isolation module as its first import. The checker selects files by parsed module content, not by filename or launch command. Multiline, side-effect, aliased, escaped and type-only imports all select a file. Text in comments or strings does not. Syntax errors fail the scan.
+- Export-from re-exports, CommonJS require, dynamic import and TypeScript import-equals acquisition of either test API are rejected. Use a static import so the checker can select and guard the file.
+- The first import must resolve to scripts/test/fixtures/test-isolation.mjs. Dashboard files instead start with dashboard/test/isolation.setup.ts; that local setup file starts with the shared module. This remains one hop.
+- The three exact wrapper/codex helper files are exceptions because tests import them as helpers rather than run them: app_server_approval_harness.ts, fixtures/cli_app_server.ts and fixtures/notice_tap.ts. Their Vitest imports may name only vi and expect. A default or namespace import, a test-registration API (including an alias), unsupported acquisition, or a missing helper invalidates the exception. Other files, including siblings under test/fixtures, follow the first-import rule.
+- Each declared package has a guard-free setup canary, and dashboard also has a guard-free jsdom canary. They assert isolation at module scope and in a test. They import only Vitest and the canonical canary helper; the helper imports only Node built-ins. Do not import the shared guard or dashboard setup in a canary. The checker requires all nine canaries to remain guard-free and verifies that the default package observations select them.
+- The canonical node:test trees remain scripts/test and server/deploy/test. Every entry there is a *.test.mjs whose first import is the shared module. Other source files in those trees must be under fixtures or on the existing helper list. Content selection also checks node:test imports elsewhere in the repository.
+- setupOrder remains a source-level declaration check. It reads setupFiles only in a declared package's own vitest.config.* or vite.config.* file, accepts one readable list of string literals, requires the shared module first (through the dashboard hop), and requires sequence.setupFiles to be list when multiple files are declared. It reports setupFiles mentions in other files or unreadable declarations. A config with no readable setupFiles mention is not rejected by this check.
+- The checker observes the default configuration of all eight declared Vitest packages using each package's own vitest list --json command. It requires one project and the selected canary files, including dashboard's jsdom canary. If default setup is missing or does not load the guard, the guard-free canary fails during collection. This observation needs installed dependencies and the wrapper and runner build outputs.
+- The existing package-ownership check remains: a Vitest config or package script under a directory outside the eight declared packages is an error. The checker no longer tries to recognize Vitest launches in package scripts or workflow command strings. CI still pins the exact checker and self-test lines in the test-isolation job.
+
+A first import protects ordinary module evaluation and test code that runs after it. Existing default setup and setupOrder remain the earlier initialization boundary. They do not make config-time code or every mode of an arbitrary configuration part of this guarantee.
 
 ## Running the checks
 
-```sh
-pnpm install --frozen-lockfile && pnpm -C dashboard install --frozen-lockfile
-pnpm -C wrapper build && pnpm -C runner build
+~~~sh
+pnpm install --frozen-lockfile
+pnpm -C dashboard install --frozen-lockfile
+pnpm -C wrapper build
+pnpm -C runner build
 node scripts/test-isolation/check.mjs
 node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs scripts/test/child-process-environment.test.mjs
-```
+~~~
 
-These are the CI job's steps. The checker prints each problem on stderr and
-one JSON line, `{"entries":N,"problems":N}`, on stdout; it exits 0 only with no
-problems. Its problems are the contract violations above plus the workflow
-wiring below.
+These are the CI job's steps. The checker prints each problem on stderr and one JSON line, {"entries":N,"problems":N}, on stdout; it exits 0 only with no problems. The test-isolation job runs the checker once against the real repository. Its self-tests cover content selection, first-import enforcement, unsupported acquisition, canary and helper contracts, setupOrder, the checker CLI failure path, and CI wiring. The separate isolation and child-process-environment suites continue to cover runtime refusals, network rules, permits, and child environment handling.
 
-The checker's observation of the real repository (minutes, because it starts
-every `node --test` entry and lists every Vitest package) runs once per CI
-candidate, as the `check.mjs` step. No test repeats it. Each remaining check
-owns a different guarantee:
-
-| Check | Guarantee |
-|---|---|
-| `node scripts/test-isolation/check.mjs` (CI step) | The real repository satisfies the contract. Its exit status is the step status |
-| `check-test-isolation.test.mjs`, rule cases | Each rule of the checker (guard loading, discovery, setup order, launch lines, permit allow-list) fails on a minimal fixture |
-| `check-test-isolation.test.mjs`, command cases | The checker command, started as the workflow starts it, exits 1 with the rule's message on stderr and the summary line when a fixture breaks a rule |
-| `check-test-isolation.test.mjs`, workflow cases | The job's checker and node:test commands are present exactly, including the complete test-file list, with no `continue-on-error` or `if:`. The checker (as its own problem) and this test each check the other's command, so removing either one fails the one that remains |
-| `test-isolation.test.mjs` | The guard's refusals, network rules and permits |
-| `child-process-environment.test.mjs` | The child environment profiles and raw child-process call-site pins reject unmanaged launches and ambient credentials |
-
-The workflow cases pin both CI commands exactly, including the node:test file
-list. Update them together with `ciWiringProblems` in the checker.
+The workflow tests pin both CI commands exactly, including the complete node:test file list. Update them together with ciWiringProblems in the checker.
 
 ## Residual risks
 
-- A non-Node program that opens the network itself (for example `git` over
-  `ssh` with keys under `HOME`) is not stopped outside the container.
-- A non-Node intermediate that clears the environment drops the guard for
-  any Node process below it.
-- The guard trusts its internal hand-off variables (`KAOIRO_TEST_ISOLATION_*`),
-  which only the spawn boundary sets. A shell that has them exported by hand
-  starts its Node processes as children: they skip root initialisation and
-  accept the handed-on permissions. The threat model is accident by cooperative
-  test code, not forgery.
-- The content of a script file, or of a script read from standard input, is
-  not inspected; only the environment layer applies to it. This includes the
-  accepted Vitest prefix `scripts/run-grok-test-namespace.py`.
-- Only the listed launchers (`env`, `setsid`, `nohup`, `timeout`, `nice`,
-  `xargs`) have their arguments checked; another program that executes its
-  arguments (`stdbuf`, `flock`, …) is covered by the environment layer only.
-- Shell strings are matched by words, not parsed: a `gh` or `docker` produced
-  by a variable or a function inside the string is not seen.
-- The Vitest observation runs in the checker's environment. A config that
-  branches on the environment is observed as it resolves there. Vitest 2.1.9
-  and 4.1.8 read no `VITEST_*` variable that selects the config file.
-- Unix sockets are not checked, so a fixed path to a host service socket is
-  reachable from Node.
-- Playwright specs under `dashboard/e2e/` have their own runner, are not in
-  CI, and are exempt.
+- A first import does not retroactively guard hoisted callbacks that run before it, config evaluation, or environment construction. The default setup remains the earlier boundary for ordinary hoisted test callbacks; config-time and environment setup code remain outside this guarantee.
+- The default observation detects a missing setup when a guard-free canary fails collection. setupOrder detects readable guard-order errors and parallel multi-file setup. The checker does not add a static rule requiring every config to declare setupFiles.
+- Separate or alternate config files, Vite plugin `config` hooks, environment-dependent config code, wrapper functions, explicit undefined values, object spreads, duplicate or later keys, nested objects, inline projects without `extends: true`, and auto-discovered `vitest.workspace.*` or `vitest.projects.*` files can change setup or isolation. These mechanisms can affect default configs too. The existing canary catches a default setup that is missing or does not load the guard; setupOrder catches readable order errors. Changes to `isolate` or `pool` through these mechanisms are not detected. There is no audit of alternate configs or resolved values.
+- Per-file reset under isolate:false is not guaranteed. Dashboard can carry roots between files even with its default setup, and Node's --experimental-test-isolation=none can cache the guard between files. Other pools and custom environments are not certified by the default observation.
+- A runner can execute source without a static test API import, an exempt helper, or a git-ignored file outside the source inventory. Computed module names and acquisition hidden behind unrelated modules are outside the static import rule.
+- Existing runtime residuals remain: a non-Node intermediate can clear the environment; hand-exported KAOIRO_TEST_ISOLATION_* variables are trusted; Unix sockets are not checked; and non-Node programs that open the network themselves are not stopped outside the disposable container.
+- Playwright specs under dashboard/e2e/ use their own runner, are not in CI, and remain exempt.

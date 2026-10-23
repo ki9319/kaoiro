@@ -128,3 +128,9 @@ claude-code SIGTERM test: exit 143 from the tsx CLI relay (issue #550).
 Channel test store isolation and OAuth watcher budgets (issue #554).
 
 - [channel-isolation-and-watcher-budget-2026-10-09.md](issue-554/channel-isolation-and-watcher-budget-2026-10-09.md) — the repeat-until-failure baseline, the C1 probe gate (exit 1 at the 250 ms threshold, held for D2), and the mutation exit codes.
+
+## issue-716/
+
+Vitest first-import isolation guards and checker acceptance measurements.
+
+- [2026-10-23-first-import-guard.md](issue-716/2026-10-23-first-import-guard.md) — inventory, negative controls, checker mutations, issue-706 compatibility, and focused per-package measurements.
