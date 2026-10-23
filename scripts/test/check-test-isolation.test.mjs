@@ -2,17 +2,20 @@ import "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { CANARIES, checkRepository, checkTestIsolation, ciWiringProblems, MODULE, observeVitest, VITEST_PACKAGES } from "../test-isolation/check.mjs";
+import { analyzeSources } from "../test-isolation/selection.mjs";
 
 const REAL_MODULE = fileURLToPath(new URL("./fixtures/test-isolation.mjs", import.meta.url));
 const REAL_REPOSITORY = fileURLToPath(new URL("../..", import.meta.url));
 // Built by concatenation so this file is not itself a permit call site.
 const PERMIT = "permit" + "HostAccess";
 const CANARY_HELPER = "scripts/test/fixtures/test-isolation-canary.mjs";
+const TYPESCRIPT = createRequire(new URL("../../runner/package.json", import.meta.url))("typescript");
 
 function write(root, path, text) {
   mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -90,6 +93,70 @@ test("the dashboard first-import hop must load the shared guard directly", () =>
   const path = "dashboard/test/isolation.setup.ts";
   const problems = problemsAfter(root => write(root, path, 'import "./other.ts";\n'));
   assert.ok(problems.includes(`${path}: first import is not ${MODULE}`), problems.join("\n"));
+});
+
+test("the dashboard first-import hop must load the guard at runtime", () => {
+  const path = "dashboard/test/isolation.setup.ts";
+  const problems = problemsAfter(root => write(root, path,
+    'import type {} from "../../scripts/test/fixtures/test-isolation.mjs";\n'));
+  assert.ok(problems.includes(`${path}: first import is type-only; ${MODULE} must load at runtime`), problems.join("\n"));
+});
+
+test("a missing dashboard first-import hop is reported", () => {
+  const path = "dashboard/test/isolation.setup.ts";
+  const problems = problemsAfter(root => rmSync(join(root, path)));
+  assert.ok(problems.includes(`${path}: missing`), problems.join("\n"));
+});
+
+test("source selection ignores node_modules, declarations, non-source files, and deleted paths", () => {
+  const root = fixtureRepository();
+  const ignored = [
+    "runner/node_modules/fixture.test.ts",
+    "runner/test/fixture.test.d.ts",
+    "runner/test/fixture.test.md",
+    "runner/test/deleted.test.ts",
+  ];
+  try {
+    for (const path of ignored) {
+      write(root, path, 'import { it } from "vitest";\n');
+      execFileSync("git", ["add", "-f", path], { cwd: root });
+    }
+    rmSync(join(root, "runner/test/deleted.test.ts"));
+    const { rows } = analyzeSources(root, TYPESCRIPT);
+    for (const path of ignored) assert.equal(rows.some(row => row.path === path), false, path);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("explicit source selection applies the same exclusions", () => {
+  const root = fixtureRepository();
+  const selected = "runner/test/selected.test.ts";
+  const ignored = [
+    "runner/node_modules/fixture.test.ts",
+    "runner/test/fixture.test.d.ts",
+    "runner/test/fixture.test.md",
+    "runner/test/deleted.test.ts",
+  ];
+  try {
+    write(root, selected, "export {};\n");
+    for (const path of ignored) write(root, path, "export {};\n");
+    rmSync(join(root, "runner/test/deleted.test.ts"));
+    const { rows } = analyzeSources(root, TYPESCRIPT, [selected, ...ignored]);
+    assert.deepEqual(rows.map(row => row.path), [selected]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("source selection reports a git listing failure", () => {
+  const root = mkdtempSync(join(tmpdir(), "kaoiro-selection-not-repository-"));
+  try {
+    assert.throws(() => analyzeSources(root, TYPESCRIPT), /git ls-files failed/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("content selection parses JSX syntax in TSX files", () => {
+  const path = "wrapper/core/test/component.test.tsx";
+  const problems = contentProblems(path,
+    importLine(path) + 'import { it } from "vitest";\nconst view = <div />;\nit("x", () => {});\n');
+  assert.deepEqual(problems, []);
 });
 
 function contentProblems(path, text, tracked = false) {
@@ -173,6 +240,24 @@ test("a canary import outside Vitest and the canonical helper is rejected", () =
   assert.ok(unexpected.includes(`${path}: setup probe imports unexpected module ./unexpected.mjs`), unexpected.join("\n"));
 });
 
+test("a canary may not import the shared guard", () => {
+  const path = CANARIES.find(candidate => candidate.startsWith("runner/"));
+  const relativeGuard = posix.relative(posix.dirname(path), MODULE);
+  const problems = contentProblems(path, canaryText(path) + `import "${relativeGuard}";\n`);
+  assert.ok(problems.includes(`${path}: setup probe must not import the isolation guard or package setup`), problems.join("\n"));
+});
+
+test("a dashboard canary may not import its package setup", () => {
+  const path = CANARIES.find(candidate => candidate.startsWith("dashboard/"));
+  const problems = contentProblems(path, canaryText(path) + 'import "./isolation.setup.ts";\n');
+  assert.ok(problems.includes(`${path}: setup probe must not import the isolation guard or package setup`), problems.join("\n"));
+});
+
+test("a missing canary helper is reported", () => {
+  const problems = problemsAfter(root => rmSync(join(root, CANARY_HELPER)));
+  assert.ok(problems.includes(`${CANARY_HELPER}: missing`), problems.join("\n"));
+});
+
 test("a canary must statically import Vitest", () => {
   const path = CANARIES.find(candidate => candidate.startsWith("runner/"));
   const noVitest = contentProblems(path, canaryText(path).replace('import { it } from "vitest";\n', ""));
@@ -189,6 +274,11 @@ test("Vitest imports outside a declared package are named errors", () => {
   const path = "extras/consumer.ts";
   const problems = contentProblems(path, importLine(path) + 'import { it } from "vitest";\n');
   assert.ok(problems.includes(`${path}: imports vitest outside a declared package`), problems.join("\n"));
+});
+
+test("a Vite config with a test section is treated as Vitest wiring", () => {
+  const problems = problemsAfter(root => write(root, "extra/vite.config.ts", "export default { test: {} };\n"));
+  assert.ok(problems.includes("extra: vitest package outside the declared inventory"), problems.join("\n"));
 });
 
 test("package script text does not infer Vitest ownership", () => {
