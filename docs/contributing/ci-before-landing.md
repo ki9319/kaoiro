@@ -12,9 +12,11 @@ candidate before it is landed. The director lands the reviewed commits directly
 on `develop`; the PR is a CI entry and evidence record, not a merge path.
 
 This procedure assumes the operator has approved branch pushes and draft PR
-creation. Until that approval exists, the current reviewer full-suite procedure
-remains in force. This page does not change workflow triggers, required status
-checks, branch rules, or deployment behavior.
+creation and that the active operator policy authorizes candidate CI as the
+authoritative full suite. Until both conditions hold, the current reviewer
+full-suite procedure remains in force; a PR CI run is supplementary. This page
+does not change workflow triggers, required status checks, branch rules, or
+deployment behavior.
 
 ## Open a draft PR for the candidate
 
