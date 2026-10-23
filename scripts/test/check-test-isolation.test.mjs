@@ -358,6 +358,12 @@ test("Vitest helper type-only and default imports violate the named API contract
   assert.ok(defaultImport.includes(`${path}: Vitest helper may import only named vi/expect bindings`), defaultImport.join("\n"));
 });
 
+test("a Vitest helper combined default import is rejected", () => {
+  const path = "wrapper/codex/test/fixtures/notice_tap.ts";
+  const problems = contentProblems(path, 'import Vitest, { vi } from "vitest";\nexport {};\n');
+  assert.ok(problems.includes(`${path}: Vitest helper may import only named vi/expect bindings`), problems.join("\n"));
+});
+
 test("Vitest helpers may import supported APIs with or without aliases", () => {
   const path = "wrapper/codex/test/fixtures/notice_tap.ts";
   for (const source of [
@@ -475,6 +481,7 @@ test("calls without a module argument do not break content selection", () => {
 test("nonliteral and non-require module expressions are not acquisitions", () => {
   const source = 'const vitest = "vitest";\n' +
     'const required = require(vitest);\n' +
+    'const stringCalled = "require"("vitest");\n' +
     'const api = load("vitest");\n';
   assert.deepEqual(contentProblems("runner/test/custom-acquisition.ts", source), []);
 });
