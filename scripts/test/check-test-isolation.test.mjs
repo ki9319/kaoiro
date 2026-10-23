@@ -266,6 +266,13 @@ test("a missing canary helper is reported", () => {
   assert.ok(problems.includes(`${CANARY_HELPER}: missing`), problems.join("\n"));
 });
 
+test("a missing package canary is reported", () => {
+  const path = CANARIES.find(candidate => candidate.startsWith("runner/"));
+  const short = path.slice("runner/".length);
+  const problems = problemsAfter(root => rmSync(join(root, path)));
+  assert.ok(problems.includes(`runner: missing ${short}`), problems.join("\n"));
+});
+
 test("a canary must statically import Vitest", () => {
   const path = CANARIES.find(candidate => candidate.startsWith("runner/"));
   const noVitest = contentProblems(path, canaryText(path).replace('import { it } from "vitest";\n', ""));
