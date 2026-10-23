@@ -251,7 +251,8 @@ test("a canary may not import the shared guard", () => {
   const path = CANARIES.find(candidate => candidate.startsWith("runner/"));
   const relativeGuard = posix.relative(posix.dirname(path), MODULE);
   const problems = contentProblems(path, canaryText(path) + `import "${relativeGuard}";\n`);
-  assert.ok(problems.includes(`${path}: setup probe must not import the isolation guard or package setup`), problems.join("\n"));
+  const diagnostic = `${path}: setup probe must not import the isolation guard or package setup`;
+  assert.equal(problems.filter(problem => problem === diagnostic).length, 1, problems.join("\n"));
 });
 
 test("a dashboard canary may not import its package setup", () => {
@@ -286,6 +287,10 @@ test("Vitest imports outside a declared package are named errors", () => {
 test("a Vite config with a test section is treated as Vitest wiring", () => {
   const problems = problemsAfter(root => write(root, "extra/vite.config.ts", "export default { test: {} };\n"));
   assert.ok(problems.includes("extra: vitest package outside the declared inventory"), problems.join("\n"));
+});
+
+test("a Vite config without a test section is not treated as Vitest wiring", () => {
+  assert.deepEqual(problemsAfter(root => write(root, "extra/vite.config.ts", "export default {};\n")), []);
 });
 
 test("a Vitest config filename is owned without a test property", () => {
@@ -414,9 +419,12 @@ test("content selection catches a side-effect import and ignores comments and st
     '// import { it } from "vitest";\nconst note = "import \\"node:test\\"";\n'), []);
 });
 
-test("a type-only test API import is selected, and a type-only guard import is rejected", () => {
+test("a type-only test API import is selected", () => {
   const importer = contentProblems("runner/test/type-only-api.ts", 'import type { MockInstance } from "vitest";\n');
   assert.ok(importer.some(problem => /type-only-api\.ts: first import is not/.test(problem)), importer.join("\n"));
+});
+
+test("a type-only guard import is rejected", () => {
   const path = "runner/test/type-only-guard.ts";
   const specifier = posix.relative(posix.dirname(path), MODULE);
   const guard = contentProblems(path, 'import type * as isolation from "' + specifier + '";\nimport { it } from "vitest";\n');
@@ -464,8 +472,11 @@ test("calls without a module argument do not break content selection", () => {
   assert.deepEqual(contentProblems("runner/test/empty-acquisition.ts", "require();\nvoid import();\n"), []);
 });
 
-test("non-require calls with test-module names are not acquisitions", () => {
-  assert.deepEqual(contentProblems("runner/test/custom-acquisition.ts", 'const api = load("vitest");\n'), []);
+test("nonliteral and non-require module expressions are not acquisitions", () => {
+  const source = 'const vitest = "vitest";\n' +
+    'const required = require(vitest);\n' +
+    'const api = load("vitest");\n';
+  assert.deepEqual(contentProblems("runner/test/custom-acquisition.ts", source), []);
 });
 
 test("non-test module acquisitions do not select a source file", () => {
