@@ -1,21 +1,28 @@
 #!/usr/bin/env node
 // Enforces the test isolation contract (docs/contributing/test-isolation.md).
-// The canonical set is the declared trees as a whole, enumerated from the
-// file list; launch lines are checked separately against that set.
+// The canonical Node entries come from the declared trees; test modules are
+// selected by static imports and checked for the guard as their first import.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { join, posix, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { analyzeSources, CANARIES as CONTENT_CANARIES, HELPERS as VITEST_HELPERS, PACKAGES as CONTENT_PACKAGES } from "./selection.mjs";
 
 export const MODULE = "scripts/test/fixtures/test-isolation.mjs";
 export const NODE_TREES = ["scripts/test", "server/deploy/test"];
 // Programs and modules in a node --test tree that are not entries.
 export const NODE_HELPERS = ["scripts/test/mock-github-api.mjs"];
-export const VITEST_PACKAGES = ["runner", "wrapper/core", "wrapper/agent-common", "wrapper/claude-code",
-  "wrapper/codex", "wrapper/antigravity", "wrapper/grok", "dashboard"];
+export const VITEST_PACKAGES = CONTENT_PACKAGES;
 export const CANARY = "test/test-isolation.canary.test.ts";
+export const CANARIES = CONTENT_CANARIES;
+const CANARY_HELPER = "scripts/test/fixtures/test-isolation-canary.mjs";
+const TYPESCRIPT = createRequire(new URL("../../runner/package.json", import.meta.url))("typescript");
+const VITEST_HELPER_APIS = new Set(["vi", "expect"]);
+const CANARY_MODULES = new Set(["vitest", CANARY_HELPER]);
+const BUILTIN_MODULES = new Set(createRequire(import.meta.url)("node:module").builtinModules
+  .flatMap(name => [name, `node:${name}`]));
 export const EXEMPT = [
   { pattern: /^protocol\/src\/[^/]+\.type-test\.ts$/, reason: "compile-time type tests run by tsc" },
   { pattern: /^dashboard\/e2e\//, reason: "Playwright specs with their own runner; not in CI" },
@@ -79,13 +86,12 @@ if (process.env.NODE_TEST_CONTEXT && !process.env.KAOIRO_ISOLATION_RECORDED) {
   return path;
 }
 
-// Runs node --test with a filter that matches no test, so each file process
-// only loads its imports; the recorder reports each file and its marker.
+// Runs the canonical node --test entries with a filter that matches no test,
+// so each file process only loads its imports; the recorder reports its marker.
 // `env -u` drops an isolation guard and test-runner context inherited from a
 // calling test process, so the marker shows only what each file loads itself.
 // A file without the guard still runs its top level here, so credentials are
-// removed and host pointers lead nowhere. Files are passed as arguments;
-// `words` are glob words from a launch line, already checked for shell syntax.
+// removed and host pointers lead nowhere.
 const SCRUBBED = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "SSH_AUTH_SOCK", "DOCKER_CONTEXT"];
 function cleanEnvironment(scratch) {
   const nowhere = join(scratch, "nowhere");
@@ -95,9 +101,9 @@ function cleanEnvironment(scratch) {
     `DOCKER_HOST=unix://${nowhere}/docker.sock`, `DOCKER_CONFIG=${nowhere}`, `GH_CONFIG_DIR=${nowhere}`];
 }
 
-function discover(scratch, cwd, { files = [], words = "" }, label) {
+function discover(scratch, cwd, { files = [] }, label) {
   const record = join(scratch, `record-${Math.random().toString(16).slice(2)}.jsonl`);
-  const command = `exec "$0" --test --test-name-pattern='${NO_MATCH}' ${words} "$@"`;
+  const command = `exec "$0" --test --test-name-pattern='${NO_MATCH}' "$@"`;
   const result = spawnSync("env", [...cleanEnvironment(scratch),
     `NODE_OPTIONS=--import=${pathToFileURL(recorder(scratch)).href}`, `KAOIRO_ISOLATION_RECORD=${record}`,
     "sh", "-c", command, process.execPath, ...files], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -125,135 +131,99 @@ function strayFiles(all, problems) {
   }
 }
 
-function segments(script) {
-  return script.split(/&&|\|\||[;|\n]/).map(part => part.trim()).filter(Boolean);
+function resolvedImport(path, specifier) {
+  return posix.normalize(posix.join(posix.dirname(path), specifier));
 }
 
-function launchSegment(root, cwd, segment, label, entries, scratch, problems) {
-  const tokens = segment.split(/\s+/);
-  if (tokens.some(token => /^--test-isolation(?:=|$)/.test(token))) {
-    problems.push(`${label}: --test-isolation would run several files in one process`);
+function firstStatementIsTypeOnly(sourceFile) {
+  const first = sourceFile.statements[0];
+  return first && TYPESCRIPT.isImportDeclaration(first) && first.importClause?.isTypeOnly === true;
+}
+
+function importDeclarations(sourceFile) {
+  return sourceFile.statements.filter(TYPESCRIPT.isImportDeclaration);
+}
+
+function canaryProblems(row, problems) {
+  const imports = importDeclarations(row.sourceFile);
+  const modules = imports.map(declaration => declaration.moduleSpecifier.text);
+  if (!modules.includes("vitest")) problems.push(`${row.path}: setup probe must statically import vitest`);
+  if (!modules.some(specifier => resolvedImport(row.path, specifier) === CANARY_HELPER)) {
+    problems.push(`${row.path}: setup probe must import ${CANARY_HELPER}`);
   }
-  const node = tokens.findIndex(token => /(?:^|\/)node$/.test(token));
-  const at = node >= 0 ? tokens.indexOf("--test", node) : -1;
-  if (at >= 0) {
-    const words = [...tokens.slice(node + 1, at), ...tokens.slice(at + 1)];
-    const directory = resolve(root, cwd);
-    if (words.some(word => /[^A-Za-z0-9_./*?=,:@+%^-]/.test(word))) {
-      problems.push(`${label}: node --test arguments use shell syntax the checker does not evaluate`);
-      return;
+  for (const declaration of imports) {
+    const specifier = declaration.moduleSpecifier.text;
+    const resolved = specifier === "vitest" ? specifier : resolvedImport(row.path, specifier);
+    if (resolved === MODULE || resolved === "dashboard/test/isolation.setup.ts") {
+      problems.push(`${row.path}: setup probe must not import the isolation guard or package setup`);
+    } else if (!CANARY_MODULES.has(resolved)) {
+      problems.push(`${row.path}: setup probe imports unexpected module ${specifier}`);
     }
-    if (!existsSync(directory) || !`${realpathSync(directory)}/`.startsWith(`${root}/`)) {
-      problems.push(`${label}: working directory ${cwd} is outside the repository`);
-      return;
-    }
-    const run = discover(scratch, directory, { words: words.join(" ") }, label);
-    const reported = run.rows.map(row => relative(root, realpathSync(row.file)));
-    if (run.status !== 0) problems.push(`${label}: node --test exited ${run.status}\n${run.output}`);
-    if (reported.length === 0) problems.push(`${label}: discovers no test file`);
-    for (const file of reported) if (!entries.includes(file)) problems.push(`${label}: starts ${file}, outside the canonical entries`);
-  }
-  // Prefixes (assignments, launchers) may come before the runner; what
-  // follows it is matched as a whole.
-  const runner = tokens.findIndex(token => RUNNER.test(posix.basename(token)));
-  if (runner >= 0) {
-    const rest = tokens.slice(runner);
-    // For node only the program position matters: its arguments do not choose what runs.
-    const program = posix.basename(rest[0]) === "node" ? rest.slice(0, rest.findIndex((token, index) => index > 0 &&
-      !token.startsWith("-")) + 1 || undefined) : rest;
-    if (program.some(token => token.includes("$"))) {
-      problems.push(`${label}: ${rest[0]} line uses substitution the checker does not evaluate`);
-    } else if (rest.includes("test") &&
-        !(posix.basename(rest[0]) === "pnpm" && TEST_INVOCATION.test(["pnpm", ...rest.slice(1)].join(" ")))) {
-      problems.push(`${label}: a test script is invoked in a form the checker does not accept (${segment})`);
-    }
-  }
-  if (tokens.some((token, index) => /(?:^|\/)playwright$/.test(token) && tokens[index + 1] === "test")) {
-    problems.push(`${label}: playwright test is exempt only as an unlaunched runner; review before adding a launch line`);
   }
 }
 
-// A small reader for the workflow shapes this repository uses: job-level
-// defaults.run.working-directory, step-level working-directory, and inline or
-// block run scalars.
-export function workflowRuns(text) {
-  const runs = [];
-  let jobs = false, job, steps = false, step;
-  const lines = text.split("\n");
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index];
-    if (/^jobs:\s*$/.test(line)) { jobs = true; continue; }
-    if (/^\S/.test(line)) { jobs = false; job = undefined; continue; }
-    const jobMatch = jobs && line.match(/^ {2}([A-Za-z0-9_-]+):\s*$/);
-    if (jobMatch) { job = { name: jobMatch[1], cwd: "" }; steps = false; step = undefined; continue; }
-    if (!job) continue;
-    if (/^ {4}steps:\s*$/.test(line)) { steps = true; continue; }
-    if (steps && /^ {6}- /.test(line)) step = { cwd: undefined };
-    const directory = line.match(/^\s+working-directory:\s*(.+?)\s*$/);
-    if (directory) {
-      if (steps && step) step.cwd = directory[1];
-      else job.cwd = directory[1];
+function helperProblems(row, problems) {
+  const declarations = importDeclarations(row.sourceFile).filter(declaration => declaration.moduleSpecifier.text === "vitest");
+  if (declarations.length === 0) {
+    problems.push(`${row.path}: stale Vitest helper exception; no static vitest import remains`);
+    return;
+  }
+  for (const declaration of declarations) {
+    const clause = declaration.importClause;
+    const bindings = clause?.namedBindings;
+    if (clause?.isTypeOnly || clause?.name || !bindings || !TYPESCRIPT.isNamedImports(bindings)) {
+      problems.push(`${row.path}: Vitest helper may import only named vi/expect bindings`);
       continue;
     }
-    const run = line.match(/^(\s+)(-\s+)?run:\s*(.*)$/);
-    if (!run) continue;
-    let body = run[3].trim().replace(/^(["'])(.*)\1$/, "$2");
-    if (/^[|>][-+]?\s*$/.test(body)) {
-      const indent = run[1].length + (run[2]?.length ?? 0);
-      const block = [];
-      while (index + 1 < lines.length &&
-          (lines[index + 1].trim() === "" || lines[index + 1].search(/\S/) > indent)) {
-        block.push(lines[++index]);
-      }
-      body = block.join("\n");
-    }
-    runs.push({ job, step, body });
-  }
-  return runs.map(({ job, step, body }) => ({ job: job.name, cwd: step?.cwd ?? job.cwd, body }));
-}
-
-// The closed set of ways to reach Vitest: a declared package's test script
-// with one of these bodies, invoked with no further words. The checker then
-// observes exactly that launch (observeVitest).
-export const VITEST_TEST_SCRIPTS = ["vitest run", "pnpm build && vitest run",
-  "python3 ../../scripts/run-grok-test-namespace.py -- vitest run"];
-const RUNNER = /^(?:pnpm|npm|npx|yarn|node)$/;
-const TEST_INVOCATION = /^pnpm (?:-C \S+ )?(?:run )?test$|^pnpm -r(?: --filter \S+)+ run test$/;
-
-function vitestLaunch(label, body, accepted, problems) {
-  if (!/vitest/i.test(body)) return;
-  if (!accepted || !VITEST_TEST_SCRIPTS.includes(body.trim().split(/\s+/).join(" "))) {
-    problems.push(`${label}: reaches Vitest outside the accepted forms (${VITEST_TEST_SCRIPTS.join(" | ")} as a declared package's test script)`);
-  }
-}
-
-function launchLines(root, all, entries, scratch, problems) {
-  for (const path of all.filter(path => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(path))) {
-    const runs = workflowRuns(readFileSync(join(root, path), "utf8"));
-    if (runs.length === 0) problems.push(`${path}: no run steps were read; the workflow layout is not understood`);
-    for (const run of runs) {
-      vitestLaunch(`${path} job ${run.job}`, run.body, false, problems);
-      const cwd = (run.cwd ?? "").replace(/^\.(?:\/|$)/, "").replace(/\/$/, "");
-      for (const segment of segments(run.body.split("\n").filter(line => !/^\s*#/.test(line)).join("\n"))) {
-        launchSegment(root, cwd, segment, `${path} job ${run.job}`, entries, scratch, problems);
+    for (const element of bindings.elements) {
+      const imported = element.propertyName?.text ?? element.name.text;
+      if (!VITEST_HELPER_APIS.has(imported)) {
+        problems.push(`${row.path}: Vitest helper imports unsupported API ${imported}`);
       }
     }
   }
-  for (const path of all.filter(path => posix.basename(path) === "package.json")) {
-    const scripts = JSON.parse(readFileSync(join(root, path), "utf8")).scripts ?? {};
-    const cwd = posix.dirname(path) === "." ? "" : posix.dirname(path);
-    for (const [name, script] of Object.entries(scripts)) {
-      vitestLaunch(`${path} script ${name}`, script, name === "test" && VITEST_PACKAGES.includes(cwd), problems);
-      for (const segment of segments(script)) launchSegment(root, cwd, segment, `${path} script ${name}`, entries, scratch, problems);
-    }
-  }
 }
 
-// Runs the package's own Vitest as its accepted launch does (no arguments,
-// in the package directory), but only collecting: setupFiles and each file's
-// module scope run, so the canary's module-scope assertion fails the listing
-// when the project does not load the guard. setupFiles is per project, so one
-// project whose canary passes covers every file it selects.
+function testModuleImports(root, all, problems) {
+  const { rows, problems: scanProblems } = analyzeSources(root, TYPESCRIPT, all);
+  const byPath = new Map(rows.map(row => [row.path, row]));
+  problems.push(...scanProblems);
+
+  for (const helper of VITEST_HELPERS) {
+    const row = byPath.get(helper);
+    if (!all.includes(helper) || !row) problems.push(`${helper}: declared Vitest helper is missing`);
+    else helperProblems(row, problems);
+  }
+
+  for (const row of rows) {
+    if (row.imports.length === 0) continue;
+    const { path } = row;
+    if (CONTENT_CANARIES.includes(path)) {
+      continue;
+    }
+    if (VITEST_HELPERS.includes(path)) continue;
+    if (path === MODULE || path === "scripts/test/fixtures/test-isolation.cjs" || NODE_HELPERS.includes(path) ||
+        NODE_TREES.some(tree => within(path, `${tree}/fixtures`))) continue;
+
+    if (row.imports.includes("vitest") && !VITEST_PACKAGES.some(pkg => within(path, pkg))) {
+      problems.push(`${path}: imports vitest outside a declared package`);
+    }
+    const expected = path.startsWith("dashboard/") ? "dashboard/test/isolation.setup.ts" : MODULE;
+    const first = firstImport(row.text);
+    if (!first || resolvedImport(path, first) !== expected) {
+      problems.push(`${path}: first import is not ${expected}`);
+    } else if (firstStatementIsTypeOnly(row.sourceFile)) {
+      problems.push(`${path}: first import is type-only; ${expected} must load at runtime`);
+    }
+  }
+
+  return byPath;
+}
+
+// Runs each declared package's default Vitest listing. The guard-free canaries
+// are setup probes: missing setup makes their module-scope assertion fail.
+// This observes selected files and one default environment, not arbitrary
+// config branches or isolation and pool values.
 export function observeVitest(root, pkg, scratch) {
   const directory = join(root, pkg);
   const vitest = join(directory, "node_modules", ".bin", "vitest");
@@ -269,11 +239,14 @@ export function observeVitest(root, pkg, scratch) {
   const projects = new Set(rows.map(row => row.projectName ?? ""));
   if (projects.size !== 1) problems.push(`${pkg}: vitest selects ${projects.size} projects; exactly one is required`);
   const files = new Set(rows.map(row => relative(root, realpathSync(row.file))));
-  if (!files.has(`${pkg}/${CANARY}`)) problems.push(`${pkg}: vitest does not select ${CANARY}`);
+  for (const canary of CANARIES.filter(path => within(path, pkg))) {
+    const short = canary.slice(pkg.length + 1);
+    if (!files.has(canary)) problems.push(`${pkg}: vitest does not select ${short}`);
+  }
   return problems;
 }
 
-function vitestWiring(root, all, scratch, observe, problems) {
+function vitestWiring(root, all, sourceRows, scratch, observe, problems) {
   const owners = new Set();
   for (const path of all) {
     const base = posix.basename(path);
@@ -284,11 +257,28 @@ function vitestWiring(root, all, scratch, observe, problems) {
     }
   }
   for (const owner of owners) if (!VITEST_PACKAGES.includes(owner)) problems.push(`${owner}: vitest package outside the declared inventory`);
-  for (const pkg of VITEST_PACKAGES) {
-    if (!all.includes(`${pkg}/${CANARY}`)) problems.push(`${pkg}: missing ${CANARY}`);
-    else if (!/^await assertIsolationActive\(\);$/m.test(readFileSync(join(root, `${pkg}/${CANARY}`), "utf8"))) {
-      problems.push(`${pkg}: ${CANARY} does not assert the guard at module scope (await assertIsolationActive();)`);
+  for (const canary of CONTENT_CANARIES) {
+    const pkg = VITEST_PACKAGES.find(candidate => within(canary, candidate));
+    const short = canary.slice(pkg.length + 1);
+    const row = sourceRows.get(canary);
+    if (!all.includes(canary) || !row) {
+      problems.push(`${pkg}: missing ${short}`);
+      continue;
     }
+    if (!/^await assertIsolationActive\(\);$/m.test(row.text)) {
+      problems.push(`${canary}: does not assert the guard at module scope (await assertIsolationActive();)`);
+    }
+    canaryProblems(row, problems);
+  }
+  const helper = sourceRows.get(CANARY_HELPER);
+  if (!helper) problems.push(`${CANARY_HELPER}: missing`);
+  else for (const declaration of importDeclarations(helper.sourceFile)) {
+    const specifier = declaration.moduleSpecifier.text;
+    if (!BUILTIN_MODULES.has(specifier)) {
+      problems.push(`${CANARY_HELPER}: imports non-builtin module ${specifier}`);
+    }
+  }
+  for (const pkg of VITEST_PACKAGES) {
     problems.push(...observe(root, pkg, scratch));
   }
   setupOrder(root, all, problems);
@@ -297,12 +287,9 @@ function vitestWiring(root, all, scratch, observe, problems) {
 const SETUP_EXEMPT = ["scripts/test-isolation/check.mjs", "scripts/test/check-test-isolation.test.mjs"];
 const PACKAGE_CONFIG = /^(?:vitest|vite)\.config\.[cm]?[jt]s$/;
 
-// Order is not observable from the listing, so it is read from config text,
-// in the one form the checker understands: a single setupFiles list of
-// string literals in a declared package's own vitest or vite config, loading
-// the module first and, with more than one entry, run in sequence. Any other
-// mention of setupFiles (another file, a second list merged in, a spread, a
-// variable, a mutation) is reported, so a form it cannot read fails closed.
+// Order is not observable from the listing, so readable setupFiles declarations
+// in the declared package configs are checked as source text. Config code that
+// changes resolved values remains outside this declaration check.
 function setupOrder(root, all, problems) {
   for (const path of all) {
     if (!PERMIT_SOURCE.test(path) || DECLARATION.test(path) || SETUP_EXEMPT.includes(path)) continue;
@@ -357,10 +344,10 @@ export function checkTestIsolation(root, { observe = observeVitest } = {}) {
   const scratch = mkdtempSync(join(tmpdir(), "kaoiro-isolation-check-"));
   try {
     const entries = classifyNodeTrees(root, all, problems);
+    const sourceRows = testModuleImports(root, all, problems);
     if (entries.length > 0) runtimeProof(root, entries, scratch, problems);
     strayFiles(all, problems);
-    launchLines(root, all, entries, scratch, problems);
-    vitestWiring(root, all, scratch, observe, problems);
+    vitestWiring(root, all, sourceRows, scratch, observe, problems);
     permitCalls(root, all, problems);
     return { entries: entries.length, problems };
   } finally {
