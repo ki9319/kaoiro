@@ -302,6 +302,14 @@ test("Vitest helper type-only and default imports violate the named API contract
   assert.ok(defaultImport.includes(`${path}: Vitest helper may import only named vi/expect bindings`), defaultImport.join("\n"));
 });
 
+test("Vitest helpers may import supported APIs with or without aliases", () => {
+  const path = "wrapper/codex/test/fixtures/notice_tap.ts";
+  for (const source of [
+    'import { vi, expect } from "vitest";\nexport {};\n',
+    'import { vi as mock, expect as check } from "vitest";\nexport {};\n',
+  ]) assert.deepEqual(contentProblems(path, source), []);
+});
+
 test("a declared Vitest helper without a static Vitest import is a stale exception", () => {
   const path = "wrapper/codex/test/fixtures/notice_tap.ts";
   const problems = contentProblems(path, "export {};\n");
