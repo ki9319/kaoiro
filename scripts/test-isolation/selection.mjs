@@ -40,7 +40,7 @@ function trackedSources(root) {
 }
 
 function stringModule(node, ts) {
-  return node && ts.isStringLiteral(node) ? node.text : undefined;
+  return node && ts.isStringLiteralLike(node) ? node.text : undefined;
 }
 
 function inspectFile(path, text, ts) {

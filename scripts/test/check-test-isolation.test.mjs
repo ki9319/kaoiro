@@ -86,6 +86,12 @@ test("a package-local setup file that imports the module first is accepted", () 
   }), []);
 });
 
+test("the dashboard first-import hop must load the shared guard directly", () => {
+  const path = "dashboard/test/isolation.setup.ts";
+  const problems = problemsAfter(root => write(root, path, 'import "./other.ts";\n'));
+  assert.ok(problems.includes(`${path}: first import is not ${MODULE}`), problems.join("\n"));
+});
+
 function contentProblems(path, text, tracked = false) {
   const root = fixtureRepository();
   try {
@@ -161,6 +167,58 @@ const mutations = {
     /scripts\/test\/a\.test\.mjs: loaded without the isolation marker/],
 };
 
+test("a canary import outside Vitest and the canonical helper is rejected", () => {
+  const path = CANARIES.find(candidate => candidate.startsWith("runner/"));
+  const unexpected = contentProblems(path, canaryText(path) + 'import "./unexpected.mjs";\n');
+  assert.ok(unexpected.includes(`${path}: setup probe imports unexpected module ./unexpected.mjs`), unexpected.join("\n"));
+});
+
+test("a canary must statically import Vitest", () => {
+  const path = CANARIES.find(candidate => candidate.startsWith("runner/"));
+  const noVitest = contentProblems(path, canaryText(path).replace('import { it } from "vitest";\n', ""));
+  assert.ok(noVitest.includes(`${path}: setup probe must statically import vitest`), noVitest.join("\n"));
+});
+
+test("a canary must import the canonical helper", () => {
+  const path = CANARIES.find(candidate => candidate.startsWith("runner/"));
+  const noHelper = contentProblems(path, canaryText(path).replace(/import \{ assertIsolationActive \} from [^;]+;\n/, ""));
+  assert.ok(noHelper.includes(`${path}: setup probe must import ${CANARY_HELPER}`), noHelper.join("\n"));
+});
+
+test("Vitest imports outside a declared package are named errors", () => {
+  const path = "extras/consumer.ts";
+  const problems = contentProblems(path, importLine(path) + 'import { it } from "vitest";\n');
+  assert.ok(problems.includes(`${path}: imports vitest outside a declared package`), problems.join("\n"));
+});
+
+test("package script text does not infer Vitest ownership", () => {
+  const root = fixtureRepository();
+  try {
+    write(root, "extras/package.json", JSON.stringify({ scripts: { test: "vitest run" } }));
+    assert.deepEqual(checkTestIsolation(root, { observe: () => [] }).problems, []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Vitest helper type-only and default imports violate the named API contract", () => {
+  const path = "wrapper/codex/test/fixtures/notice_tap.ts";
+  const typeOnly = contentProblems(path, 'import type { vi } from "vitest";\nexport {};\n');
+  assert.ok(typeOnly.includes(`${path}: Vitest helper may import only named vi/expect bindings`), typeOnly.join("\n"));
+  const defaultImport = contentProblems(path, 'import Vitest from "vitest";\nexport {};\n');
+  assert.ok(defaultImport.includes(`${path}: Vitest helper may import only named vi/expect bindings`), defaultImport.join("\n"));
+});
+
+test("a declared Vitest helper without a static Vitest import is a stale exception", () => {
+  const path = "wrapper/codex/test/fixtures/notice_tap.ts";
+  const problems = contentProblems(path, "export {};\n");
+  assert.ok(problems.includes(`${path}: stale Vitest helper exception; no static vitest import remains`), problems.join("\n"));
+});
+
+test("parse failures in scanned sources are named errors", () => {
+  const path = "runner/test/parse-error.ts";
+  const problems = contentProblems(path, 'import { it } from "vitest";\nconst value = ;\n');
+  assert.ok(problems.some(problem => problem.startsWith(`${path}:2: TypeScript could not parse the source:`)), problems.join("\n"));
+});
+
 for (const [name, [mutate, expected]] of Object.entries(mutations)) {
   test("the checker is red when " + name, () => {
     const problems = problemsAfter(mutate);
@@ -221,6 +279,14 @@ for (const [form, source] of Object.entries(unsupportedAcquisitions)) {
     });
   }
 }
+
+test("template-literal module names in require and dynamic import are unsupported acquisitions", () => {
+  const path = "wrapper/core/test/template-acquisition.ts";
+  const source = importLine(path) + 'const required = require(`vitest`);\nconst loaded = await import(`node:test`);\n';
+  const problems = contentProblems(path, source);
+  assert.ok(problems.includes(`${path}: unsupported test-module acquisition (require("vitest")); use a static import`), problems.join("\n"));
+  assert.ok(problems.includes(`${path}: unsupported test-module acquisition (dynamic import("node:test")); use a static import`), problems.join("\n"));
+});
 
 test("unusual caller strings no longer affect the checker", () => {
   const root = fixtureRepository();

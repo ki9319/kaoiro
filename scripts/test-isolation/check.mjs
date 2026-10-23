@@ -18,6 +18,7 @@ export const VITEST_PACKAGES = CONTENT_PACKAGES;
 export const CANARY = "test/test-isolation.canary.test.ts";
 export const CANARIES = CONTENT_CANARIES;
 const CANARY_HELPER = "scripts/test/fixtures/test-isolation-canary.mjs";
+const DASHBOARD_SETUP = "dashboard/test/isolation.setup.ts";
 const TYPESCRIPT = createRequire(new URL("../../runner/package.json", import.meta.url))("typescript");
 const VITEST_HELPER_APIS = new Set(["vi", "expect"]);
 const CANARY_MODULES = new Set(["vitest", CANARY_HELPER]);
@@ -189,6 +190,18 @@ function testModuleImports(root, all, problems) {
   const byPath = new Map(rows.map(row => [row.path, row]));
   problems.push(...scanProblems);
 
+  const dashboardSetup = byPath.get(DASHBOARD_SETUP);
+  if (!all.includes(DASHBOARD_SETUP) || !dashboardSetup) {
+    problems.push(`${DASHBOARD_SETUP}: missing`);
+  } else {
+    const first = firstImport(dashboardSetup.text);
+    if (!first || resolvedImport(DASHBOARD_SETUP, first) !== MODULE) {
+      problems.push(`${DASHBOARD_SETUP}: first import is not ${MODULE}`);
+    } else if (firstStatementIsTypeOnly(dashboardSetup.sourceFile)) {
+      problems.push(`${DASHBOARD_SETUP}: first import is type-only; ${MODULE} must load at runtime`);
+    }
+  }
+
   for (const helper of VITEST_HELPERS) {
     const row = byPath.get(helper);
     if (!all.includes(helper) || !row) problems.push(`${helper}: declared Vitest helper is missing`);
@@ -252,9 +265,6 @@ function vitestWiring(root, all, sourceRows, scratch, observe, problems) {
     const base = posix.basename(path);
     const config = /^(?:vitest\.(?:config|workspace)|vite\.config)\.[cm]?[jt]s$/.test(base);
     if (config && (base.startsWith("vitest") || /\btest\s*:/.test(readFileSync(join(root, path), "utf8")))) owners.add(posix.dirname(path));
-    if (base === "package.json" && /\bvitest\b/.test(JSON.stringify(JSON.parse(readFileSync(join(root, path), "utf8")).scripts ?? {}))) {
-      owners.add(posix.dirname(path));
-    }
   }
   for (const owner of owners) if (!VITEST_PACKAGES.includes(owner)) problems.push(`${owner}: vitest package outside the declared inventory`);
   for (const canary of CONTENT_CANARIES) {
