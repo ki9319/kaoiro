@@ -108,6 +108,13 @@ test("a missing dashboard first-import hop is reported", () => {
   assert.ok(problems.includes(`${path}: missing`), problems.join("\n"));
 });
 
+test("a dashboard setup with no import is rejected", () => {
+  const path = "dashboard/test/isolation.setup.ts";
+  const problems = problemsAfter(root => write(root, path, "export {};\n"));
+  assert.ok(problems.includes(`${path}: first import is not ${MODULE}`), problems.join("\n"));
+  assert.equal(problems.some(problem => problem.includes("first import is type-only")), false, problems.join("\n"));
+});
+
 test("source selection ignores node_modules, declarations, non-source files, and deleted paths", () => {
   const root = fixtureRepository();
   const ignored = [
@@ -286,6 +293,50 @@ test("a Vitest config filename is owned without a test property", () => {
   assert.ok(problems.includes("extra: vitest package outside the declared inventory"), problems.join("\n"));
 });
 
+test("a node:test import is not treated as a Vitest package import", () => {
+  const path = "scripts/test/independent.test.mjs";
+  const source = importLine(path) + 'import { test } from "node:test";\ntest("fixture", () => {});\n';
+  assert.deepEqual(contentProblems(path, source), []);
+});
+
+test("the shared guard implementation may import node:test", () => {
+  const root = fixtureRepository();
+  try {
+    const source = readFileSync(join(root, MODULE), "utf8") + '\nimport { test } from "node:test";\n';
+    write(root, MODULE, source);
+    assert.deepEqual(checkTestIsolation(root, { observe: () => [] }).problems, []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a declared node helper may import node:test", () => {
+  const path = "scripts/test/mock-github-api.mjs";
+  const problems = problemsAfter(root => write(root, path, 'import { test } from "node:test";\n'));
+  assert.deepEqual(problems, []);
+});
+
+test("a node:test fixture may import node:test", () => {
+  const path = "scripts/test/fixtures/helper.mjs";
+  const problems = problemsAfter(root => write(root, path, 'import { test } from "node:test";\n'));
+  assert.deepEqual(problems, []);
+});
+
+test("the CommonJS guard facade is exempt from first-import enforcement", () => {
+  const root = fixtureRepository();
+  const entries = ["scripts/test/a.test.mjs", "server/deploy/test/b.test.mjs"];
+  try {
+    for (const path of entries) rmSync(join(root, path));
+    write(root, "scripts/test/fixtures/test-isolation.cjs", 'import { test } from "node:test";\n');
+    const { problems } = checkTestIsolation(root, { observe: () => [] });
+    assert.ok(problems.includes("node --test trees have no entries"), problems.join("\n"));
+    assert.equal(problems.some(problem => problem.startsWith("scripts/test/fixtures/test-isolation.cjs: first import is not")), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a missing shared guard is reported", () => {
+  const problems = problemsAfter(root => rmSync(join(root, MODULE)));
+  assert.ok(problems.includes(`${MODULE}: missing`), problems.join("\n"));
+});
+
 test("package script text does not infer Vitest ownership", () => {
   const root = fixtureRepository();
   try {
@@ -308,6 +359,24 @@ test("Vitest helpers may import supported APIs with or without aliases", () => {
     'import { vi, expect } from "vitest";\nexport {};\n',
     'import { vi as mock, expect as check } from "vitest";\nexport {};\n',
   ]) assert.deepEqual(contentProblems(path, source), []);
+});
+
+test("a Vitest helper namespace import violates the named API contract", () => {
+  const path = "wrapper/codex/test/fixtures/notice_tap.ts";
+  const problems = contentProblems(path, 'import * as vitest from "vitest";\nexport {};\n');
+  assert.ok(problems.includes(`${path}: Vitest helper may import only named vi/expect bindings`), problems.join("\n"));
+});
+
+test("a Vitest helper side-effect import violates the named API contract", () => {
+  const path = "wrapper/codex/test/fixtures/notice_tap.ts";
+  const problems = contentProblems(path, 'import "vitest";\nexport {};\n');
+  assert.ok(problems.includes(`${path}: Vitest helper may import only named vi/expect bindings`), problems.join("\n"));
+});
+
+test("a Vitest helper rejects named APIs outside vi and expect", () => {
+  const path = "wrapper/codex/test/fixtures/notice_tap.ts";
+  const problems = contentProblems(path, 'import { it } from "vitest";\nexport {};\n');
+  assert.ok(problems.includes(`${path}: Vitest helper imports unsupported API it`), problems.join("\n"));
 });
 
 test("a declared Vitest helper without a static Vitest import is a stale exception", () => {
@@ -389,6 +458,22 @@ test("template-literal module names in require and dynamic import are unsupporte
   const problems = contentProblems(path, source);
   assert.ok(problems.includes(`${path}: unsupported test-module acquisition (require("vitest")); use a static import`), problems.join("\n"));
   assert.ok(problems.includes(`${path}: unsupported test-module acquisition (dynamic import("node:test")); use a static import`), problems.join("\n"));
+});
+
+test("calls without a module argument do not break content selection", () => {
+  assert.deepEqual(contentProblems("runner/test/empty-acquisition.ts", "require();\nvoid import();\n"), []);
+});
+
+test("non-require calls with test-module names are not acquisitions", () => {
+  assert.deepEqual(contentProblems("runner/test/custom-acquisition.ts", 'const api = load("vitest");\n'), []);
+});
+
+test("non-test module acquisitions do not select a source file", () => {
+  const path = "runner/test/non-test-acquisition.ts";
+  const source = 'const required = require("node:path");\n' +
+    'const loaded = await import("node:fs");\n' +
+    'import pathApi = require("node:util");\n';
+  assert.deepEqual(contentProblems(path, source), []);
 });
 
 test("unusual caller strings no longer affect the checker", () => {
@@ -496,6 +581,28 @@ test("a package without Vitest installed cannot be observed and is reported", ()
   const root = fixtureRepository();
   try {
     assert.deepEqual(observeVitest(root, "runner", root), ["runner: cannot observe the suite: vitest is not installed (install dependencies first)"]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a successful Vitest listing that is not JSON is reported", () => {
+  const root = fixtureRepository();
+  const vitest = "runner/node_modules/.bin/vitest";
+  try {
+    write(root, vitest, "#!/usr/bin/env node\nconsole.log('not-json');\n");
+    chmodSync(join(root, vitest), 0o755);
+    const problems = observeVitest(root, "runner", root);
+    assert.ok(problems.some(problem => problem.startsWith("runner: vitest list exited 0")), problems.join("\n"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a failed Vitest listing is reported even when it prints JSON", () => {
+  const root = fixtureRepository();
+  const vitest = "runner/node_modules/.bin/vitest";
+  try {
+    write(root, vitest, "#!/usr/bin/env node\nconsole.log('[]');\nprocess.exit(1);\n");
+    chmodSync(join(root, vitest), 0o755);
+    const problems = observeVitest(root, "runner", root);
+    assert.ok(problems.some(problem => problem.startsWith("runner: vitest list exited 1")), problems.join("\n"));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
