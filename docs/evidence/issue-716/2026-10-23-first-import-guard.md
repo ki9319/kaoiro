@@ -5,7 +5,7 @@ Evidence for [issue #716](https://github.com/sakuraiyuta/kaoiro/issues/716), mea
 ## Source and inventory
 
 - Baseline: `dd9cdca180eb9c4f756a66cfdc93d269036c7ddd`.
-- Guard and checker implementation: `194b45141cd8fc774bcbdba0509f059f5ad72dd5`; dashboard TypeScript import correction: `707f367bdd60acdbe8920b96294b69506cce7288`; implementation-review corrections: `0bd56c4b8b7ff1df62dbb13a64410354e756bc01`.
+- Guard and checker implementation: `194b45141cd8fc774bcbdba0509f059f5ad72dd5`; dashboard TypeScript import correction: `707f367bdd60acdbe8920b96294b69506cce7288`; implementation-review corrections: `0bd56c4b8b7ff1df62dbb13a64410354e756bc01`; AST decision-test corrections: `dd57438a8b527019db812231176035915771a324`.
 - Fixed runtime image: `sha256:56cfd9fbe740e78f5d6d219772b6f5f7ba08424bf449f688b1a2597eebd469b8`.
 - The reproducible inventory found 497 source files, selected 485 by static test-API imports, retained 3 helpers and 9 guard-free canaries, and added the guard import to 439 files. Re-running the codemod made no further changes.
 - The review-corrected checker CLI reported `{"entries":33,"problems":0}`. Its test-isolation suite passed 132/132 tests, with no skipped or cancelled tests. All 104 dashboard imports use the extensionless local setup specifier; the checker accepts it and rejects the `.ts` spelling that failed dashboard type checking. The first-import check independently requires `dashboard/test/isolation.setup.ts` to load the shared guard directly.
@@ -20,6 +20,10 @@ The 132-test checker suite exercises the real Vitest observation path and checks
 On committed checker `0bd56c4b8b7ff1df62dbb13a64410354e756bc01`, the full mutation set ran without a worktree snapshot. All 17 individual mutations—N1–N9, P1–P5, the direct dashboard-hop check, removal of package-script ownership inference, and template-literal recognition—made their named self-test fail. The unmutated baseline passed 87/87. The mutation runner reported `restored: true`; checker and selector hashes returned to `5c83d8de5a6a6871ab5919abbe32eef562e6f42c22bbed348ee60e6513d4b34f` and `b306ddaf503f8d6aaf982f20893a9d59b4aa1d30c4f3571513019bf7e468634b`.
 
 The review-corrected candidate `0bd56c4b8b7ff1df62dbb13a64410354e756bc01` was checked with the genuine [issue #706](https://github.com/sakuraiyuta/kaoiro/issues/706) runner closure from `fda99b9c776f2cfac5a567fb554ddfc7f5dbca97`: its four package scripts, Vitest config, tier selector and declaration, tier manifest, and both tier tests. The actual checker CLI exited 0 with `{"entries":33,"problems":0}`; the transferred config retained its original setup and spread (SHA-256 `07a4d05878e72a53cea91d8f1df83d54f73a6424d496a9611f4030bfb4ed10a3`). The temporary overlay was restored byte-for-byte.
+
+## AST decision inventory for implementation review r3
+
+On the final checker and selector source commit `dd57438a8b527019db812231176035915771a324`, a TypeScript AST traversal enumerated every decision node in the changed functions: 102 nodes across 19 checker functions and 15 selector functions. Each node received one focused self-test mapping and one mutation. The exact-commit mutation run on the pinned image completed with 82 mutants making their mapped test red, 20 classified as equivalent with an explicit reason, and zero unclassified survivors. The checker and selector source hashes were `5c83d8de5a6a6871ab5919abbe32eef562e6f42c22bbed348ee60e6513d4b34f` and `b306ddaf503f8d6aaf982f20893a9d59b4aa1d30c4f3571513019bf7e468634b`. The inventory script's negative control increased its rows from zero to two after adding an `if` and an early return.
 
 ## Paired focused package measurements
 
