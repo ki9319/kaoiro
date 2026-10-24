@@ -181,7 +181,8 @@ completing, read [High-risk change release](high-risk-change-release.md) first;
 it adds a production-shape start check and a canary stage to this update.
 
 When preparing a release, write its release note under
-[docs/release/](../release/README.md).
+[docs/release/](../release/README.md) and land it before creating the release
+tag, so the tag includes it.
 
 **Server-side, this is a `--dry-run` preview plus two real invocations —
 prepare, then commit — not one call.** `update` deliberately splits the real

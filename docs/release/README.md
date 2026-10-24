@@ -30,19 +30,33 @@ old note to match later behaviour, and link to the current contract instead.
 ## Writing a note
 
 Whoever prepares a production release writes the note and lands it on
-develop before or together with the release.
+develop **before** creating the release tag, and creates the tag on the commit
+that contains the note. Checking out a release tag therefore includes the
+note that describes it.
 
-1. Collect the range with
-   `git log --reverse --format='%h %s' <previous tag>..<new tag>` and the
-   issues the commits reference.
-2. Group user-visible changes by area and give each its issue number. Leave
+1. Plan the tag name with `scripts/release-tag.mjs plan` on the code that will
+   be released, and name the note after it. The name depends on the UTC date:
+   if the date changes before the tag is created, plan again and rename the
+   note.
+2. Collect the range with
+   `git log --reverse --format='%h %s' <previous tag>..HEAD` and the issues
+   the commits reference.
+3. Group user-visible changes by area and give each its issue number. Leave
    out test-only and plan-only commits unless they change how the project is
    operated.
-3. List the operator steps the upgrade needs (configuration changes, new
+4. List the operator steps the upgrade needs (configuration changes, new
    runner capabilities, the release class from
    [High-risk change release](../operations/high-risk-change-release.md)).
-4. Add known issues as they are found after the release.
 5. Add a line to the index below, newest first.
+6. Land the note on develop, then plan the tag again on that commit and create
+   it there. The note names the tag and the previous release; it does not
+   record its own commit SHA, which is only known after the note is committed.
+   Read the commit from the tag.
+
+What is only known after the release (the deployment date and times, results
+on the operator's hosts) stays in the production run record outside the
+repository. Known issues found after the release are added to the note on
+develop later; the tagged copy keeps the note as released.
 
 The repository is public. Do not write host names, deployment layout,
 per-host results or other details of an operator's environment; keep
