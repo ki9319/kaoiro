@@ -2,7 +2,7 @@
 title: High-risk change release
 description: How to tell whether a change can stop the agents that would fix it, what to prepare first, the production-shape start gate for the runner, the canary stage, and recovery when every agent has stopped.
 status: accepted
-last_updated: 2026-10-17
+last_updated: 2026-10-25
 related: [deployment]
 ---
 
@@ -65,10 +65,7 @@ git diff --name-only <base>..<head> -- \
   'runner/deploy/**' \
   scripts/build-runner-tarball.sh scripts/build-release-manifest.mjs \
   scripts/build-identity.mjs scripts/with-build-identity.mjs \
-  scripts/landing-tags.mjs scripts/landing-workflow.mjs \
-  scripts/production-release-tags.mjs scripts/production-release-workflow.mjs \
-  scripts/release-automation-gate.mjs \
-  .github/workflows/develop-landing.yml .github/workflows/production-release.yml \
+  scripts/production-release-tags.mjs \
   runner/src/spawn.ts runner/src/supervisor.ts runner/src/cli.ts \
   runner/src/runner-cli.ts runner/src/config.ts runner/src/config-watcher.ts \
   runner/src/transport.ts runner/src/args.ts runner/src/delivery-settings.ts \

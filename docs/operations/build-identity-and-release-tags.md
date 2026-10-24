@@ -1,8 +1,8 @@
 ---
 title: Build identity and release tags
-description: Immutable landing identities, common production checkpoints and guarded release automation.
+description: Immutable build identities (landing pairs and release tags), common production checkpoints and release recovery.
 status: accepted
-last_updated: 2026-10-23
+last_updated: 2026-10-25
 related: [deployment, protocol]
 ---
 
@@ -15,16 +15,14 @@ new-format runner. Historical `YYYY.M.PATCH` artifacts remain readable.
 
 ## Identity
 
-A successful non-forced develop push tip receives one annotated
-`vYYYY.MM.DD.N` tag and a same-object `identity/landing/<full-SHA>` claim. N counts
-issuance order within the original workflow run's UTC day, not push order. Use
-the first push run's `created_at`, including on rerun or midnight-crossing
-reconciliation. No pre-activation backfill is permitted. The allocator must
-read the complete namespace, detect broken pairs/gaps and push both refs with
-`--atomic`; no nonatomic fallback, force or remote deletion is allowed.
+Production identity is an exact `v*` tag at HEAD. The reader accepts two forms:
+a historical landing pair (an annotated `vYYYY.MM.DD.N` tag plus a same-object
+`identity/landing/<full-SHA>` claim, issued for develop push tips by a retired
+workflow) and a schema-2 release tag (see [Release tags](#release-tags)).
+Landing pairs are immutable and stay readable; no new ones are issued.
 
 `scripts/build-identity.mjs` is the only producer of version and branch. It
-requires an exact HEAD tag/claim pair, not an ancestor. Tagged builds retain
+requires an exact HEAD tag (a landing pair or a release tag), not an ancestor. Tagged builds retain
 the annotation's landed branch even on main or a detached ref. Untagged builds
 use the build ref. Dirty, shallow, absent or inconsistent tag observations do
 not claim a tagged production build. Labels are `vYYYY.MM.DD.N / branch / hash`
@@ -34,13 +32,11 @@ for old readers and does not authorize a production release.
 
 ## Release tags
 
-The reader also accepts a schema-2 release tag
-([ADR-0069](../adr/0069-reduce-release-publication-and-native-state-protection.md)),
-created at release time on the released commit. Creating one is **not
-approved** until cutover C of the
-[issue 709 plan](../plans/issue-709-release-reduction.md) is complete
-(enrollment check, tag-creation measurement, landing allocation stopped);
-until then landing tags remain the only production version source.
+A schema-2 release tag
+([ADR-0069](../adr/0069-reduce-release-publication-and-native-state-protection.md))
+is created at release time on the released commit and is the production version
+source for commits released after the cutover recorded in the
+[release notes index](../release/README.md).
 
 A release tag is an annotated, unsigned `vYYYY.MM.DD.N` tag whose message is
 exactly one compact JSON object with exactly these keys:
@@ -69,9 +65,7 @@ node scripts/release-tag.mjs plan [--revision <40-hex>] [--day YYYY-MM-DD]
 `N` is one more than the highest number among origin's tags of that UTC day.
 A local-only tag of the same name on another commit makes the printed
 `git tag` fail rather than create a second tag; remove the stray local tag
-after checking it. Once schema-2 tags exist, do not re-enable landing
-allocation: the pinned allocator treats an unpaired `v*` tag as a broken
-inventory.
+after checking it.
 
 ## Coordinated production builds
 
@@ -454,258 +448,13 @@ bound to the fixed full enrollment inventory and the digest of the damaged row
 change to the damaged row invalidates the inspection and requires inspection
 again. All original facts remain in the evidence manifest.
 
-## Automation activation and trust
-
-All automation is disabled by default. At the common canary checkpoint, the
-operator dispatches the fixed `production-release.yml` workflow from their own
-`gh` credentials (operator decision, 2026-10-09). No Actions-write token is
-provisioned on a production host. Generate an execution card after recording
-completion:
-
-```sh
-node scripts/production-release-card.mjs card \
-  --attempt <attempt-directory> --repo <repository-root>
-```
-
-The card contains a fully resolved one-line command of this form, with the
-actual validated compact receipt instead of a placeholder:
-
-```sh
-node <reviewed-control-checkout>/scripts/landing-repair.mjs audit --repository sakuraiyuta/kaoiro && gh workflow run production-release.yml --repo sakuraiyuta/kaoiro --ref develop -f 'receipt=<validated-completion-JSON>'
-```
-
-The card's `command` first audits all post-activation landing events, then
-chains dispatch and mandatory verification. Pending landings or an unknown
-inventory stop before dispatch; a push-only Actions result is not a full audit. While the
-workflow is pending, verification is nonzero; repeat the card's `verification`
-after the workflow finishes. It must exit
-zero and write `tag-ack.json` only after both remote refs and the exact landing
-pair agree. A workflow result or dispatch HTTP success alone is insufficient.
-The receiver validates both original and rerun actors, the host allowlist and
-bounded receipt, and executes only fixed reviewed control code. Receipt input
-is data, never an executable ref.
-
-Run the completion-side reconciliation audit before and after each checkpoint:
-
-```sh
-node scripts/production-release-card.mjs audit \
-  --root <deploy-root>/production-releases --repo <repository-root>
-```
-
-Nonzero reports unfinished attempts, completed attempts with missing or
-unconfirmed remote tags, or invalid local completion records. This catches an omitted dispatch from the
-receipt side; GitHub alone cannot discover private receipts never submitted.
-It reads remote refs without creating them, and never transmits credentials.
-Repair by executing the validated card, then repeat read-back. Redeploying the
-same commit reuses its immutable tag and records the new local attempt.
-
-The actual repository default is develop. Landing the workflows there makes
-dispatch discoverable; a main bootstrap or promotion is unnecessary. Main
-promotion remains unrelated operator work. CLAUDE.md's description of main as
-the default branch differs from this observed state; this change does not edit
-that policy table or change the default branch.
-
-Changes to the privileged workflows, allocator and central tag reader require
-operator approval before landing and exact-commit V6/V9 evidence. Claims and
-reconciliation are detection, not protection against someone who already owns
-that code. The execution card fixes the literal reviewed control SHA and the
-original push run that begins allocation. Pre-activation pushes are ignored.
-
-Before enabling either workflow, require actual V9/V10 and append-only rules
-in a throwaway GitHub repository, then operator provisioning on the real repo:
-
-- V9: atomic ref pairs, race/read-back behavior, no update/deletion bypass,
-  two develop push runs and invariant original `created_at` on rerun.
-- V10: the selected S4 dispatch principal and fixed receiver, allowed actors and
-  hosts, and no host Contents-write privilege. Unauthorized input must refuse
-  before refs. A local bare repository is not GitHub evidence.
-- V6/FS: the exact candidate's distribution shape, production config/env/Node
-  and successful registration; keep the high-risk section-3 start gate.
-
-A personal-repository probe rejected GitHub Actions app ID 15368 as a creation
-bypass actor (HTTP 422). An actual Contents-write Actions bot also failed a
-RepositoryRole-write creation bypass (rule suites 4440870693 / 4440870712).
-The operator's write-capable creation decision is implemented with normal
-Contents-write authorization and no creation ruleset. The independent
-update/deletion prohibition has no bypass.
-Creation permission never grants permission to move or delete existing refs.
-Use these exact selectors in the immutable ruleset; a shallow `identity/**` selector
-must not stand in for the nested claim paths:
-
-| Namespace | Ruleset ref selector |
-|---|---|
-| Landing public tag | `refs/tags/v*` |
-| Landing claim | `refs/tags/identity/landing/*` |
-| Production claim | `refs/tags/identity/release/production/*` |
-| Production public tag | `refs/tags/release/*` |
-
-Require live update and deletion refusals for all four paths before activation.
-
-After landing and reviewing the exact execution card, the operator provisions
-the real repository's rule. The agent must not run this production command:
-
-```sh
-gh api --method POST repos/sakuraiyuta/kaoiro/rulesets --input - <<'JSON'
-{
-  "name": "Kaoiro immutable release identities",
-  "target": "tag",
-  "enforcement": "active",
-  "conditions": {"ref_name": {"exclude": [], "include": [
-    "refs/tags/v*", "refs/tags/identity/landing/*",
-    "refs/tags/identity/release/production/*", "refs/tags/release/*"
-  ]}},
-  "rules": [{"type": "update"}, {"type": "deletion"}],
-  "bypass_actors": []
-}
-JSON
-gh api repos/sakuraiyuta/kaoiro/rulesets
-```
-
-Review the existing rules first. A separate creation restriction on these paths
-would block the workflow bot; its removal is an operator operation. Never add a
-bypass to the immutable rule. Keep automation disabled until the post-install
-read-back confirms active enforcement and all four exact selectors.
-
-Hand-made public tags without their claims, or conflicting claim objects,
-degrade build identity and are reported by the full inventory audit. Workflow
-reconciliation audits that inventory even when all known runs already have
-claims. Reader checks and audits do not replace approval of trusted code.
-
-Only after these conditions and review, the operator sets on
-`sakuraiyuta/kaoiro`: `KAOIRO_IDENTITY_GATES_SHA` to the exact approved control
-SHA, `KAOIRO_IDENTITY_V9=true`, `KAOIRO_IDENTITY_V10=true`, the matching
-`KAOIRO_LANDING_CONTROL_SHA`/`KAOIRO_RELEASE_CONTROL_SHA`,
-`KAOIRO_LANDING_FIRST_RUN_ID` to the reviewed first push run,
-`KAOIRO_RELEASE_ACTORS` and `KAOIRO_RELEASE_HOST_IDS` to JSON allowlists, then
-`KAOIRO_LANDING_ENABLED=true` and `KAOIRO_RELEASE_ENABLED=true` last. Both job
-admission and control scripts compare these gates to actual checked-out HEAD.
-Do not enable with placeholders or with evidence from a different commit.
-
-## Repair
-
-Rerun or explicit reconciliation validates the preserved first push artifact
-and repairs missing post-activation tip allocations. Missing original-event
-artifacts, broken public/claim pairs, gaps or partial namespace inventories
-stop for operator repair; never guess a clock or silently assign a new version.
-Retries after an accepted-but-unobserved push read back existing immutable
-claims. New-source races retry boundedly with a fresh complete inventory.
-
-A failed common recorder leaves publication pending and the previous completed
-record untouched. Retain attempt directories and acknowledgments independently
-of ordinary deploy pruning. Release workflow retries/redeploys reuse the first
-tag; never force, delete, renumber or rewrite an immutable tag to recover.
-
-## Recorded repair of a historical landing
-
-The automatic Contents-write token can be denied when an original commit has
-workflow content different from the default branch. After a failed atomic
-push, only a valid unchanged remote inventory with no winning pair and the
-exact bounded GitHub App workflow-permission refusal yields
-`landing_operator_repair_required`. Other denials remain unknown errors.
-The job stops all writes after the first refusal, enumerates the remaining
-backlog read-only, and preserves `landing-result-<run-id>-<run-attempt>` plus
-the Actions summary. Only the actually denied identity is marked for operator
-repair. Neither a 403 nor a workflow difference alone proves this cause.
-
-Use `repair_command` from that result in a **clean checkout of its exact
-`repair_control_sha`**. The public job cannot know an operator's private local
-checkout path, so the command is relative to that identified checkout. The
-private production card resolves its audit to an absolute path. Both validate
-HEAD against repository control/gate variables before acting. For example:
-
-```sh
-node scripts/landing-repair.mjs repair --git-transport ssh \
-  --repository sakuraiyuta/kaoiro --original-run <original-run-id> \
-  --expected-target <full-original-target-SHA>
-```
-
-`repair`, `resume` and `record-existing` require the literal transport `ssh`.
-Any local `url.*.insteadOf` or `url.*.pushInsteadOf` setting refuses repair,
-including benign HTTPS-to-SSH rewrites. Use a reviewed clean checkout without
-these settings; do not bypass the check or redirect the repository path.
-
-See the [child environment contract](../reference/security/enforcement-boundaries.md#child-process-environments) for the closed child profiles and tool lookup.
-
-There is no HTTPS fallback and no added OAuth workflow scope. `gh` reads the
-original run/artifact, accepted control/boundary and current User login only.
-That login must have repository push authority and match the existing
-`KAOIRO_RELEASE_ACTORS` allow-list. A fixed `/usr/bin/ssh -T git@github.com`
-probe must name the same login, including letter case. Read only stderr up to
-4 KiB, accept only GitHub's anchored single successful-authentication sentence
-and exit 1, and apply the same actor grammar as the allow-list. Exit 0/255,
-signal, timeout, additional output or a deploy-key greeting refuses before
-push. Probe and push share the same immutable effective SSH identity/environment
-selection, strict host-key checking and no known-host update. A fixed quiet
-client log level suppresses local missing-default-key diagnostics; remote
-extra output still fails the exact greeting check. Only the fixed
-GitHub host/user/port and validated repository can be used. The push uses the
-existing paired allocator, original target and original UTC clock.
-Explicit Git environments must be prepared by that builder; copying them loses
-its profile and is refused. The CI allocation and both inventory audits share
-one prepared authenticated Git environment. Remote landing inventory and
-publication require an explicit prepared environment; omissions are refused.
-Operator audit explicitly selects the ordinary Git profile; manual repair uses
-the frozen SSH profile, and CI uses its authenticated profile. Local Git metadata
-operations may select the ordinary profile by default.
-The `gh` profile carries session-bus and runtime-directory values needed for
-Secret Service, as do several other profiles. It excludes `SSH_AUTH_SOCK`.
-
-Test gates preload the shared host-manager guard. Shells and the known launchers
-`env`, `setsid`, `nohup`, `timeout`, `nice`, `sudo` and `xargs` reject literal manager
-names and user-manager options in every argument, including shell positional
-arguments. This conservative fixture boundary also rejects benign mentions.
-Computed command names and commands inside separately executed shell scripts
-remain outside it. The updater's owned-manager check remains a separate boundary.
-Guard mutations use inert child-process sinks, never a host-manager invocation.
-
-The command writes local Git blobs and compare-and-create refs before and
-after publication:
-`refs/kaoiro/landing-repairs/<repository-id>/<original-run-id>/intent` and
-`.../receipt`. These are **per-checkout evidence**, never pushed or shared
-publication authority. Back up the named checkout's objects/refs together;
-only the remote same-object tag/claim arbitrates issuance.
-
-- No intent/pair: `repair` must record intent before any push.
-- Valid intent without a pair: inspect the original evidence and explicitly
-  use `resume` with the same required options. No replacement clock/target.
-  The same authenticated operator and reviewed control SHA must also match
-  the retained intent. A changed artifact cannot be substituted during resume.
-- Exact pair with missing receipt: `record-existing` verifies the pair and
-  writes a receipt without pushing. A post-push receipt failure prints this
-  recovery command and the actual remote object.
-- Exact pair and valid receipt: duplicate operation returns 73 with no ref move.
-  A pair for the same target with a different original run or clock is refused,
-  never reported as an exact duplicate. If another checkout wins during issuance,
-  the exact pair can be recorded locally and the result reports 73, not creation.
-- An established pair without local intent remains resolved remotely; do not
-  manufacture a repair journal in another checkout.
-- Malformed or contradictory local refs refuse. Preserve the exact named ref
-  and object, compare its blob with the original artifact and verified backup,
-  and use native Git recovery after confirming writers stopped. Never remove
-  locks automatically or invent original-event evidence.
-
-`audit --repository sakuraiyuta/kaoiro` re-reads remote pairs and the bounded
-UTC-window original-run inventory. It states its frozen observation range and
-returns nonzero for any pending identity, missing evidence or saturated range.
-Already established valid pairs do not require an expired original artifact.
-Repeated runs retain the established original tuple; no pre-activation backfill
-is performed. Re-run audit after repair before the card's dispatch.
-
-| Exit | Result | Meaning |
-|---|---|---|
-| 0 | success/resolved | Exact remote identity and applicable record checks pass; an audit also states its scope. |
-| 73 | `already_repaired` | Exact original identity already paired; no duplicate push or ref move. |
-| 77 | `landing_operator_repair_required` | Automatic allocator observed the pinned workflow-permission refusal with valid unchanged inventory and no winning pair. |
-| 78 | other refusal/error | Pending/unknown inventory, invalid original evidence, credential/transport failure or unrelated rejection; no success inferred. |
-
 ## Repairing a malformed reserved tag
 
 Do not move a valid `v*`, `identity/landing/*`, `release/*` or
-`identity/release/*` ref to another commit. Stop the allocator/receiver and
-preserve `git ls-remote --tags origin` plus the annotation of the exact bad ref.
-Compare it with the original workflow run, the landing claim and the private
-completion before deciding whether it is malformed. The gate refuses rather
-than silently skipping a reserved ref.
+`identity/release/*` ref to another commit. Preserve `git ls-remote --tags origin`
+plus the annotation of the exact bad ref, and compare it with the release note
+before deciding whether it is malformed. A production build refuses a malformed
+reserved ref rather than skipping it.
 
 If a malformed ref must be removed, the operator first exports the active tag
 ruleset and its bypass identities with `gh api repos/sakuraiyuta/kaoiro/rulesets`.
@@ -713,8 +462,8 @@ The operator temporarily excludes only the exact reviewed malformed ref from
 the immutable tag rule, without adding a principal-wide bypass, then deletes
 only that ref with
 `git push origin :refs/tags/<reviewed-malformed-ref>`. Restore and independently
-verify the original ruleset immediately, before re-enabling allocation or the
-receiver. Record the old object ID, evidence, approver and restored ruleset in
-the incident. A missing ruleset, ambiguous identity or a valid ref stops this
-procedure; agents do not change rulesets or delete public tags. Reconcile after
-repair, and issue a new build only if the full reserved inventory passes.
+verify the original ruleset immediately. Record the old object ID, evidence,
+approver and restored ruleset in the incident. A missing ruleset, ambiguous
+identity or a valid ref stops this procedure; agents do not change rulesets or
+delete public tags. Issue a new build only after the tags at HEAD read cleanly
+again.
