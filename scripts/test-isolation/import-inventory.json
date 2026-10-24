@@ -1,6 +1,6 @@
 {
   "typescript": "5.9.3",
-  "raw": 497,
+  "raw": 494,
   "problems": [],
   "rows": [
     {
@@ -1220,14 +1220,6 @@
       "firstImport": "../../scripts/test/fixtures/test-isolation.mjs"
     },
     {
-      "path": "runner/test/landingTags.test.ts",
-      "imports": [
-        "vitest"
-      ],
-      "exception": null,
-      "firstImport": "../../scripts/test/fixtures/test-isolation.mjs"
-    },
-    {
       "path": "runner/test/launchShimVerify.test.ts",
       "imports": [
         "vitest"
@@ -1453,22 +1445,6 @@
     },
     {
       "path": "scripts/test/github-issue-import.test.mjs",
-      "imports": [
-        "node:test"
-      ],
-      "exception": null,
-      "firstImport": "./fixtures/test-isolation.mjs"
-    },
-    {
-      "path": "scripts/test/landing-reconciliation.test.mjs",
-      "imports": [
-        "node:test"
-      ],
-      "exception": null,
-      "firstImport": "./fixtures/test-isolation.mjs"
-    },
-    {
-      "path": "scripts/test/landing-repair.test.mjs",
       "imports": [
         "node:test"
       ],
@@ -3981,4 +3957,3 @@
     }
   ]
 }
-

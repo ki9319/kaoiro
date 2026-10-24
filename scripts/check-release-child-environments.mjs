@@ -12,12 +12,11 @@ const LEGACY_CHILD_CALLS = {
 const nativeCalls = /\b(?:execFileSync|execFile|execSync|spawnSync|spawn|fork)\s*\(/g;
 
 export const CHILD_ENVIRONMENT_SCOPE = [
-  "scripts/build-identity.mjs", "scripts/landing-backlog.mjs", "scripts/landing-repair-records.mjs",
-  "scripts/landing-repair-ssh.mjs", "scripts/landing-tags.mjs", "scripts/landing-workflow.mjs",
-  "scripts/production-release-authority.mjs", "scripts/production-release-card.mjs",
+  "scripts/build-identity.mjs",
+  "scripts/production-release-authority.mjs",
   "scripts/production-release-launcher.mjs", "scripts/production-release-reconciliation.mjs",
   "scripts/production-release-tags.mjs", "scripts/production-release-unit.mjs",
-  "scripts/production-release-workflow.mjs", "scripts/production-runner-worker.mjs",
+  "scripts/production-runner-worker.mjs",
   "scripts/with-build-identity.mjs", "runner/deploy/release-gate.mjs",
   "server/deploy/kaoiro-release-reconciliation.mjs", "server/deploy/kaoiro-server-deploy.mjs",
 ];

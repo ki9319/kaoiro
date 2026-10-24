@@ -22,7 +22,6 @@
     "test/grok-catalog.test.ts",
     "test/grok_sessions.test.ts",
     "test/landingBuildIdentity.test.ts",
-    "test/landingTags.test.ts",
     "test/launchShimVerify.test.ts",
     "test/launchShimVersion.test.ts",
     "test/releaseBootstrap.test.ts",

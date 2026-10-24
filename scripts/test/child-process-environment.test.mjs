@@ -9,7 +9,6 @@ import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { CHILD_PATH, childEnvironment, execChildSync, spawnChildSync } from "../child-process-environment.mjs";
 import { checkReleaseChildEnvironments } from "../check-release-child-environments.mjs";
-import { operatorSshSnapshot } from "../landing-repair-ssh.mjs";
 import { releaseAuthorityRequest } from "../production-release-authority.mjs";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
@@ -55,12 +54,8 @@ test("build children retain the exact selected toolchain PATH without ambient cr
   }
 });
 
-test("existing authority and new repair SSH launches both exclude ambient secrets", () => {
-  const original = childProcess.spawnSync, originalExec = childProcess.execFileSync, captured = [];
-  childProcess.spawnSync = (file, args, options) => {
-    captured.push(options.env);
-    return { status: args[0] === "-G" ? 0 : 1, stdout: "hostname github.com\nuser git\nport 22\n", stderr: "Hi OperatorOne! You've successfully authenticated, but GitHub does not provide shell access.\n" };
-  };
+test("release authority launches exclude ambient secrets", () => {
+  const originalExec = childProcess.execFileSync, captured = [];
   childProcess.execFileSync = (file, args, options) => {
     captured.push(options.env);
     return JSON.stringify({ schema: 1, nonce: "fixture", root: "/fixture/history", recording_hostname: "fixture",
@@ -68,23 +63,22 @@ test("existing authority and new repair SSH launches both exclude ambient secret
   };
   syncBuiltinESMExports();
   try {
-    operatorSshSnapshot("OperatorOne", { env: hostile });
     const saved = { ...process.env };
     Object.assign(process.env, hostile);
     try {
       releaseAuthorityRequest({ status: "enrolled", descriptor: { transport: "local", root: "/fixture/history", recording_hostname: "fixture",
         tool_sha256: "a".repeat(64), node_path: process.execPath, exporter_path: "/fixture/exporter", node_major: Number(process.versions.node.split(".")[0]) } }, { nonce: "fixture" });
     } finally { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); }
-    assert.equal(captured.length, 3);
+    assert.equal(captured.length, 1);
     for (const env of captured) for (const key of Object.keys(hostile).filter(key => key !== "PATH")) assert.equal(env[key], undefined, key);
-  } finally { childProcess.spawnSync = original; childProcess.execFileSync = originalExec; syncBuiltinESMExports(); }
+  } finally { childProcess.execFileSync = originalExec; syncBuiltinESMExports(); }
 });
 
 test("coverage check rejects separate existing and new bypasses and its own disabled guard", () => {
   const green = checkReleaseChildEnvironments(root);
-  assert.equal(green.files, 18); assert.ok(green.calls >= 35);
+  assert.equal(green.files, 11); assert.ok(green.calls >= 23);
   assert.equal(green.unchanged_legacy_calls, 4);
-  for (const target of ["scripts/production-release-authority.mjs", "scripts/landing-repair-ssh.mjs",
+  for (const target of ["scripts/production-release-authority.mjs", "scripts/build-identity.mjs",
     "server/deploy/kaoiro-server-deploy.mjs"]) {
     assert.throws(() => checkReleaseChildEnvironments(root, (path, encoding) => {
       const source = readFileSync(path, encoding);
@@ -98,7 +92,7 @@ test("coverage pins import-only, spawn/fork, exact legacy count and both scope-p
     const source = readFileSync(path, encoding);
     return path.endsWith(target) ? transform(source) : source;
   });
-  for (const target of ["scripts/landing-repair-ssh.mjs", "server/deploy/kaoiro-server-deploy.mjs"]) {
+  for (const target of ["scripts/build-identity.mjs", "server/deploy/kaoiro-server-deploy.mjs"]) {
     for (const extra of ["import cp from 'node:child_process';", "spawn('unsafe', []);", "fork('unsafe');"]) {
       assert.throws(mutate(target, source => source + "\n" + extra), /unmanaged/);
     }

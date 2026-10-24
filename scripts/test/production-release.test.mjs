@@ -2,8 +2,6 @@ import "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-  chmodSync,
-  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -13,7 +11,6 @@ import {
 import { hostname, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { repairFixture } from "./fixtures/landing-repair-fixture.mjs";
 import { stageReleaseTools } from "../production-release-tools.mjs";
 import { readReleaseAuthority } from "../production-release-authority.mjs";
 import { releaseJsonBytes } from "../production-release-files.mjs";
@@ -30,20 +27,10 @@ import {
 } from "../production-release-record.mjs";
 import { publishProductionRelease } from "../production-release-tags.mjs";
 import {
-  originalPushRecord,
-  validateOriginalRecord,
-} from "../landing-workflow.mjs";
-import { validateDispatch } from "../production-release-workflow.mjs";
-import { validateAutomationGate } from "../release-automation-gate.mjs";
-import {
   acknowledgeReleaseAttempt,
   collectRunnerCompletion,
   collectServerCompletion,
 } from "../collect-production-release.mjs";
-import {
-  productionDispatchCard,
-  auditProductionCompletions,
-} from "../production-release-card.mjs";
 const scratch = [];
 afterEach(() => {
   for (const dir of scratch.splice(0))
@@ -114,25 +101,6 @@ function receipt(
   };
 }
 const options = { allowedHosts: ["runner-01"] };
-test("activation binds both mandatory gates to the actual reviewed control commit", () => {
-  const head = "a".repeat(40);
-  for (const kind of ["landing", "release"]) {
-    const prefix = kind === "landing" ? "KAOIRO_LANDING" : "KAOIRO_RELEASE";
-    const env = {
-      [`${prefix}_ENABLED`]: "true",
-      [`${prefix}_CONTROL_SHA`]: head,
-      KAOIRO_IDENTITY_GATES_SHA: head,
-      KAOIRO_IDENTITY_V9: "true",
-      KAOIRO_IDENTITY_V10: "true",
-    };
-    validateAutomationGate(env, head, kind);
-    for (const field of Object.keys(env))
-      assert.throws(() =>
-        validateAutomationGate({ ...env, [field]: "false" }, head, kind),
-      );
-    assert.throws(() => validateAutomationGate(env, "b".repeat(40), kind));
-  }
-});
 test("a bounded completion requires all independently completed legs", () => {
   const r = receipt();
   assert.equal(validateProductionReceipt(r, options), r);
@@ -289,88 +257,6 @@ function remote() {
   return { root, source, bare, revision, git };
 }
 
-test("the workflow audits all tags before returning an existing claim", () => {
-  const fixture = remote();
-  const bin = join(fixture.root, "bin");
-  mkdirSync(bin);
-  const run = {
-    id: 1,
-    run_number: 1,
-    workflow_id: 77,
-    event: "push",
-    head_branch: "develop",
-    head_sha: fixture.revision,
-    created_at: "2026-10-09T00:00:00Z",
-    repository: { id: BUILD_REPOSITORY_ID },
-    head_repository: { id: BUILD_REPOSITORY_ID },
-  };
-  const gh = join(bin, "gh");
-  writeFileSync(
-    gh,
-    `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(JSON.stringify(run))});\n`,
-  );
-  chmodSync(gh, 0o700);
-  const preload = join(fixture.root, "child-preload.mjs");
-  writeFileSync(preload, `import { installChildFixture } from ${JSON.stringify(new URL("./fixtures/child-process-fixture.mjs", import.meta.url).href)}; installChildFixture(${JSON.stringify(bin)});`);
-  const invoke = () =>
-    spawnSync(
-      process.execPath,
-      [
-        "--import", preload,
-        new URL("../landing-workflow.mjs", import.meta.url).pathname,
-        "allocate",
-      ],
-      {
-        cwd: fixture.source,
-        encoding: "utf8",
-        timeout: 30_000,
-        env: {
-          ...process.env,
-          PATH: `${bin}:${process.env.PATH}`,
-          GH_TOKEN: "local-fixture-only",
-          GITHUB_REPOSITORY: "sakuraiyuta/kaoiro",
-          GITHUB_REPOSITORY_ID: String(BUILD_REPOSITORY_ID),
-          GITHUB_RUN_ID: "1",
-          KAOIRO_LANDING_FIRST_RUN_ID: "1",
-          KAOIRO_LANDING_ENABLED: "true",
-          KAOIRO_LANDING_CONTROL_SHA: fixture.revision,
-          KAOIRO_IDENTITY_GATES_SHA: fixture.revision,
-          KAOIRO_IDENTITY_V9: "true",
-          KAOIRO_IDENTITY_V10: "true",
-        },
-      },
-    );
-  const refs = () =>
-    fixture.git(fixture.source, "ls-remote", "--tags", "origin");
-  const initial = refs();
-  const accepted = invoke();
-  assert.equal(accepted.status, 0, accepted.stderr);
-  assert.equal(refs(), initial);
-  const orphan = {
-    schema: 1,
-    kind: "landing",
-    repository_id: BUILD_REPOSITORY_ID,
-    revision: fixture.revision,
-    branch: "develop",
-    version: "2026.10.09.2",
-    original_run_id: 2,
-    created_at: "2026-10-09T00:00:01Z",
-  };
-  fixture.git(
-    fixture.source,
-    "tag",
-    "-a",
-    "v2026.10.09.2",
-    "-m",
-    JSON.stringify(orphan),
-  );
-  fixture.git(fixture.source, "push", "origin", "refs/tags/v2026.10.09.2");
-  const corrupted = refs();
-  const rejected = invoke();
-  assert.equal(rejected.status, 78, rejected.stderr);
-  assert.match(rejected.stderr, /claim|duplicate|inventory/);
-  assert.equal(refs(), corrupted);
-});
 test("a redeploy with a new UUID reuses the immutable first release tag", () => {
   const { source, revision, git } = remote();
   const first = receipt(revision);
@@ -468,78 +354,6 @@ test("an atomic release publication cannot leave only its public tag", () => {
     "",
   );
 });
-test("forced/deleted and untrusted origins never become original landing records", () => {
-  const run = {
-    id: 2,
-    created_at: "2026-10-09T23:59:59Z",
-    event: "push",
-    head_branch: "develop",
-    head_sha: "a".repeat(40),
-    repository: { id: BUILD_REPOSITORY_ID },
-    head_repository: { id: BUILD_REPOSITORY_ID },
-  };
-  const event = {
-    after: run.head_sha,
-    ref: "refs/heads/develop",
-    forced: false,
-    deleted: false,
-  };
-  const record = originalPushRecord(event, run, BUILD_REPOSITORY_ID);
-  assert.equal(
-    validateOriginalRecord(record, run, BUILD_REPOSITORY_ID),
-    record,
-  );
-  assert.equal(record.createdAt, "2026-10-09T23:59:59Z");
-  for (const field of ["forced", "deleted"])
-    assert.throws(() =>
-      validateOriginalRecord(
-        { ...record, [field]: true },
-        run,
-        BUILD_REPOSITORY_ID,
-      ),
-    );
-  assert.throws(() =>
-    originalPushRecord(
-      event,
-      { ...run, head_repository: { id: 1 } },
-      BUILD_REPOSITORY_ID,
-    ),
-  );
-});
-test("receiver authorization covers original and rerun actors", () => {
-  const run = {
-    event: "workflow_dispatch",
-    head_branch: "develop",
-    repository: { id: BUILD_REPOSITORY_ID },
-    head_repository: { id: BUILD_REPOSITORY_ID },
-    actor: { login: "operator" },
-    triggering_actor: { login: "operator" },
-  };
-  const options = {
-    repositoryId: BUILD_REPOSITORY_ID,
-    allowedActors: ["operator"],
-  };
-  validateDispatch(run, options);
-  for (const bad of [
-    { ...run, event: "pull_request" },
-    { ...run, head_branch: "main" },
-    { ...run, triggering_actor: { login: "other" } },
-  ])
-    assert.throws(() => validateDispatch(bad, options));
-  for (const allowedActors of [
-    "operator",
-    null,
-    {},
-    [],
-    ["operator", "operator"],
-    [1],
-  ]) {
-    assert.throws(
-      () => validateDispatch(run, { ...options, allowedActors }),
-      /allow-list/,
-    );
-  }
-});
 test("host authority requires an array instead of substring matching a string", () => {
   for (const allowedHosts of [
     "runner-01",
@@ -571,7 +385,7 @@ test("fake dependencies cannot record a production completion", async () => {
   );
 });
 
-test("the operator card binds the fixed workflow/ref and audit reports omitted publication", () => {
+test("collect ack through the launcher is refused until publication and while another attempt is unresolved", () => {
   const { root, source, revision } = remote();
   const identity = artifactBuildIdentity({
     revision,
@@ -598,10 +412,6 @@ test("the operator card binds the fixed workflow/ref and audit reports omitted p
     Date.parse(plan.created_at) + 10,
   );
   completeReleaseAttempt(dir, r, options);
-  assert.throws(
-    () => productionDispatchCard({ dir, cwd: source }),
-    /enrolled authority/,
-  );
   const server = join(source, "server"),
     tools = join(root, "tools");
   mkdirSync(server, { mode: 0o700 });
@@ -609,9 +419,9 @@ test("the operator card binds the fixed workflow/ref and audit reports omitted p
     resolve(dirname(fileURLToPath(import.meta.url)), "../.."),
     tools,
   );
-  const fixedNode = join(root, "pinned-node"), nodeCalls = join(root, "node-calls");
+  const fixedNode = join(root, "pinned-node");
   writeFileSync(fixedNode,
-    `#!/bin/sh\nprintf '%s\\n' "$1" >> '${nodeCalls}'\nexec '${process.execPath}' "$@"\n`,
+    `#!/bin/sh\nexec '${process.execPath}' "$@"\n`,
     { mode: 0o755 });
   const descriptor = {
     schema: 1,
@@ -649,55 +459,18 @@ test("the operator card binds the fixed workflow/ref and audit reports omitted p
     }),
     { mode: 0o600 },
   );
-  const card = productionDispatchCard({ dir, cwd: source });
-  assert.equal(card.repository, "sakuraiyuta/kaoiro");
-  assert.equal(card.workflow, "production-release.yml");
-  assert.equal(card.ref, "develop");
-  assert.ok(
-    card.command.startsWith(card.landing_audit + " && " + card.dispatch),
-  );
-  assert.ok(card.command.includes(revision));
-  assert.equal(card.receipt_sha256, receiptDigest(r));
-  assert.ok(
-    card.verification.includes(
-      " collect '" + manifest.sha256 + "' ack --server-dir",
-    ),
-  );
-  assert.ok(card.command.endsWith(card.verification));
-  assert.ok(card.landing_audit.startsWith(`'${fixedNode}' `));
-  const landingFixture = repairFixture();
-  try {
-    const pendingCard = productionDispatchCard({ dir, cwd: landingFixture.repo, repository: "fixture/repo" });
-    // The isolation guard refuses a bare gh in a shell string, so the
-    // fixture's gh is named by its path; the card's order is unchanged.
-    const fixtureGh = join(dirname(landingFixture.marker), "bin", "gh");
-    const command = pendingCard.command.replace(" && gh workflow run ", ` && ${fixtureGh} workflow run `);
-    assert.notEqual(command, pendingCard.command);
-    const pending = spawnSync("sh", ["-c", command], {
-      cwd: landingFixture.repo, env: landingFixture.env, encoding: "utf8", timeout: 30_000,
-    });
-    assert.equal(pending.status, 78, pending.stderr);
-    assert.equal(existsSync(landingFixture.marker), false, "pending landing must stop the generated card before dispatch");
-    assert.equal(readFileSync(nodeCalls, "utf8").trim(),
-      join(landingFixture.repo, "scripts/landing-repair.mjs"));
-  } finally { landingFixture.dispose(); }
-  const { status } = spawnSync("sh", ["-c", card.verification], {
+  const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
+  const launcher = quote(descriptor.exporter_path),
+    node = quote(fixedNode),
+    digest = quote(manifest.sha256);
+  const verification =
+    `${node} ${launcher} collect ${digest} ack --server-dir ${quote(server)} --attempt ${quote(resolve(dir))} --repo ${quote(source)}` +
+    ` && ${node} ${launcher} audit ${digest} --install-root ${quote(server)} --expected-authority-sha256 ${quote(authority.sha256)} --role card --repo ${quote(source)}`;
+  const { status } = spawnSync("sh", ["-c", verification], {
     encoding: "utf8",
   });
   assert.notEqual(status, 0);
-  assert.deepEqual(
-    auditProductionCompletions({ root: attempts, cwd: source }).map(
-      (row) => row.status,
-    ),
-    ["publication_missing"],
-  );
   publishProductionRelease({ cwd: source, receipt: r, ...options });
-  assert.deepEqual(
-    auditProductionCompletions({ root: attempts, cwd: source }).map(
-      (row) => row.status,
-    ),
-    ["published"],
-  );
   writeFileSync(
     join(dir, "server-audit.json"),
     releaseJsonBytes({
@@ -714,7 +487,7 @@ test("the operator card binds the fixed workflow/ref and audit reports omitted p
     }),
     { mode: 0o600 },
   );
-  const published = spawnSync("sh", ["-c", card.verification], {
+  const published = spawnSync("sh", ["-c", verification], {
     encoding: "utf8",
     timeout: 30_000,
   });
@@ -726,7 +499,7 @@ test("the operator card binds the fixed workflow/ref and audit reports omitted p
     ["runner-01"],
     { runtime_hosts: plan.runtime_hosts, authority: plan.authority },
   );
-  const unreported = spawnSync("sh", ["-c", card.verification], {
+  const unreported = spawnSync("sh", ["-c", verification], {
     encoding: "utf8",
     timeout: 30_000,
   });
@@ -737,29 +510,4 @@ test("the operator card binds the fixed workflow/ref and audit reports omitted p
   );
   assert.match(unreported.stderr, /unresolved attempts/);
   rmSync(y.dir, { recursive: true });
-
-  const anotherTarget = structuredClone(plan);
-  anotherTarget.identity.revision = "b".repeat(40);
-  anotherTarget.identity.landing.revision = "b".repeat(40);
-  writeFileSync(join(dir, "attempt.json"), JSON.stringify(anotherTarget));
-  assert.throws(
-    () => productionDispatchCard({ dir, cwd: source }),
-    /attempt differs/,
-  );
-  writeFileSync(join(dir, "attempt.json"), JSON.stringify(plan));
-  writeFileSync(
-    join(dir, "completion.json"),
-    JSON.stringify({
-      ...r,
-      attempt_uuid: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-    }),
-  );
-  assert.throws(
-    () => productionDispatchCard({ dir, cwd: source }),
-    /attempt differs/,
-  );
-  assert.equal(
-    auditProductionCompletions({ root: attempts, cwd: source })[0].status,
-    "invalid_completion",
-  );
 });
