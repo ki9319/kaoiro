@@ -77,7 +77,6 @@ function main() {
   process.stdout.write([
     `tag: ${plan.name}`,
     `record: ${JSON.stringify(plan.record)}`,
-    "Not approved before cutover C (docs/plans/issue-709-release-reduction.md section 3.7).",
     "Commands for the release operator:",
     ...plan.commands,
     "",

@@ -287,7 +287,11 @@ describe("release tag real entry", () => {
     const source = project();
     const head = git(["rev-parse", "HEAD"], source);
     const planned = releaseWithHelper(source);
-    expect(planned.stdout).toContain("Not approved before cutover C");
+    const lines = planned.stdout.split("\n");
+    const record = lines.findIndex((line) => line.startsWith("record: "));
+    expect(record).toBeGreaterThanOrEqual(0);
+    expect(lines.findIndex((line) => line.startsWith("git "))).toBeGreaterThan(record);
+    expect(planned.stdout).not.toContain("Not approved before cutover C");
     const result = build(source);
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
