@@ -214,7 +214,9 @@ for candidate sources and notice timing.
   *(measured; see [usage-rate-limits evidence](../../evidence/antigravity/usage-rate-limits.md))*:
   `agy -p /usage --output-format json` →
   `command.data.groups[].buckets[]` with bucket ids in `gemini-*` and `3p-*`
-  families and `window` values `5h` / `weekly`; `-p /model` → current model/effort;
+  families and `window` values `5h` / `weekly`; the wrapper reads only the exact
+  ids `gemini-5h`, `gemini-weekly`, `3p-5h` and `3p-weekly` and ignores
+  model-specific buckets such as `gemini-argon-wtu-weekly`; `-p /model` → current model/effort;
   `-p /permissions`, `-p /hooks`, `-p /help`.
 - **Wrapper rate-limit state:** a terminal `result.error` containing a
   `RESOURCE_EXHAUSTED` / HTTP 429 marker with a positive parsed reset delay

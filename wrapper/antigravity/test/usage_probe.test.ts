@@ -53,6 +53,23 @@ function usageOutput(): string {
   });
 }
 
+// Shape reported by agy 1.4.7: a third, model-specific group whose bucket id
+// also starts with `gemini-` and whose window is `weekly`. Values are synthetic.
+const ARGON_GROUP = {
+  name: "Gemini 4 Argon",
+  buckets: [
+    { id: "gemini-argon-wtu-weekly", window: "weekly", remaining_fraction: 0, reset_time: "2026-10-05T12:00:00Z" },
+  ],
+};
+
+function usageOutputWithArgon(position: "first" | "last"): string {
+  const payload = JSON.parse(usageOutput()) as { command: { data: { groups: unknown[] } } };
+  const groups = payload.command.data.groups;
+  if (position === "first") groups.unshift(ARGON_GROUP);
+  else groups.push(ARGON_GROUP);
+  return JSON.stringify(payload);
+}
+
 describe("Antigravity usage probe parsing and process settlement", () => {
   it("classifies only committed model families", () => {
     expect(modelToUsageFamily("gemini-3.8-flash-high")).toBe("gemini");
@@ -71,6 +88,25 @@ describe("Antigravity usage probe parsing and process settlement", () => {
     expect(thirdParty?.get("five_hour")?.utilization).toBeCloseTo(0.2, 12);
     expect(thirdParty?.get("five_hour")?.resets_at).toBe(1791028800);
     expect(thirdParty?.get("seven_day")).toEqual({ utilization: 0.5, resets_at: 1791115200 });
+  });
+
+  it.each(["first", "last"] as const)(
+    "ignores the model-specific Argon weekly bucket when it comes %s",
+    (position) => {
+      const output = usageOutputWithArgon(position);
+      expect(parseAgyUsageOutput(output, "gemini")).toEqual(new Map([
+        ["five_hour", { utilization: 0.4, resets_at: 1791028800 }],
+        ["seven_day", { utilization: 0.75, resets_at: 1791115200 }],
+      ]));
+      expect(parseAgyUsageOutput(output, "3p")?.get("seven_day")).toEqual({ utilization: 0.5, resets_at: 1791115200 });
+    },
+  );
+
+  it("treats a response with only the Argon bucket as an unusable sample", () => {
+    expect(parseAgyUsageOutput(JSON.stringify({
+      status: "SUCCESS",
+      command: { name: "usage", data: { groups: [ARGON_GROUP] } },
+    }), "gemini")).toBeNull();
   });
 
   it("treats malformed and unknown bucket output as an unusable sample", () => {

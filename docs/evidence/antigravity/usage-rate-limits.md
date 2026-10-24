@@ -2,7 +2,7 @@
 title: Antigravity CLI usage and rate limits evidence
 description: Measured `/usage` response fields and the current Antigravity rate-limit mapping contract.
 status: provisional
-last_updated: 2026-10-03
+last_updated: 2026-10-24
 related: [antigravity-adapter]
 ---
 
@@ -16,14 +16,24 @@ each with `buckets`. A bucket provides an `id`, `window`,
 `remaining_fraction`, and `reset_time`. The measured families are `gemini-*`
 and `3p-*`; windows are `5h` and `weekly`.
 
+On `agy` 1.4.7 (observed 2026-10-24, issue
+[#725](https://github.com/sakuraiyuta/kaoiro/issues/725)) the response gains a
+third group, "Gemini 4 Argon", with a bucket `gemini-argon-wtu-weekly` whose
+`window` is `weekly`. It shares the `gemini-` prefix and the window of the
+`gemini-weekly` bucket but has its own quota, so it must not be mapped to
+`seven_day`.
+
 No account-specific output is retained here. The raw live response contained
 quota values and is intentionally not checked in.
 
 ## Mapping contract
 
-- A committed `gemini-*` model selects `gemini-*` buckets; committed `claude-*`
-  and `gpt-*` models select `3p-*` buckets. Other models have no classified
-  family and do not expose an old probe snapshot.
+- A committed `gemini-*` model selects the buckets with the exact ids
+  `gemini-5h` and `gemini-weekly`; committed `claude-*` and `gpt-*` models
+  select `3p-5h` and `3p-weekly`. A bucket with any other id (such as
+  `gemini-argon-wtu-weekly`), or whose `window` differs from the one expected
+  for its id, is ignored. Other models have no classified family and do not
+  expose an old probe snapshot.
 - `5h` maps to `five_hour`; `weekly` maps to `seven_day`.
 - `utilization` is `clamp(1 - remaining_fraction, 0, 1)`.
 - `reset_time` maps to Unix-seconds `resets_at` only when

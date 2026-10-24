@@ -38,6 +38,20 @@ type RawUsagePayload = {
   command?: { name?: unknown; data?: { groups?: unknown } };
 };
 
+// Exact ids only: `agy` also reports model-specific buckets that share the
+// `gemini-` prefix and the `weekly` window (e.g. an Argon group), which would
+// overwrite the real weekly bucket of the same window.
+const KNOWN_USAGE_BUCKETS: Record<AgyUsageFamily, Record<string, { window: string; key: AgyUsageWindow }>> = {
+  gemini: {
+    "gemini-5h": { window: "5h", key: "five_hour" },
+    "gemini-weekly": { window: "weekly", key: "seven_day" },
+  },
+  "3p": {
+    "3p-5h": { window: "5h", key: "five_hour" },
+    "3p-weekly": { window: "weekly", key: "seven_day" },
+  },
+};
+
 /** Parses the measured `/usage` JSON and returns only the requested family. */
 export function parseAgyUsageOutput(
   stdout: string,
@@ -53,7 +67,7 @@ export function parseAgyUsageOutput(
 
   const groups = payload.command.data?.groups;
   if (!Array.isArray(groups)) return null;
-  const prefix = family === "gemini" ? "gemini-" : "3p-";
+  const known = KNOWN_USAGE_BUCKETS[family];
   const result = new Map<AgyUsageWindow, AgyUsageRateLimit>();
   for (const groupValue of groups) {
     if (typeof groupValue !== "object" || groupValue === null || Array.isArray(groupValue)) continue;
@@ -62,12 +76,9 @@ export function parseAgyUsageOutput(
     for (const bucketValue of buckets) {
       if (typeof bucketValue !== "object" || bucketValue === null || Array.isArray(bucketValue)) continue;
       const bucket = bucketValue as RawUsageBucket;
-      if (typeof bucket.id !== "string" || !bucket.id.startsWith(prefix)) continue;
-      const window: AgyUsageWindow | null = bucket.window === "5h"
-        ? "five_hour"
-        : bucket.window === "weekly"
-          ? "seven_day"
-          : null;
+      if (typeof bucket.id !== "string" || !Object.hasOwn(known, bucket.id)) continue;
+      const expected = known[bucket.id]!;
+      const window: AgyUsageWindow | null = bucket.window === expected.window ? expected.key : null;
       const remaining = typeof bucket.remaining_fraction === "number" && Number.isFinite(bucket.remaining_fraction)
         ? bucket.remaining_fraction
         : null;
