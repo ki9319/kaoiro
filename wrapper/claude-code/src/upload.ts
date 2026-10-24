@@ -15,7 +15,11 @@ import { OfficeParser } from "officeparser";
 import { PDFDocument } from "pdf-lib";
 import sharp from "sharp";
 import type { FileUploadRejectReason } from "@kaoiro/protocol";
-import { clipUtf8Head, utf8HeadEnd } from "@kaoiro/wrapper-core";
+import {
+  clipUtf16Head,
+  clipUtf8Head,
+  utf8HeadEnd,
+} from "@kaoiro/wrapper-core";
 
 /** Allowed image MIMEs (file-upload spec). Render path: image content
  *  block (renderImageBlock). */
@@ -609,7 +613,7 @@ export class DefaultOfficeTextExtractor implements OfficeTextExtractor {
       const text = ast.toText();
       if (text.length > OFFICE_MAX_OUTPUT_CHARS) {
         return (
-          text.slice(0, OFFICE_MAX_OUTPUT_CHARS) +
+          clipUtf16Head(text, OFFICE_MAX_OUTPUT_CHARS) +
           `\n\n[...truncated at ${OFFICE_MAX_OUTPUT_CHARS} chars]\n`
         );
       }
