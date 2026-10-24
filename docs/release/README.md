@@ -12,10 +12,12 @@ previous production release and this one, the operator steps the upgrade
 needs, and the issues found during or right after it.
 
 Until cutover C of the [issue 709 plan](../plans/issue-709-release-reduction.md),
-a version tag is created on every develop landing (see
-[Build identity and release tags](../operations/build-identity-and-release-tags.md)),
-so most tags never reach production on their own. After it, the release
-operator creates one release tag per production release with
+a version tag was created on every develop landing, so most of those tags never
+reached production on their own. Cutover C completed on 2026-10-24: landings no
+longer create tags (C3), and [v2026.10.24.1](v2026.10.24.1.md) at
+`d0c43ed3c54016df8f5cb520aa6c286890922c16` is the first release tag (C4). Tags
+before it mean "landed"; tags from it on mean "released". The release operator
+creates one release tag per production release with
 `scripts/release-tag.mjs plan`
 ([Release tags](../operations/build-identity-and-release-tags.md#release-tags)). A release note covers the
 whole range of tags that went to production together and is named after the
@@ -50,6 +52,7 @@ production run records outside the repository.
 
 | Release | Date | Previous | Highlights |
 |---|---|---|---|
+| [v2026.10.24.1](v2026.10.24.1.md) | 2026-10-24 | v2026.10.22.11 | First schema-2 release tag, Antigravity weekly rate limit and result size, surrogate-safe text cuts, directory names in the remaining dashboard places |
 | [v2026.10.22.11](v2026.10.22.11.md) | 2026-10-23 | v2026.10.21.1 | Deploy CLI binds the Compose override to its transactions, build identity reads schema-2 release tags |
 | [v2026.10.21.1](v2026.10.21.1.md) | 2026-10-22 | v2026.10.20.5 | Claude Code peers on Agent SDK 0.3.306 (Claude Code 2.1.306) |
 | [v2026.10.20.5](v2026.10.20.5.md) | 2026-10-20 | v2026.10.18.1 | Sends from turns started by Monitor notifications, Codex operator steer by delivery policy, a recovery command for every server deploy phase |

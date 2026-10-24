@@ -98,3 +98,13 @@ This ADR stays `proposed` until the design review passes and the operator
 records the decision points of plan section 8. Using schema-2 tags and
 stopping allocation additionally wait for the enrollment check (U2) and the
 tag-creation measurement (U6) of plan section 9.
+
+## Cutover record
+
+Cutover C of the plan completed on 2026-10-24. C1 (U2) and C2 (U6) passed on
+2026-10-22; C3 stopped tag allocation on develop landings; C4 created the first
+schema-2 release tag, `v2026.10.24.1`, on
+`d0c43ed3c54016df8f5cb520aa6c286890922c16`. `v*` tags before that commit mean
+"landed" and tags from it on mean "released"
+([release notes](../release/README.md)). This record does not change the
+ADR's status, which still follows the gates above.
