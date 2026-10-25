@@ -54,6 +54,28 @@ describe("production frozen identity consumers", () => {
     expect(readFileSync(join(repo, "moved-source"), "utf8")).toBe("x");
     expect(result.status).toBe(78); expect(result.stderr).toContain("source revision or dirty state changed");
   });
+  it("names an unbuildable child environment instead of a source mismatch", () => {
+    const { repo } = project();
+    const preload = join(repo, ".git/no-home.cjs");
+    // Same shape as the measured Node failure when HOME is unset and the user has no passwd entry.
+    writeFileSync(preload, `const os = require("node:os");
+const info = { errno: -2, code: "ENOENT", message: "no such file or directory", syscall: "uv_os_homedir" };
+const error = Object.assign(new Error("A system error occurred: uv_os_homedir returned ENOENT (no such file or directory)"),
+  { name: "SystemError", code: "ERR_SYSTEM_ERROR", errno: -2, syscall: "uv_os_homedir", info });
+os.homedir = () => { throw error; };
+require("node:module").syncBuiltinESMExports();
+`);
+    const run = (...flags: string[]) => spawnSync(process.execPath, [...flags, join(repo, "scripts/with-build-identity.mjs"), "--", process.execPath, "-e", ""],
+      { cwd: repo, encoding: "utf8", env: { PATH: process.env.PATH, HOME: repo } });
+    const control = run();
+    expect(control.stderr).toBe(""); expect(control.status).toBe(0);
+    const result = run("--require", preload);
+    expect(result.status).toBe(78);
+    expect(result.stderr).toContain("with-build-identity: child environment unavailable: ");
+    expect(result.stderr).toContain("uv_os_homedir returned ENOENT");
+    expect(result.stderr).toContain("set HOME");
+    expect(result.stderr).not.toContain("source revision or dirty state changed");
+  });
   it("finds pnpm and its nested tool only through the supplied toolchain PATH", () => {
     const { repo, git } = project();
     const bin = join(repo, ".git/toolchain");

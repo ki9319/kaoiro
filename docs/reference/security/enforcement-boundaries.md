@@ -268,3 +268,13 @@ Actions Git receives an explicitly constructed authorization header. User-manage
 connection keys, runner settings and build identity fields are carried only by
 their corresponding profiles. Privileged release commands require tools in
 their fixed search path or at the explicitly configured absolute path.
+
+`with-build-identity.mjs` builds the Git child environment once before it
+reads the source identity, and reports a failure (for example no resolvable
+home directory) as `child environment unavailable`. That preflight result is
+discarded; each child builds its own environment. Errors thrown while building
+a child environment must not contain environment values, because the
+coordinator's stderr can reach public CI logs. Only an unbuildable environment
+is named this way: a missing `git` or a damaged repository still reads as
+`source revision or dirty state changed`, and `computeBuildIdentity` still
+degrades to an `unknown` identity for dev builds.

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnChildSync } from "./child-process-environment.mjs";
+import { childEnvironment, spawnChildSync } from "./child-process-environment.mjs";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,6 +15,11 @@ if (args[0] === "--") args.shift();
 const scratch = mkdtempSync(join(tmpdir(), "kaoiro-build-identity-"));
 try {
   if (!args.length) throw new Error("a build command is required");
+  // git failures below read as "source changed", so name an unbuildable child
+  // environment first. The result is discarded: each child builds its own.
+  try { childEnvironment("git", process.env); } catch (error) {
+    throw new Error(`child environment unavailable: ${error.message} (set HOME, or run as a user that has a passwd entry)`);
+  }
   const identity = requireTagged ? artifactBuildIdentity(requireTaggedIdentity(root)) : consumeBuildIdentity(root);
   assertSourceIdentity(root, identity);
   const file = join(scratch, "identity.json");
