@@ -383,7 +383,7 @@ describe.skipIf(process.platform !== "linux")("development activation option", {
     const native=readFileSync(join(h.root,"releases",h.B,"node_modules/@openai/codex/vendor/fixture/bin/codex"),"utf8");
     const preload=join(h.dir,"fault-preload.mjs");writeFileSync(preload,readFileSync(preload,"utf8")+'\nglobalThis.fetch=async()=>new Response(JSON.stringify({status:"ok",build_identity_formats:["legacy-calver","landing-calver-v1"]}),{status:200});\n');
     h.replace(h.B,{"dist/build-info.json":JSON.stringify({...JSON.parse(readFileSync(join(h.root,"releases",h.B,"dist/build-info.json"),"utf8")),version:"untagged",branch:"fixture"}),"node_modules/@openai/codex/vendor/fixture/bin/codex":native});
-    if(mode==="forward"){const rejected=h.forward();expect(rejected.status).not.toBe(0);expect(h.callLog()).toBe("");expect(h.records()).toHaveLength(0);ok(h.forward("allowed",["--allow-dirty"]));}
+    if(mode==="forward"){const rejected=h.forward();expect(rejected.status).not.toBe(0);expect(h.callLog()).toBe("");expect(existsSync(join(h.root,"codex-state/v2/records"))?h.records():[]).toHaveLength(0);ok(h.forward("allowed",["--allow-dirty"]));}
     else{await interrupted([...forwardArgs(),"--allow-dirty"],{phase:"start-intent",when:"after"});const uuid=tx().uuid;expect(h.resume(uuid).status).not.toBe(0);ok(h.resume(uuid,"resume",["--allow-dirty"]));}
     expect(h.records().filter(r=>r.phase==="completed")).toHaveLength(1);expect(h.current()).toBe(h.B);
   });
@@ -395,7 +395,7 @@ describe.skipIf(process.platform !== "linux")("development activation option", {
     expect(rejected.status).toBe(78);
     expect(rejected.stderr).toContain("Target build format refused before stopping the runner");
     expect(rejected.stderr).toContain("completed landing or release tag");
-    expect(h.records()).toHaveLength(0);
+    expect(existsSync(join(h.root,"codex-state/v2/records"))?h.records():[]).toHaveLength(0);
     expect(h.callLog()).toBe("");
     ok(h.forward("allowed",["--allow-dirty"]));
     expect(h.current()).toBe(h.B);
