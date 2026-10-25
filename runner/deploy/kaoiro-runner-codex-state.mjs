@@ -252,12 +252,18 @@ async function admitRestore(root, tx, home, service, tool) {
   tx.asides.push({ attempt, aside }); tx.phase = "restore-prepared"; tx.tool = tool;
   await publish(root, tx);
 }
-async function prepareRollback(root, path, home, service, tool) {
-  requireUpdate(root);
+// Read-only selection shared by restore-target and prepareRollback: never calls
+// admitRestore, publish, withLock, systemctl, or exclude; restore-target prints
+// record.source.id directly rather than going through the target action.
+function selectRetainedSnapshot(root, path) {
   const choices = records(root).filter( // codex-recovery-site: G7.restore
     tx => tx.snapshot.path === path && tx.snapshot.status === "retained");
   must(choices.length === 1, "No unique retained snapshot matches selection");
-  const tx = selected(root, choices[0].uuid);
+  return selected(root, choices[0].uuid);
+}
+async function prepareRollback(root, path, home, service, tool) {
+  requireUpdate(root);
+  const tx = selectRetainedSnapshot(root, path);
   await admitRestore(root, tx, home, service, tool); return tx.uuid;
 }
 async function stageRestore(root, tx) {
@@ -477,7 +483,7 @@ function protectedReleases(root) {
   }
   return [...ids].join("\n");
 }
-const ACTIONS = ["guard", "preflight", "prepare", "prepare-restore", "run", "resume", "recover", "prune", "promote", "inspect", "inventory", "summary", "target", "protected", "classify", "next"];
+const ACTIONS = ["guard", "preflight", "prepare", "prepare-restore", "restore-target", "run", "resume", "recover", "prune", "promote", "inspect", "inventory", "summary", "target", "protected", "classify", "next"];
 const RUNS = ["run", "resume", "recover"];
 const context = root => ({ root, deploy, interpreter: process.execPath });
 // Read-only: takes no lock and writes nothing. Records are published by
@@ -509,6 +515,7 @@ async function main(argv) {
   if (action === "guard" || action === "preflight") await guard(root, args[0], args[1] || undefined, action === "preflight");
   else if (action === "prepare") console.log(await prepare(root, ...args));
   else if (action === "prepare-restore") console.log(await prepareRollback(root, ...args));
+  else if (action === "restore-target") console.log(selectRetainedSnapshot(root, args[0]).source.id);
   else if (action === "run") await run(root, args[0], args[1], args[2]);
   else if (action === "resume" || action === "recover") await withLock(root, ".lock.update", () => run(root, args[0], action, args[1]));
   else if (action === "prune") await withLock(root, ".lock.update", () => prune(root, args[0]));
@@ -535,7 +542,7 @@ function report(error, [action, rootArg, ...args]) {
   try { root = realpathSync(rootArg); } catch { /* no record to name */ }
   const candidates = [message.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/)?.[0], ["guard", "preflight"].includes(action) ? args[1] : args[0]];
   // A restore selects its record by snapshot path.
-  if (action === "prepare-restore" && root) try { const named = records(root).filter(tx => tx.snapshot.path === args[0]); if (named.length === 1) candidates.splice(1, 0, named[0].uuid); } catch { /* records unreadable */ }
+  if (["prepare-restore", "restore-target"].includes(action) && root) try { const named = records(root).filter(tx => tx.snapshot.path === args[0]); if (named.length === 1) candidates.splice(1, 0, named[0].uuid); } catch { /* records unreadable */ }
   for (const uuid of candidates) {
     if (tx || !root || !UUID.test(uuid || "")) continue;
     try { tx = selected(root, uuid); } catch { /* not a record of this root */ }

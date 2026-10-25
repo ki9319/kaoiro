@@ -383,9 +383,75 @@ describe.skipIf(process.platform !== "linux")("development activation option", {
     const native=readFileSync(join(h.root,"releases",h.B,"node_modules/@openai/codex/vendor/fixture/bin/codex"),"utf8");
     const preload=join(h.dir,"fault-preload.mjs");writeFileSync(preload,readFileSync(preload,"utf8")+'\nglobalThis.fetch=async()=>new Response(JSON.stringify({status:"ok",build_identity_formats:["legacy-calver","landing-calver-v1"]}),{status:200});\n');
     h.replace(h.B,{"dist/build-info.json":JSON.stringify({...JSON.parse(readFileSync(join(h.root,"releases",h.B,"dist/build-info.json"),"utf8")),version:"untagged",branch:"fixture"}),"node_modules/@openai/codex/vendor/fixture/bin/codex":native});
-    if(mode==="forward"){const rejected=h.forward();expect(rejected.status).not.toBe(0);expect(h.callLog()).toBe("");ok(h.resume(tx().uuid,"recover"));ok(h.forward("allowed",["--allow-dirty"]));}
+    if(mode==="forward"){const rejected=h.forward();expect(rejected.status).not.toBe(0);expect(h.callLog()).toBe("");expect(h.records()).toHaveLength(0);ok(h.forward("allowed",["--allow-dirty"]));}
     else{await interrupted([...forwardArgs(),"--allow-dirty"],{phase:"start-intent",when:"after"});const uuid=tx().uuid;expect(h.resume(uuid).status).not.toBe(0);ok(h.resume(uuid,"resume",["--allow-dirty"]));}
     expect(h.records().filter(r=>r.phase==="completed")).toHaveLength(1);expect(h.current()).toBe(h.B);
+  });
+  it("refuses an untagged forward build format before writing a record or stopping the runner",()=>{
+    const native=readFileSync(join(h.root,"releases",h.B,"node_modules/@openai/codex/vendor/fixture/bin/codex"),"utf8");
+    const preload=join(h.dir,"fault-preload.mjs");writeFileSync(preload,readFileSync(preload,"utf8")+"\nglobalThis.fetch=async()=>new Response(JSON.stringify({status:\"ok\",build_identity_formats:[\"legacy-calver\",\"landing-calver-v1\"]}),{status:200});\n");
+    h.replace(h.B,{"dist/build-info.json":JSON.stringify({...JSON.parse(readFileSync(join(h.root,"releases",h.B,"dist/build-info.json"),"utf8")),version:"untagged",branch:"fixture"}),"node_modules/@openai/codex/vendor/fixture/bin/codex":native});
+    const rejected=h.forward();
+    expect(rejected.status).toBe(78);
+    expect(rejected.stderr).toContain("Target build format refused before stopping the runner");
+    expect(rejected.stderr).toContain("completed landing or release tag");
+    expect(h.records()).toHaveLength(0);
+    expect(h.callLog()).toBe("");
+    ok(h.forward("allowed",["--allow-dirty"]));
+    expect(h.current()).toBe(h.B);
+  });
+  it("refuses an untagged restore build format before mutating the retained record or stopping the runner",()=>{
+    const nativeA=readFileSync(join(h.root,"releases",h.A,"node_modules/@openai/codex/vendor/fixture/bin/codex"),"utf8");
+    const preload=join(h.dir,"fault-preload.mjs");writeFileSync(preload,readFileSync(preload,"utf8")+"\nglobalThis.fetch=async()=>new Response(JSON.stringify({status:\"ok\",build_identity_formats:[\"legacy-calver\",\"landing-calver-v1\"]}),{status:200});\n");
+    h.replace(h.A,{"dist/build-info.json":JSON.stringify({...JSON.parse(readFileSync(join(h.root,"releases",h.A,"dist/build-info.json"),"utf8")),version:"untagged",branch:"fixture"}),"node_modules/@openai/codex/vendor/fixture/bin/codex":nativeA});
+    ok(h.forward());
+    const record=tx(),beforeBytes=readFileSync(h.recordPath(record.uuid)),beforeLog=h.callLog();
+    const rejected=h.restore();
+    expect(rejected.status).toBe(78);
+    expect(rejected.stderr).toContain("Target build format refused before stopping the runner");
+    expect(rejected.stderr).toContain("completed landing or release tag");
+    expect(readFileSync(h.recordPath(record.uuid))).toEqual(beforeBytes);
+    expect(h.callLog()).toBe(beforeLog);
+  });
+  it("prints the retained source id from restore-target without writing records or locks",()=>{
+    ok(h.forward());
+    const record=tx(),beforeBytes=readFileSync(h.recordPath(record.uuid)),beforeFiles=readdirSync(join(h.root,"codex-state/v2/records")).sort();
+    const r=h.state("restore-target",h.root,record.snapshot.path);
+    ok(r);
+    expect(r.stdout.trim()).toBe(h.A);
+    expect(r.stdout.trim()).not.toBe(h.B);
+    expect(readFileSync(h.recordPath(record.uuid))).toEqual(beforeBytes);
+    expect(readdirSync(join(h.root,"codex-state/v2/records")).sort()).toEqual(beforeFiles);
+    expect(existsSync(join(h.root,".lock.update"))).toBe(false);
+    expect(existsSync(join(h.root,".lock.links"))).toBe(false);
+  });
+  it("renders matching refusal messages and hints for restore-target and prepare-restore on non-retained, unknown, and ambiguous paths",()=>{
+    ok(h.forward());
+    const record=tx();
+    record.snapshot.status="retired";rewrite(record);
+    mkdirSync(join(h.root,".lock.update"),{mode:0o700});
+    const retiredTarget=h.state("restore-target",h.root,record.snapshot.path);
+    const retiredPrepare=h.state("prepare-restore",h.root,record.snapshot.path,h.home,"kogane468-test",h.B);
+    expect(retiredTarget.status).not.toBe(0);
+    expect(retiredTarget.stderr).toContain("No unique retained snapshot matches selection");
+    expect(retiredTarget.stderr).toContain("next (rollback):");
+    expect(retiredTarget.stderr).toBe(retiredPrepare.stderr);
+
+    const unknownPath=join(h.dir,"missing-backup");
+    const unknownTarget=h.state("restore-target",h.root,unknownPath);
+    const unknownPrepare=h.state("prepare-restore",h.root,unknownPath,h.home,"kogane468-test",h.B);
+    expect(unknownTarget.status).not.toBe(0);
+    expect(unknownTarget.stderr).toContain("No unique retained snapshot matches selection");
+    expect(unknownTarget.stderr).toBe(unknownPrepare.stderr);
+
+    record.snapshot.status="retained";rewrite(record);
+    const duplicate={...record,uuid:"00000000-0000-4000-8000-000000000099"};
+    rewrite(duplicate);
+    const ambiguousTarget=h.state("restore-target",h.root,record.snapshot.path);
+    const ambiguousPrepare=h.state("prepare-restore",h.root,record.snapshot.path,h.home,"kogane468-test",h.B);
+    expect(ambiguousTarget.status).not.toBe(0);
+    expect(ambiguousTarget.stderr).toContain("No unique retained snapshot matches selection");
+    expect(ambiguousTarget.stderr).toBe(ambiguousPrepare.stderr);
   });
 });
 

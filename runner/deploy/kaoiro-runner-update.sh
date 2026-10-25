@@ -380,20 +380,22 @@ if [ -n "$codex_home" ]; then
   printf '%s: WARNING: external Codex-home writers are not inspected; snapshot recovery may fail and require fresh setup (docs/operations/codex-home.md)\n' "$prog" >&2
   tool_id=$(cat "$deploy_dir/../VERSION")
   if [ -n "$codex_restore" ]; then
-    codex_transaction=$(kaoiro_codex_state prepare-restore "$root" "$codex_restore" "$codex_home" "$service" "$tool_id" "$$") ||
+    id=$(kaoiro_codex_state restore-target "$root" "$codex_restore") ||
+      kaoiro_die "Codex restore preflight refused before stop; see docs/operations/runner-update-and-rollback.md#codex-state-backup" 78
+    kaoiro_preflight_build_format "$root/releases/$id" "$allow_dirty" ||
+      kaoiro_die "Target build format refused before stopping the runner" 78
+    codex_transaction=$(kaoiro_codex_state prepare-restore "$root" "$codex_restore" "$codex_home" "$service" "$tool_id" "$") ||
       kaoiro_die "Codex restore preflight refused before stop; see docs/operations/runner-update-and-rollback.md#codex-state-backup" 78
   else
-    codex_transaction=$(kaoiro_codex_state prepare "$root" "$id" "$codex_home" "$codex_backup" "$service" "$tool_id" "$$") ||
+    kaoiro_preflight_build_format "$root/releases/$id" "$allow_dirty" ||
+      kaoiro_die "Target build format refused before stopping the runner" 78
+    codex_transaction=$(kaoiro_codex_state prepare "$root" "$id" "$codex_home" "$codex_backup" "$service" "$tool_id" "$") ||
       kaoiro_die "Codex backup preflight refused before stop; see docs/operations/runner-update-and-rollback.md#codex-state-backup" 78
   fi
   # The record is published: from here on a refusal names its recovery lines.
   id=$(kaoiro_codex_state target "$root" "$codex_transaction") || {
     kaoiro_codex_state next "$root" "$codex_transaction" >&2 || true
     kaoiro_die "Cannot read the published transaction target" 78
-  }
-  kaoiro_preflight_build_format "$root/releases/$id" "$allow_dirty" || {
-    kaoiro_codex_state next "$root" "$codex_transaction" >&2 || true
-    kaoiro_die "Target build format refused before stopping the runner" 78
   }
   kaoiro_codex_state run "$root" "$codex_transaction" resume "$allow_dirty"
   [ -z "$codex_restore" ] || exit 0

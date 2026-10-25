@@ -30,7 +30,7 @@ Forward production updates require an exact completed landing tag or schema-2
 release tag ([Release tags](build-identity-and-release-tags.md#release-tags)); `--from-repo`
 builds use `--require-tagged` by default. Tagged and `untagged` candidates also
 check the current server's advertised `build_identity_formats` before stopping
-the old unit. A failed check leaves the old runner running. Updater success uses
+the old unit. A failed check leaves the old runner running and leaves no Codex transaction record. Updater success uses
 `--version --json` with the 40-character SHA, never the seven-character label.
 Legacy releases can attest their pinned physical build-info JSON.
 
