@@ -269,9 +269,13 @@ function openRunnerGroup(rawPid: unknown): RunnerGroup {
   return { pgid: requireGroupPid(rawPid), ended: false };
 }
 
-/** Waits for the runner's process group to empty, then SIGKILLs it once if it
- *  does not within `waitMs`. The only target ever signalled is `-pgid`, with
- *  signal 0 or SIGKILL. ESRCH from a probe or from the SIGKILL ends it for good;
+/** Waits for the runner's process group to empty, then SIGKILLs it at most once
+ *  per call if it does not within `waitMs`. A group that still answers after
+ *  that SIGKILL is not ended (it was not proven empty), so a later call may send
+ *  one more; that is safe because POSIX does not reuse a process ID while a
+ *  process group with that ID exists. The only target ever signalled is
+ *  `-pgid`, with signal 0 or SIGKILL. ESRCH from a probe or from the SIGKILL
+ *  ends it for good;
  *  any other error (EPERM) means a member is not ours, which only happens after
  *  the pgid was reused, so nothing is killed. Accepted residual: the group can
  *  empty and its number be reused between a successful probe and the SIGKILL.
@@ -632,7 +636,7 @@ describe("runner group signal helper (fake backend)", () => {
     expect(group.ended).toBe(true);
   });
 
-  it("reports members that survive the SIGKILL and sends it only once", async () => {
+  it("reports members that survive the SIGKILL and sends it only once per call", async () => {
     const fake = scripted({ afterKill: "alive" });
     const group = openRunnerGroup(PG);
     const outcome = await settleRunnerGroup(group, fake.options);
