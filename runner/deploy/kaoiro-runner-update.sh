@@ -384,12 +384,12 @@ if [ -n "$codex_home" ]; then
       kaoiro_die "Codex restore preflight refused before stop; see docs/operations/runner-update-and-rollback.md#codex-state-backup" 78
     kaoiro_preflight_build_format "$root/releases/$id" "$allow_dirty" ||
       kaoiro_die "Target build format refused before stopping the runner" 78
-    codex_transaction=$(kaoiro_codex_state prepare-restore "$root" "$codex_restore" "$codex_home" "$service" "$tool_id" "$") ||
+    codex_transaction=$(kaoiro_codex_state prepare-restore "$root" "$codex_restore" "$codex_home" "$service" "$tool_id" "$$") ||
       kaoiro_die "Codex restore preflight refused before stop; see docs/operations/runner-update-and-rollback.md#codex-state-backup" 78
   else
     kaoiro_preflight_build_format "$root/releases/$id" "$allow_dirty" ||
       kaoiro_die "Target build format refused before stopping the runner" 78
-    codex_transaction=$(kaoiro_codex_state prepare "$root" "$id" "$codex_home" "$codex_backup" "$service" "$tool_id" "$") ||
+    codex_transaction=$(kaoiro_codex_state prepare "$root" "$id" "$codex_home" "$codex_backup" "$service" "$tool_id" "$$") ||
       kaoiro_die "Codex backup preflight refused before stop; see docs/operations/runner-update-and-rollback.md#codex-state-backup" 78
   fi
   # The record is published: from here on a refusal names its recovery lines.
