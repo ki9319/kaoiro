@@ -389,10 +389,12 @@ plugin state separately and do not infer history loss from an empty catalog.
 The exact home-root name `.sqlite-maintenance.lock` is disposable, alongside
 `thread-writer-locks`. Codex uses it to elect one background reclamation worker
 per target database parent directory. With no explicit `log_dir` or
-`sqlite_home`, the databases and their maintenance lock remain directly under
-`CODEX_HOME`; this classification applies only to that exact root name.
-[0.164.0 reclamation](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/state/src/runtime/reclamation.rs#L75-L148)
-and [database placement](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/state/src/sqlite.rs#L190-L219)
+`sqlite_home`, and no `CODEX_SQLITE_HOME` environment variable (it changes the
+placement in the same way; kaoiro runners do not set it), the databases and
+their maintenance lock remain directly under `CODEX_HOME`; this classification
+applies only to that exact root name.
+[0.164.0 reclamation](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/state/src/runtime/reclamation.rs#L73-L137)
+and [database placement](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/state/src/sqlite.rs#L189-L218)
 create the file as needed and retain a kernel lock after acquiring ownership,
 without using its contents as persisted state. Snapshots omit it from both
 manifest and payload. Forward backup leaves its inode/content intact; full
