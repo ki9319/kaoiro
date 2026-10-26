@@ -612,7 +612,7 @@
   "source_commit": "ea567492d43a12bc8f68d9c215db27ecc92984d5",
   "binary": {
     "version": "codex-cli 0.159.3",
-    "path": "/home/yuta/git/kaoiro/worktrees/fuji-485/node_modules/.pnpm/@openai+codex@0.159.3/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
+    "path": "<repo>/worktrees/fuji-485/node_modules/.pnpm/@openai+codex@0.159.3/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
     "sha256": "8bf204b36a2f6dd0dab73aa2f639892e67ef9ac8befccb4a05b1496ebf25c479"
   },
   "operator_decision": {
@@ -629,17 +629,17 @@
     "local_phoenix": "supplies connection and persona only"
   },
   "capture_manifest": {
-    "path": "/home/yuta/git/kaoiro/worktrees/fuji-485/tmp/fuji-485-capture/qualification-2026-10-03/capture-manifest.json",
+    "path": "<repo>/worktrees/fuji-485/tmp/fuji-485-capture/qualification-2026-10-03/capture-manifest.json",
     "sha256": "1701c30bec357261de06e3c65d7807fca3b13a0c1d72938f31cbcb32fee1954e"
   },
   "bound_capture_files": 75,
   "bound_runtime_assets": 114,
   "prior_capture_manifest": {
-    "path": "/home/yuta/git/kaoiro/worktrees/fuji-485/tmp/fuji-485-capture/capture-manifest.json",
+    "path": "<repo>/worktrees/fuji-485/tmp/fuji-485-capture/capture-manifest.json",
     "sha256": "0178a4c415f3bd8e4bf40772d3f472d4a44fa1d32d773ae8b655e6845d3e4e28"
   },
   "checker": {
-    "path": "/home/yuta/git/kaoiro/worktrees/fuji-485/tmp/fuji-485-capture/qualification-2026-10-03/check-qualification.py",
+    "path": "<repo>/worktrees/fuji-485/tmp/fuji-485-capture/qualification-2026-10-03/check-qualification.py",
     "sha256": "afbe6f14ea5b5e2525de9b969d744d05fc21ce80db0c0d87b9993faa18997f9e"
   },
   "checker_controls": {

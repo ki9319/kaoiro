@@ -220,7 +220,7 @@ is the report-based record of the attempts.
 ## Recorded live probe (2026-10-01)
 
 This section records the follow-up probe using the scratch home
-`/home/yuta/.local/share/kaoiro-scratch/codex-461`. The older report above
+`~/.local/share/kaoiro-scratch/codex-461`. The older report above
 remains the history of the earlier unrecorded timeouts. The follow-up used the
 Codex CLI 0.156.1 binary whose SHA-256 is
 `0b2e9301d6100dddda3b9d5c80ebaeaa3a2f1962388f2f36f6b96a9f08b1f33f`.
@@ -284,7 +284,7 @@ pinned to the scratch home.
 
 SHA-256 values bind the redacted logs, their rollout records, and the pinned
 probe executables used above. All paths are under
-`/home/yuta/.local/share/kaoiro-scratch/codex-461/probe-20261001/` unless
+`~/.local/share/kaoiro-scratch/codex-461/probe-20261001/` unless
 noted otherwise.
 
 | Artifact | SHA-256 |
@@ -317,7 +317,6 @@ The three rollout JSONL files above have SHA-256 values, in direct/exec/app-serv
 order: `b44b4479578887c0c497f370af7ecced64ea0374b1123c280606612e95bae871`,
 `47fb63012ddda5bf699f30d69924dbb64fd3756828d17a91b6812029897c4838`, and
 `6d65e0d77c9f421991029222c04a82b619ee8c599fadeb229c57c0626fe0d951`.
-
 
 ## Signed-in remote catalog (2026-10-27)
 
@@ -358,11 +357,11 @@ is not proof of actual entitlement for every account or plan.
 ### Pre-design native measurement
 
 On baseline `5526a42a825bd2787a6cf511d1f61a06d2b6afd8`, Node 24.3.0 and the
-0.161.0 native above, the measurement used `runCodexCli()` with its production factories
-on both exec and app-server. The outer Phoenix peer was a local loopback;
-RPC observers forwarded to the original implementation. Terra was declared
-through the existing extra-model mechanism, without injecting its default
-effort. Each backend completed this five-stage sequence in one session:
+0.161.0 native above, the measurement used `runCodexCli()` with its production
+factories on both exec and app-server. The outer Phoenix peer was a local
+loopback; RPC observers forwarded to the original implementation. Terra was
+declared through the existing extra-model mechanism, without injecting its
+default effort. Each backend completed this five-stage sequence in one session:
 
 | Stage | Observed result |
 |---|---|

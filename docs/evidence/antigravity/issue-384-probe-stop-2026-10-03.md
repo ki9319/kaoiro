@@ -15,7 +15,7 @@ its stdout pipe open, preventing Node's child-process `close` event?
   `c4565aa31eac88f1e28174cc867801bb8f0e0f03840fde05e110895c98251db2`),
   which runs the command under outer and inner `setsid` and a user/PID
   namespace.
-- Each trial spawned `/home/yuta/.local/bin/agy -p /usage --output-format json`
+- Each trial spawned `~/.local/bin/agy -p /usage --output-format json`
   with stdout and stderr piped. The harness inspected only the process tree
   rooted at its own spawned PID and compared descendant file descriptors with
   that child's stdout pipe. It sent `SIGKILL` only to that held child PID.

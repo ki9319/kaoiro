@@ -25,7 +25,7 @@ that temporary files remain available. Measurement dates are retained per record
   binary was executed directly; `--version` returned `codex-cli 0.153.4` and
   `initialize` reported 0.153.4.
 - Executed binary:
-  `/home/yuta/git/kaoiro/node_modules/.pnpm/@openai+codex@0.153.4-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex`.
+  `<repo>/node_modules/.pnpm/@openai+codex@0.153.4-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex`.
 - Binary SHA-256:
   `56ef98ab4032d317ab26e9b5e5a175650717351edb16ed9cde0cb6d1734d62da`.
 - Generated schema: `<binary> app-server generate-json-schema --out <scratch>/schema153 --experimental`.
@@ -123,9 +123,9 @@ original final answer before the steered input and revised answer; each case
 retained one turn; wrong-ID and idle requests were rejected. This observation
 is not a guarantee about every scheduling interleaving or protocol method.
 
-- Entry: `/home/yuta/.asdf/shims/codex --version` → `codex-cli 0.154.0`.
+- Entry: `~/.asdf/shims/codex --version` → `codex-cli 0.154.0`.
 - Executed binary:
-  `/home/yuta/.asdf/installs/nodejs/24.3.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex`.
+  `~/.asdf/installs/nodejs/24.3.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex`.
 - Binary SHA-256:
   `3188814c35471432d4123203e0eb38e5bddc60226e3d7ddf0e59e649ea140022`.
 - Driver exited 0; only the temporary-home PATH-alias warning appeared.

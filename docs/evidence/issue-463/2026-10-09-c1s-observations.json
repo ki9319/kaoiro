@@ -2,7 +2,7 @@
   "source_commit": "95ea6524a99b9bf73e3c7930e01dc067f5771f23",
   "fixture_commit": "502e05c8e4ca122c47cc6ae12f9fb95edc139e8c",
   "base_commit": "9d9f8ed8dd6aa9ff471a4d198ad5e86895fa65a2",
-  "archive": "/home/yuta/Nextcloud/storage.hktypeb.jp/kaoiro/fuji/2026-10-09-issue-559/implementation",
+  "archive": "<share-root>/kaoiro/fuji/2026-10-09-issue-559/implementation",
   "gates": [
     {
       "name": "server mix precommit",
@@ -311,7 +311,7 @@
         "\u2139 pass 0",
         "\u2139 fail 1",
         "\u2139 skipped 0",
-        "        at fail (file:///home/yuta/git/kaoiro/worktrees/fuji-559/server/deploy/kaoiro-server-deploy.mjs:71:15)"
+        "        at fail (file://<repo>/worktrees/fuji-559/server/deploy/kaoiro-server-deploy.mjs:71:15)"
       ],
       "log": "impl-A-mutation-entry-cut-fuji.log",
       "sha256": "4eef92e26059aa46b2cefae43eddc1132f153ebecbb0bd638bfc2a38e0fb7212"
@@ -390,7 +390,7 @@
         "\u2139 pass 0",
         "\u2139 fail 1",
         "\u2139 skipped 0",
-        "        at fail (file:///home/yuta/git/kaoiro/worktrees/fuji-559/server/deploy/kaoiro-server-deploy.mjs:71:15)"
+        "        at fail (file://<repo>/worktrees/fuji-559/server/deploy/kaoiro-server-deploy.mjs:71:15)"
       ],
       "log": "impl-A-mutation-tmpfs-cut-fuji.log",
       "sha256": "73cd729db64a1e2955a9b6fe776ab6040249b46c0741ce01c550f4c87a4276ab"
@@ -908,7 +908,7 @@
       "name": "viewer-private-cut",
       "exit_code": 0,
       "status": "unpinned",
-      "log": "/home/yuta/git/kaoiro/tmp/reviews/issue-559/impl-BC-mutation-viewer-private-cut-fuji.log",
+      "log": "<repo>/tmp/reviews/issue-559/impl-BC-mutation-viewer-private-cut-fuji.log",
       "counts": [
         "Result: 31 passed"
       ]

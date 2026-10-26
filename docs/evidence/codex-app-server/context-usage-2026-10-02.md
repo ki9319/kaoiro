@@ -216,7 +216,7 @@ That design and all source changes are outside this research assignment.
 Machine-readable observations and the content binding are in
 [context-usage-2026-10-02.json](context-usage-2026-10-02.json). Raw selected-field
 captures, scripts, full failure logs, generated schema, and the manifest remain
-under `/home/yuta/git/kaoiro/worktrees/fuji-485/tmp/fuji-485-capture/` until the
+under `<repo>/worktrees/fuji-485/tmp/fuji-485-capture/` until the
 issue closes. The manifest SHA-256 is
 `0178a4c415f3bd8e4bf40772d3f472d4a44fa1d32d773ae8b655e6845d3e4e28`.
 The committed JSON preserves the numeric observations even after scratch cleanup.

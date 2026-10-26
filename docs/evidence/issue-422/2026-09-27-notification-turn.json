@@ -375,7 +375,7 @@
                 {
                   "tool_use_id": "toolu_01V5hdiZzPeoreqrityMT2fv",
                   "type": "tool_result",
-                  "content": "Command running in background with ID: bghfcgbs1. Output is being written to: /tmp/claude-1000/-home-yuta-git-kaoiro-worktrees-kogane-422-tmp-kogane-422-cwd/a5ec2b77-5a09-4783-bac6-0a8162e04cfb/tasks/bghfcgbs1.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+                  "content": "Command running in background with ID: bghfcgbs1. Output is being written to: /tmp/claude-1000/-home-<user>-git-kaoiro-worktrees-kogane-422-tmp-kogane-422-cwd/a5ec2b77-5a09-4783-bac6-0a8162e04cfb/tasks/bghfcgbs1.output. You will be notified when it completes. To check interim output, use Read on that file path.",
                   "is_error": false
                 }
               ]
@@ -514,7 +514,7 @@
             "task_id": "bghfcgbs1",
             "tool_use_id": "toolu_01V5hdiZzPeoreqrityMT2fv",
             "status": "completed",
-            "output_file": "/tmp/claude-1000/-home-yuta-git-kaoiro-worktrees-kogane-422-tmp-kogane-422-cwd/a5ec2b77-5a09-4783-bac6-0a8162e04cfb/tasks/bghfcgbs1.output",
+            "output_file": "/tmp/claude-1000/-home-<user>-git-kaoiro-worktrees-kogane-422-tmp-kogane-422-cwd/a5ec2b77-5a09-4783-bac6-0a8162e04cfb/tasks/bghfcgbs1.output",
             "summary": "Background command \"Sleep 12 seconds then print marker\" completed (exit code 0)",
             "uuid": "77d74304-032c-4474-a591-87f15b2189ae",
             "session_id": "a5ec2b77-5a09-4783-bac6-0a8162e04cfb"
@@ -909,7 +909,7 @@
                 {
                   "tool_use_id": "toolu_01A9bHtCzUbnC8TSs5kK4372",
                   "type": "tool_result",
-                  "content": "Command running in background with ID: bsyzdkrri. Output is being written to: /tmp/claude-1000/-home-yuta-git-kaoiro-worktrees-kogane-422-tmp-kogane-422-cwd/a4b52666-200c-4932-8d99-c76403cdd7e1/tasks/bsyzdkrri.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+                  "content": "Command running in background with ID: bsyzdkrri. Output is being written to: /tmp/claude-1000/-home-<user>-git-kaoiro-worktrees-kogane-422-tmp-kogane-422-cwd/a4b52666-200c-4932-8d99-c76403cdd7e1/tasks/bsyzdkrri.output. You will be notified when it completes. To check interim output, use Read on that file path.",
                   "is_error": false
                 }
               ]
@@ -1046,7 +1046,7 @@
             "task_id": "bsyzdkrri",
             "tool_use_id": "toolu_01A9bHtCzUbnC8TSs5kK4372",
             "status": "completed",
-            "output_file": "/tmp/claude-1000/-home-yuta-git-kaoiro-worktrees-kogane-422-tmp-kogane-422-cwd/a4b52666-200c-4932-8d99-c76403cdd7e1/tasks/bsyzdkrri.output",
+            "output_file": "/tmp/claude-1000/-home-<user>-git-kaoiro-worktrees-kogane-422-tmp-kogane-422-cwd/a4b52666-200c-4932-8d99-c76403cdd7e1/tasks/bsyzdkrri.output",
             "summary": "Background command \"sleep 12; printf BACKGROUND_DONE\" completed (exit code 0)",
             "uuid": "cbbee2c2-697b-402b-bcce-b9c41f1b117d",
             "session_id": "a4b52666-200c-4932-8d99-c76403cdd7e1"

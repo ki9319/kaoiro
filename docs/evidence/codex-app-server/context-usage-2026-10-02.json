@@ -79,7 +79,7 @@
   "binary_sha256": "8bf204b36a2f6dd0dab73aa2f639892e67ef9ac8befccb4a05b1496ebf25c479",
   "upstream_release_commit": "01fc69f4026735edfdf6789820549727a4867b11",
   "capture_manifest": {
-    "path": "/home/yuta/git/kaoiro/worktrees/fuji-485/tmp/fuji-485-capture/capture-manifest.json",
+    "path": "<repo>/worktrees/fuji-485/tmp/fuji-485-capture/capture-manifest.json",
     "sha256": "0178a4c415f3bd8e4bf40772d3f472d4a44fa1d32d773ae8b655e6845d3e4e28"
   },
   "checker_controls": {

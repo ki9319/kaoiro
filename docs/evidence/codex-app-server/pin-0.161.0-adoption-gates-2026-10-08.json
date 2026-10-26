@@ -4,18 +4,18 @@
   "identity": {
     "node": "v22.23.3",
     "cli": {
-      "path": "/home/yuta/git/kaoiro/worktrees/niko-539/node_modules/.pnpm/@openai+codex@0.161.0/node_modules/@openai/codex/package.json",
+      "path": "<repo>/worktrees/niko-539/node_modules/.pnpm/@openai+codex@0.161.0/node_modules/@openai/codex/package.json",
       "version": "0.161.0"
     },
     "sdk": {
-      "path": "/home/yuta/git/kaoiro/worktrees/niko-539/node_modules/.pnpm/@openai+codex-sdk@0.161.0_patch_hash=faafbd6188ec0466bd5d3dfd02ed642304b5e09be1986b58533577b8456dbd0c/node_modules/@openai/codex-sdk/package.json",
-      "entry": "/home/yuta/git/kaoiro/worktrees/niko-539/node_modules/.pnpm/@openai+codex-sdk@0.161.0_patch_hash=faafbd6188ec0466bd5d3dfd02ed642304b5e09be1986b58533577b8456dbd0c/node_modules/@openai/codex-sdk/dist/index.js",
+      "path": "<repo>/worktrees/niko-539/node_modules/.pnpm/@openai+codex-sdk@0.161.0_patch_hash=faafbd6188ec0466bd5d3dfd02ed642304b5e09be1986b58533577b8456dbd0c/node_modules/@openai/codex-sdk/package.json",
+      "entry": "<repo>/worktrees/niko-539/node_modules/.pnpm/@openai+codex-sdk@0.161.0_patch_hash=faafbd6188ec0466bd5d3dfd02ed642304b5e09be1986b58533577b8456dbd0c/node_modules/@openai/codex-sdk/dist/index.js",
       "version": "0.161.0",
       "sha256": "2597aa3b22fa8a1d7cbd4fa313a0f6a3cba006654f372458daf84aca501749da"
     },
     "native": {
-      "path": "/home/yuta/git/kaoiro/worktrees/niko-539/node_modules/.pnpm/@openai+codex@0.161.0/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
-      "exec_path": "/home/yuta/git/kaoiro/worktrees/niko-539/node_modules/.pnpm/@openai+codex@0.161.0-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex",
+      "path": "<repo>/worktrees/niko-539/node_modules/.pnpm/@openai+codex@0.161.0/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
+      "exec_path": "<repo>/worktrees/niko-539/node_modules/.pnpm/@openai+codex@0.161.0-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex",
       "version": "codex-cli 0.161.0",
       "sha256": "9a820c17865fa825d04db416818679a9d63bd72e50835c396f496e5684626c9c"
     },
@@ -344,19 +344,19 @@
       "label": "restored-node24",
       "node": "24.3.0",
       "command": "(cd wrapper/codex && pnpm exec vitest run test/sdk_stream_patch.test.ts test/host.test.ts test/cli_sdk_native.integration.test.ts -t \"resolves the patched|finishes a real SDK|production factories\")",
-      "cwd": "/home/yuta/git/kaoiro/worktrees/niko-539",
+      "cwd": "<repo>/worktrees/niko-539",
       "exit_code": 0,
       "elapsed_seconds": 4.748,
-      "log": "/home/yuta/Nextcloud/storage.hktypeb.jp/kaoiro/niko/2026-10-08-sdk-codex-0161/implementation-539/restored-node24.log"
+      "log": "<share-root>/kaoiro/niko/2026-10-08-sdk-codex-0161/implementation-539/restored-node24.log"
     },
     "capture_restored": {
       "label": "restored-capture",
       "node": "22.23.3",
       "command": "(cd wrapper/codex && pnpm exec vitest run test/app_server_rpc_server_request.test.ts)",
-      "cwd": "/home/yuta/git/kaoiro/worktrees/niko-539",
+      "cwd": "<repo>/worktrees/niko-539",
       "exit_code": 0,
       "elapsed_seconds": 1.876,
-      "log": "/home/yuta/Nextcloud/storage.hktypeb.jp/kaoiro/niko/2026-10-08-sdk-codex-0161/implementation-539/restored-capture.log"
+      "log": "<share-root>/kaoiro/niko/2026-10-08-sdk-codex-0161/implementation-539/restored-capture.log"
     }
   }
 }

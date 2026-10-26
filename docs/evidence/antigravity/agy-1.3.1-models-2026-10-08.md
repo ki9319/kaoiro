@@ -9,7 +9,7 @@ last_updated: 2026-10-08
 Target: [issue #534](https://github.com/sakuraiyuta/kaoiro/issues/534), runtime/test
 commit for Antigravity 1.3.1 baseline on `issue-534-agy-1-3-1`.
 Host: Linux x64, Node 22.23.3, pnpm 10.20.0.
-The installed CLI executable (`/home/yuta/.local/bin/agy`) reports `1.3.1`.
+The installed CLI executable (`~/.local/bin/agy`) reports `1.3.1`.
 
 ## 1. Raw CLI model catalog output
 

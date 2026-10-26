@@ -89,7 +89,7 @@ held an executable `kuroe377-marker` printing `KUROE377-MARKER-OK`. Prompt:
 run `echo "PATH=$PATH"; command -v kuroe377-marker || echo NOT-FOUND;
 kuroe377-marker` and echo the stdout verbatim.
 
-- Model reply: `PATH=/home/yuta/.gemini/antigravity-cli/bin:<scratch>/bin:/home/yuta/.local/bin:/usr/local/sbin:…`,
+- Model reply: `PATH=~/.gemini/antigravity-cli/bin:<scratch>/bin:~/.local/bin:/usr/local/sbin:…`,
   `<scratch>/bin/kuroe377-marker`, `KUROE377-MARKER-OK`.
 
 So the wrapper's spawn `env.PATH` reaches the tool shell (agy only prepends

@@ -253,9 +253,9 @@ changed-line checker exit 1. The full lint failure is not reported as green.
 
 Raw logs, source patches, probe drivers, rate snapshots, mutation manifests
 and the exact build archive are retained in
-`/home/yuta/git/kaoiro/tmp/reviews/issue-560/`. A finished copy and checksum
+`<repo>/tmp/reviews/issue-560/`. A finished copy and checksum
 manifest are shared under
-`/home/yuta/Nextcloud/storage.hktypeb.jp/kaoiro/fuji/2026-10-09-issue-560/`.
+`<share-root>/kaoiro/fuji/2026-10-09-issue-560/`.
 The implementation handoff records the finished archive's hash and final
 documentation commit. Owned credential homes and disposable server state
 directories are removed; the feature worktree stays for independent review.

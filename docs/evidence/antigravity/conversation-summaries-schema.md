@@ -113,14 +113,14 @@ the Antigravity peer's whoami reply envelope. The ID was used once and is
 omitted from this plan and command output. The copied row query selected only
 `workspace_uris` and `nesting_depth` and returned one row. `workspace_uris` was
 a non-empty JSON array with two `file:` URI entries; both decoded successfully.
-One matched the agent cwd `/home/yuta/git/kaoiro`, and the other matched the
+One matched the agent cwd `<repo>`, and the other matched the
 current per-epoch customization `--add-dir` path. `nesting_depth` was zero.
 The current customization path still existed when checked. The query printed
 only these shape and match results, not the ID or URI values.
 
 The director measured the target launch at about 21:0x local time: its runner
 spawn request and the agy and wrapper working directories all used
-`/home/yuta/git/kaoiro`; agy received that cwd and the per-epoch customization
+`<repo>`; agy received that cwd and the per-epoch customization
 directory as its two `--add-dir` values. `host.ts:1290,1935` constructs these
 two arguments, and `customization.ts:72-82` creates the customization path
 with `mkdtempSync`. The matching customization URI therefore shows that the

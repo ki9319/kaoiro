@@ -31,9 +31,9 @@ The probe enters the freshly built `runClaudeCli`, which constructs the real Age
 
 Each invocation runs in a fresh user/network/PID namespace with only loopback enabled and no external route. A nested user namespace supplies UID/GID 1000. The child environment is an allowlist with an isolated config directory and a dummy local API key; real credentials and provider endpoints are not inherited. The outer PID namespace bounds descendant lifetime. Model responses are scripted Anthropic Messages SSE, not real API responses or spend. Request bodies are captured independently at the loopback endpoint; the response script does not use the proposed hook-ID predictor to decide whether an input was included.
 
-Dedicated worktree/build path: `/home/yuta/git/kaoiro/worktrees/kogane-433`, fixed at the baseline before the report commit. Offline frozen-lockfile install, protocol typecheck, and core → agent-common → claude-code builds each exited 0. Shared source/dist and peer worktrees were untouched. Protocol is type-only and has no build output. The probe used only this dependency-order build, avoiding the shared-dist drift documented by I3/issue 428.
+Dedicated worktree/build path: `<repo>/worktrees/kogane-433`, fixed at the baseline before the report commit. Offline frozen-lockfile install, protocol typecheck, and core → agent-common → claude-code builds each exited 0. Shared source/dist and peer worktrees were untouched. Protocol is type-only and has no build output. The probe used only this dependency-order build, avoiding the shared-dist drift documented by I3/issue 428.
 
-Retained host evidence directory: `/home/yuta/git/kaoiro/tmp/reviews/issue-429/e/`.
+Retained host evidence directory: `<repo>/tmp/reviews/issue-429/e/`.
 
 | Binding | SHA-256 |
 | --- | --- |
@@ -47,7 +47,7 @@ Retained host evidence directory: `/home/yuta/git/kaoiro/tmp/reviews/issue-429/e
 | Installed `sdk.mjs` | `ef4c2c0fc286d8c7dab7771516cf95206f9f670e99e74dc62f245b7fc8224955` |
 | Executed Linux x64 native CLI | `1e08503dbdf3c2cb0d706d32f3408277388d1c76ef108673e8fe42c1b322925b` |
 
-Node: `/home/yuta/.asdf/installs/nodejs/24.3.0/bin/node`, v24.3.0, also content-bound in the manifest. Every native init reports CLI 2.1.280; the actual spawned binary path is recorded per run. `manifest-verification.json` records 209 comparisons and zero mismatches before cleanup. Frozen probe/seam/product outputs were unchanged throughout; only the explicitly approved checker correction occurred.
+Node: `~/.asdf/installs/nodejs/24.3.0/bin/node`, v24.3.0, also content-bound in the manifest. Every native init reports CLI 2.1.280; the actual spawned binary path is recorded per run. `manifest-verification.json` records 209 comparisons and zero mismatches before cleanup. Frozen probe/seam/product outputs were unchanged throughout; only the explicitly approved checker correction occurred.
 
 ## Schedule, counts, and timing
 
@@ -115,9 +115,9 @@ The default wrapper also starts its ordinary metadata/usage probes. Process poll
 
 ### Artifacts and independent checks
 
-Scratch build: `/home/yuta/git/kaoiro/worktrees/kogane-433-e5`. Offline frozen-lockfile install, protocol typecheck, core → agent-common → claude-code build, and local server compilation all exited 0. The instrumentation recompile also exited 0. Shared source/dist were untouched. SDK **0.3.280**, native CLI **2.1.280**, Node **v24.3.0**. Version comes from the actual native transcripts; `/proc` observations bind the executed CLI path to the hashed binary.
+Scratch build: `<repo>/worktrees/kogane-433-e5`. Offline frozen-lockfile install, protocol typecheck, core → agent-common → claude-code build, and local server compilation all exited 0. The instrumentation recompile also exited 0. Shared source/dist were untouched. SDK **0.3.280**, native CLI **2.1.280**, Node **v24.3.0**. Version comes from the actual native transcripts; `/proc` observations bind the executed CLI path to the hashed binary.
 
-Retained evidence: `/home/yuta/git/kaoiro/tmp/reviews/issue-429/e/E5/`.
+Retained evidence: `<repo>/tmp/reviews/issue-429/e/E5/`.
 
 | Binding | SHA-256 |
 | --- | --- |
@@ -217,9 +217,9 @@ bounds descendants, and direct children are stopped by retained handles.
 
 ### Production settings and side effects
 
-`HOME=/home/yuta`; no scratch HOME or `CLAUDE_CONFIG_DIR` replaces the operator
-configuration. `/home/yuta/.claude/settings.json` resolves to
-`/home/yuta/git/ai-settings/claude/settings.json`, SHA-256
+`HOME=<home>`; no scratch HOME or `CLAUDE_CONFIG_DIR` replaces the operator
+configuration. `~/.claude/settings.json` resolves to
+`~/git/ai-settings/claude/settings.json`, SHA-256
 `817a66b3da1a0a928e54327d681d0cbc9301e2480f19ec55022deb518a90b789`.
 **Difference from production: `USAGE_LOG_PATH` points into the R3 evidence
 scratch directory.** Settings and hook bytes are unchanged. The model is pinned
@@ -318,7 +318,7 @@ never edited to manufacture this contrast. The checker is a disposable raw-log
 reader; no product test suite or guard mutation is claimed by this measurement.
 
 Evidence is retained at
-`/home/yuta/git/kaoiro/tmp/reviews/issue-429/e/R3/`. `schedule-counts.json`,
+`<repo>/tmp/reviews/issue-429/e/R3/`. `schedule-counts.json`,
 `native-summary.json`, per-run `*.check.json` and `negative-controls.json`
 contain the counted results. The server observation delta is retained and not
 committed. Offline install, protocol typecheck and dependency-order core →

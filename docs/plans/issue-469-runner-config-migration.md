@@ -19,7 +19,7 @@ is implemented yet. Base: `develop` at `e1073d7d`.
 Method: every `KAOIRO_*` name in `runner/`, `wrapper/`, `protocol/`,
 `scripts/`, `.github/` (non-test) was followed to the function that decides
 its value; `server/` and `dashboard/` are out of scope (issue #470). The
-production `runner.env` on `yuta-win` was read with values redacted: it sets
+production `runner.env` on `<runner-host>` was read with values redacted: it sets
 `KAOIRO_RUNNER_TOKEN`, `KAOIRO_NODE`, `PATH`, `CODEX_HOME`,
 `KAOIRO_CODEX_APPROVAL_AXIS`, `KAOIRO_CODEX_OPERATOR_STEER`,
 `KAOIRO_CLAUDE_PHASE2_DELIVERY_PERSONAS`.

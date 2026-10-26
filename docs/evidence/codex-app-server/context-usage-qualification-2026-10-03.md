@@ -159,7 +159,7 @@ stand on the native events measured here, rather than be attributed to Claude.
 [Machine-readable evidence](context-usage-qualification-2026-10-03.json) contains
 every captured usage snapshot, ordering indices, the operator decision, process
 exit codes and content bindings. Raw captures remain under
-`/home/yuta/git/kaoiro/worktrees/fuji-485/tmp/fuji-485-capture/qualification-2026-10-03/`
+`<repo>/worktrees/fuji-485/tmp/fuji-485-capture/qualification-2026-10-03/`
 until issue #485 closes. The new manifest SHA-256 is
 `1701c30bec357261de06e3c65d7807fca3b13a0c1d72938f31cbcb32fee1954e`;
 it binds 75 capture/script files and 114 built runtime assets plus the native

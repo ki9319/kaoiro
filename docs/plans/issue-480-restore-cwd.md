@@ -13,8 +13,8 @@ Baseline: `e1073d7db4505f693c00f69880c33941e75bde1f`.
 
 A disposable Phoenix Channel test exercised the real operator `spawn`, wrapper
 `envelope`, and operator `restore` handlers with the application-managed stores.
-Spawn seeded `/home/yuta/git/kaoiro`; a session-bearing envelope reporting
-`ext.cwd=/home/yuta/git/kaoiro/worktrees/fuji-480` replaced it; restore broadcast
+Spawn seeded `<repo>`; a session-bearing envelope reporting
+`ext.cwd=<repo>/worktrees/fuji-480` replaced it; restore broadcast
 that worktree cwd with the same session ID. Exit 0, one passing observation test.
 Feeding that exact broadcast payload into the real runner `Supervisor.handleSpawn`
 returned `cwd_not_found`, with zero launcher calls, although the worktree exists.

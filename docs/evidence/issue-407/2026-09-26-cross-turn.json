@@ -3618,39 +3618,39 @@
       "sha256": "3ae7e03f52170596089fe97d5ab2d4bf76f277174af3a57adb0f776e4900f13b"
     },
     {
-      "path": "/home/yuta/git/kaoiro/worktrees/kogane-407/pnpm-lock.yaml",
+      "path": "<repo>/worktrees/kogane-407/pnpm-lock.yaml",
       "sha256": "8e899275909fac72db348d86ec41579aa6967aa4c82eef4a672092a2861b6994"
     },
     {
-      "path": "/home/yuta/git/kaoiro/worktrees/kogane-407/wrapper/codex/node_modules/@openai/codex-sdk/dist/index.js",
+      "path": "<repo>/worktrees/kogane-407/wrapper/codex/node_modules/@openai/codex-sdk/dist/index.js",
       "sha256": "72d4e07babc1a3173c1e8efc016f92c42a00056fa62e3b0ecf739f19d7668521"
     },
     {
-      "path": "/home/yuta/git/kaoiro/worktrees/kogane-407/wrapper/codex/dist/host.js",
+      "path": "<repo>/worktrees/kogane-407/wrapper/codex/dist/host.js",
       "sha256": "4187c03ea01c98fc125552c52297ae21ef151d9d418809e180af727a42187c43"
     },
     {
-      "path": "/home/yuta/git/kaoiro/worktrees/kogane-407/wrapper/codex/dist/bridge.js",
+      "path": "<repo>/worktrees/kogane-407/wrapper/codex/dist/bridge.js",
       "sha256": "4c49bf13a2f835e8b9ed02a5cadd76a8bbb969d1ad952f18ed2350ec33616395"
     },
     {
-      "path": "/home/yuta/git/kaoiro/worktrees/kogane-407/wrapper/codex/dist/toolhost.js",
+      "path": "<repo>/worktrees/kogane-407/wrapper/codex/dist/toolhost.js",
       "sha256": "e01bf674c861b7653dbf4a388b0f74d0b9aca74a338f7053e4d74ed303d41aab"
     },
     {
-      "path": "/home/yuta/git/kaoiro/worktrees/kogane-407/wrapper/codex/dist/app_server_transport.js",
+      "path": "<repo>/worktrees/kogane-407/wrapper/codex/dist/app_server_transport.js",
       "sha256": "5434ba7fb6e8156c469f39d05621d216eb5213c84f4c31cf4eb9dde759020275"
     },
     {
-      "path": "/home/yuta/git/kaoiro/worktrees/kogane-407/wrapper/codex/dist/app_server_session.js",
+      "path": "<repo>/worktrees/kogane-407/wrapper/codex/dist/app_server_session.js",
       "sha256": "a5d09bc335e62f713681bb3eb3da796dafa7e4ce7886f14a4cb82b3e65ae9f02"
     },
     {
-      "path": "/home/yuta/git/kaoiro/worktrees/kogane-407/wrapper/agent-common/dist/inter_agent.js",
+      "path": "<repo>/worktrees/kogane-407/wrapper/agent-common/dist/inter_agent.js",
       "sha256": "e8f4a5379994a0577902ff97050a5c3a9a799d4cccb3d089edd3a7d3843461b4"
     },
     {
-      "path": "/home/yuta/git/kaoiro/worktrees/kogane-407/node_modules/.pnpm/@openai+codex@0.156.1-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex",
+      "path": "<repo>/worktrees/kogane-407/node_modules/.pnpm/@openai+codex@0.156.1-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex",
       "sha256": "0b2e9301d6100dddda3b9d5c80ebaeaa3a2f1962388f2f36f6b96a9f08b1f33f"
     },
     {

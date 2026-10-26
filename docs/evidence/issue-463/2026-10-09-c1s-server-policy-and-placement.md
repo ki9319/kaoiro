@@ -35,7 +35,7 @@ Original temporary paths in recorded references identify the experiment;
 their bytes are preserved here and in the archive, not at a live temporary path.
 
 The non-secret logs and raw Docker inspections are stored at
-`/home/yuta/Nextcloud/storage.hktypeb.jp/kaoiro/fuji/2026-10-09-issue-559/implementation/`.
+`<share-root>/kaoiro/fuji/2026-10-09-issue-559/implementation/`.
 The observations file lists every archived filename, byte count and SHA-256.
 Working copies remain in `tmp/reviews/issue-559/` for review.
 
@@ -205,7 +205,7 @@ the blocked policy-owner cuts miss the 2500 ms receive wait. No surviving cut
 is counted as red. Every cut was restored before the final positive gate.
 
 Logs, exact changes and hashes for this delta are archived in
-`/home/yuta/Nextcloud/storage.hktypeb.jp/kaoiro/fuji/2026-10-09-issue-559/implementation-r2/`.
+`<share-root>/kaoiro/fuji/2026-10-09-issue-559/implementation-r2/`.
 All new test processes use `setsid` inside an owned user/PID namespace.
 Suspend/resume targets are captured PIDs in that test application's BEAM;
 there is no host process enumeration or signal, production deployment,

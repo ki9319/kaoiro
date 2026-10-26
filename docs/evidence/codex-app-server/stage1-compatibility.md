@@ -32,7 +32,7 @@ experiment below does not authorize either feature.
 - Package: `@openai/codex@0.153.4`, resolved through its installed Linux x64
   platform package, not the user's global CLI.
 - Executed binary:
-  `/home/yuta/git/kaoiro/node_modules/.pnpm/@openai+codex@0.153.4-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex`.
+  `<repo>/node_modules/.pnpm/@openai+codex@0.153.4-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex`.
 - Binary SHA-256:
   `56ef98ab4032d317ab26e9b5e5a175650717351edb16ed9cde0cb6d1734d62da`.
 - `--version`: `codex-cli 0.153.4` (exit 0).
@@ -206,7 +206,7 @@ Appendix C already covers as a separate, larger effort out of #399's scope.
 - Package: `@openai/codex@0.156.1`, resolved through its installed Linux x64
   platform package (same resolution method as Appendix C).
 - Executed binary:
-  `/home/yuta/git/kaoiro/node_modules/.pnpm/@openai+codex@0.156.1-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex`.
+  `<repo>/node_modules/.pnpm/@openai+codex@0.156.1-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex`.
 - Binary SHA-256:
   `0b2e9301d6100dddda3b9d5c80ebaeaa3a2f1962388f2f36f6b96a9f08b1f33f`.
 - `--version`: `codex-cli 0.156.1` (exit 0).
@@ -325,7 +325,7 @@ The SDK-spawned child's real `execve()` argv, captured with `strace -f -e
 trace=execve` on this exact run:
 
 ```
-/home/yuta/git/kaoiro/node_modules/.pnpm/@openai+codex@0.156.1-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex \
+<repo>/node_modules/.pnpm/@openai+codex@0.156.1-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex \
   exec --experimental-json \
   --config approvals_reviewer="user" \
   --sandbox workspace-write \

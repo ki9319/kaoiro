@@ -59,7 +59,7 @@
         "inter_agent_steer_reconciliation.test.ts"
       ],
       "exit": 1,
-      "log": "/home/yuta/git/kaoiro/tmp/reviews/issue-548/impl-r2-mutation-KA-fuji.log"
+      "log": "<repo>/tmp/reviews/issue-548/impl-r2-mutation-KA-fuji.log"
     },
     {
       "mutation": "retain-cut",
@@ -88,7 +88,7 @@
         "cli_inter_agent_t4b.test.ts"
       ],
       "exit": 1,
-      "log": "/home/yuta/git/kaoiro/tmp/reviews/issue-548/impl-r2-mutation-retain-cut-fuji.log"
+      "log": "<repo>/tmp/reviews/issue-548/impl-r2-mutation-retain-cut-fuji.log"
     },
     {
       "mutation": "retire-inverted",
@@ -117,7 +117,7 @@
         "cli_inter_agent_t4b.test.ts"
       ],
       "exit": 1,
-      "log": "/home/yuta/git/kaoiro/tmp/reviews/issue-548/impl-r2-mutation-retire-inverted-fuji.log"
+      "log": "<repo>/tmp/reviews/issue-548/impl-r2-mutation-retire-inverted-fuji.log"
     },
     {
       "mutation": "queue-head-replaced",
@@ -148,7 +148,7 @@
         "T15d"
       ],
       "exit": 1,
-      "log": "/home/yuta/git/kaoiro/tmp/reviews/issue-548/impl-r2-mutation-queue-head-replaced-fuji.log"
+      "log": "<repo>/tmp/reviews/issue-548/impl-r2-mutation-queue-head-replaced-fuji.log"
     },
     {
       "mutation": "footer-dispatch-wording-cut",
@@ -174,7 +174,7 @@
         "test/kaoiro_server/footer_assets_test.exs"
       ],
       "exit": 2,
-      "log": "/home/yuta/git/kaoiro/tmp/reviews/issue-548/impl-r2-mutation-footer-dispatch-wording-cut-fuji.log"
+      "log": "<repo>/tmp/reviews/issue-548/impl-r2-mutation-footer-dispatch-wording-cut-fuji.log"
     }
   ],
   "native_turns_added": 0,

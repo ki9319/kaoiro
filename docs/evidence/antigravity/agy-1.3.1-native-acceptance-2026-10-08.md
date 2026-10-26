@@ -9,7 +9,7 @@ last_updated: 2026-10-08
 Target: [issue #534](https://github.com/sakuraiyuta/kaoiro/issues/534), runtime acceptance
 for Antigravity CLI 1.3.1 on branch `issue-534-agy-1-3-1`.
 Host: Linux x64, Node 22.23.3, pnpm 10.20.0.
-The installed CLI executable (`/home/yuta/.local/bin/agy`) reports `1.3.1`.
+The installed CLI executable (`~/.local/bin/agy`) reports `1.3.1`.
 
 ## 1. Composition and reproduction harness
 
