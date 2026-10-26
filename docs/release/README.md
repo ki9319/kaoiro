@@ -2,7 +2,7 @@
 title: Release notes
 description: One page per production release, listing what changed since the previous production release.
 status: accepted
-last_updated: 2026-10-25
+last_updated: 2026-10-26
 ---
 
 # Release notes
@@ -66,6 +66,7 @@ production run records outside the repository.
 
 | Release | Date | Previous | Highlights |
 |---|---|---|---|
+| [v2026.10.26.1](v2026.10.26.1.md) | 2026-10-26 | v2026.10.25.1 | Configurable work-item admission limits with operator controls, Bandit 1.14.0 |
 | [v2026.10.25.1](v2026.10.25.1.md) | 2026-10-25 | v2026.10.24.1 | Minimized native Codex state, Codex recovery hints from one table, retired landing tags and release publication, Bandit 1.13.1 and xmldom 0.9.12 |
 | [v2026.10.24.1](v2026.10.24.1.md) | 2026-10-24 | v2026.10.22.11 | First schema-2 release tag, Antigravity weekly rate limit and result size, surrogate-safe text cuts, directory names in the remaining dashboard places |
 | [v2026.10.22.11](v2026.10.22.11.md) | 2026-10-23 | v2026.10.21.1 | Deploy CLI binds the Compose override to its transactions, build identity reads schema-2 release tags |
