@@ -78,7 +78,9 @@ may serve HTTP/2 to clients, but must use HTTP/1.1 upstream to this server.
 If a native `https:` listener is introduced, apply the same
 `http_2_options: [enabled: false]` there to prevent HTTP/2 through TLS ALPN.
 
-Bandit is updated to 1.13.1 to address the HTTP/1 request-target advisory.
+Bandit 1.14.0 includes the HTTP/1 and WebSocket security fixes. The chunk-extension
+regression test detects CVE-2026-114216; the remaining advisories are checked
+by dependency audit and the locked version.
 HTTP/2 remains disabled pending a separate reviewed decision, so dependency
 updates do not remove this restriction. The setting is compiled into the
 release; rollback uses the previous release, rather than an environment-variable

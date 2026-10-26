@@ -87,6 +87,37 @@ defmodule KaoiroServerWeb.EndpointTransportTest do
     end)
   end
 
+  for {label, extension} <- [{"bare LF", ";a=b\nc=d"}, {"valid", ";a=b"}] do
+    @extension extension
+    @invalid label == "bare LF"
+    @tag :bandit_chunk_extension
+    test "#{label} chunk extension is checked before routing", %{port: port} do
+      with_socket(port, fn socket ->
+        :ok = :inet.setopts(socket, packet: :http_bin)
+
+        :ok =
+          :gen_tcp.send(socket, [
+            "POST /api/health HTTP/1.1\r\nHost: localhost\r\n",
+            "Content-Type: application/x-www-form-urlencoded\r\n",
+            "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+            "3",
+            @extension,
+            "\r\na=b\r\n0\r\n\r\n"
+          ])
+
+        assert {:ok, {:http_response, _version, status, _reason}} =
+                 :gen_tcp.recv(socket, 0, @timeout)
+
+        if @invalid do
+          assert status == 400
+        else
+          # Plug.Parsers reads the body before the missing POST route produces 404.
+          refute status == 400
+        end
+      end)
+    end
+  end
+
   describe "HTTP/1.1 WebSockets" do
     setup do
       saved = Application.fetch_env(:kaoiro_server, :client_tokens)
@@ -103,20 +134,19 @@ defmodule KaoiroServerWeb.EndpointTransportTest do
       {:ok, token: token}
     end
 
-    for path <- ["/wrapper", "/runner", "/client"] do
+    for path <- ["/wrapper", "/runner", "/client"],
+        {extensions, suffix} <- [
+          {nil, ""},
+          {"permessage-deflate; client_max_window_bits", " with a valid extension offer"}
+        ] do
       @path path
-      test "#{path} upgrades and replies to a Phoenix heartbeat", %{port: port, token: token} do
+      @extensions extensions
+      test "#{path} upgrades and replies to a Phoenix heartbeat#{suffix}", %{
+        port: port,
+        token: token
+      } do
         with_socket(port, fn socket ->
-          :ok = :inet.setopts(socket, packet: :http_bin)
-          key = Base.encode64(:crypto.strong_rand_bytes(16))
-          target = "#{@path}/websocket?vsn=2.0.0&token=#{token}"
-
-          :ok =
-            :gen_tcp.send(socket, [
-              "GET #{target} HTTP/1.1\r\nHost: localhost\r\n",
-              "Connection: Upgrade\r\nUpgrade: websocket\r\n",
-              "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: #{key}\r\n\r\n"
-            ])
+          key = send_upgrade(socket, @path, token, @extensions)
 
           assert {:ok, {:http_response, {1, 1}, 101, _reason}} =
                    :gen_tcp.recv(socket, 0, @timeout)
@@ -127,6 +157,7 @@ defmodule KaoiroServerWeb.EndpointTransportTest do
             Base.encode64(:crypto.hash(:sha, key <> "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
 
           assert headers["sec-websocket-accept"] == expected
+          refute Map.has_key?(headers, "sec-websocket-extensions")
           :ok = :inet.setopts(socket, packet: :raw)
 
           payload = Jason.encode!([nil, "1", "phoenix", "heartbeat", %{}])
@@ -152,6 +183,36 @@ defmodule KaoiroServerWeb.EndpointTransportTest do
         end)
       end
     end
+
+    for path <- ["/wrapper", "/runner", "/client"] do
+      @path path
+      test "#{path} rejects a malformed extension offer", %{port: port, token: token} do
+        with_socket(port, fn socket ->
+          send_upgrade(socket, @path, token, "permessage-deflate; =x")
+
+          assert {:ok, {:http_response, _version, 400, _reason}} =
+                   :gen_tcp.recv(socket, 0, @timeout)
+        end)
+      end
+    end
+  end
+
+  defp send_upgrade(socket, path, token, extensions) do
+    :ok = :inet.setopts(socket, packet: :http_bin)
+    key = Base.encode64(:crypto.strong_rand_bytes(16))
+    target = "#{path}/websocket?vsn=2.0.0&token=#{token}"
+    extension_header = if extensions, do: "Sec-WebSocket-Extensions: #{extensions}\r\n", else: ""
+
+    :ok =
+      :gen_tcp.send(socket, [
+        "GET #{target} HTTP/1.1\r\nHost: localhost\r\n",
+        "Connection: Upgrade\r\nUpgrade: websocket\r\n",
+        "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: #{key}\r\n",
+        extension_header,
+        "\r\n"
+      ])
+
+    key
   end
 
   defp with_socket(port, fun) do
