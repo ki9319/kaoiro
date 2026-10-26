@@ -1,0 +1,18 @@
+{
+  "version": "0.164.0",
+  "native_version": "codex-cli 0.164.0",
+  "native_sha256": "b93f6811d3f653f0fb83be4050d857fb9abbb111dfa2ce160563327daff7f306",
+  "fixture_sha256": "66a4cd1772f468307bd189b6033d76a54af9fe58d10c1d786fb15b828ce65c4e",
+  "initialize": {
+    "userAgent": "codex_pin_capture/0.164.0 (Debian 13.0.0; x86_64) unknown (codex_pin_capture; 1)",
+    "codexHome": "<scratch>/home",
+    "platformFamily": "unix",
+    "platformOs": "linux"
+  },
+  "capture_command": "node capture-approval.mjs",
+  "captured_at": "2026-10-26T21:31:24.875Z",
+  "auth_method": "local provider; no credentials",
+  "experimental_api": true,
+  "outside_file_absent": true,
+  "provider_requests": 2
+}

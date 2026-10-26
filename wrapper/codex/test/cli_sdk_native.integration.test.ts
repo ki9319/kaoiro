@@ -66,12 +66,12 @@ it.each(["exec", "app-server"] as const)("runs the %s production factories again
     expect(JSON.stringify(requests[1]!.input)).toContain(unicode);
     const native = resolveAppServerBinary();
     const version = execFileSync(native, ["--version"], { encoding: "utf8" }).trim();
-    expect(version).toBe("codex-cli 0.161.0");
+    expect(version).toBe("codex-cli 0.164.0");
     const record = { backend, node: process.version, native_version: version,
       native_sha256: createHash("sha256").update(await readFile(native)).digest("hex"),
       requests: requests.map(r => ({ model: r.model, reasoning: r.reasoning })), unicode_observed: true,
       result: results()[0]!.payload, factory_injections: [] };
-    const outputDir = process.env.KAOIRO_CODEX_0161_EVIDENCE_DIR;
+    const outputDir = process.env.KAOIRO_CODEX_0164_EVIDENCE_DIR;
     if (outputDir) await writeFile(join(outputDir, `cli-native-${backend}.json`), JSON.stringify(record, null, 2) + "\n");
   } finally {
     for (const listener of process.listeners("SIGINT")) if (!signals.includes(listener)) listener("SIGINT");

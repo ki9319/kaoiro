@@ -47,15 +47,14 @@ existing shared paid catalog also includes it for API-key authentication;
 actual entitlement remains account-dependent. See the
 [dated Terra evidence](../../evidence/codex/model-catalog.md#signed-in-remote-catalog-2026-10-27).
 
-## Bundled 0.161.0 baseline
+## Bundled 0.164.0 baseline
 
-The bundled CLI/SDK pin is 0.161.0. The unauthenticated 0.160.0 and 0.161.0
-natives return identical 11-entry model lists (including hidden entries),
-GPT-6.1 Sol as default, and the same declared default effort. The tagged
-`models.json` is byte-identical. kaoiro's curated catalog, minimum versions,
-plan policy and effort policy remain unchanged. These measurements do not
-establish signed-in server defaults or operator entitlement; both remain
-unverified. See [the dated adoption evidence](../../evidence/codex-app-server/pin-0.161.0-adoption-gates-2026-10-08.md).
+The bundled CLI/SDK pin is 0.164.0. Its consumed SDK declarations remain
+compatible, and native checks cover explicit model/effort settings, default-effort
+resolution, and resumed turns. The pin does not change kaoiro's curated order,
+minimum client versions, plan policy or effort policy; GPT-6.1 Terra still has
+a supported minimum of 0.161.0. Local-provider checks do not establish signed-in
+server defaults or account entitlement. See [the dated adoption evidence](../../evidence/codex-app-server/pin-0.164.0-adoption-gates-2026-10-27.md).
 
 ## Implications for kaoiro
 
