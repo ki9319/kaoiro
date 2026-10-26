@@ -93,19 +93,29 @@ defmodule KaoiroServerWeb.PendingRetentionTest do
 
   defp push_ok(wrapper, env), do: assert_reply(push(wrapper, "envelope", env), :ok)
 
-  defp snapshot_entry(id) do
-    _socket = join_operator()
+  # Each join pushes its own snapshot, so read it before the next join.
+  defp join_snapshot(id) do
+    socket = join_operator()
     assert_push "snapshot", %{"agents" => agents}
-    agents[id]
+    {socket, agents[id]}
+  end
+
+  defp snapshot_entry(id), do: id |> join_snapshot() |> elem(1)
+
+  defp refute_pending(entry) do
+    ext = entry["ext"] || %{}
+    refute Map.has_key?(ext, "pending_permission")
+    refute Map.has_key?(ext, "pending_question")
   end
 
   for {label, rejected} <- [
         {"instruction_rejected", :instruction_rejected},
         {"attach_rejected", :attach_rejected}
       ] do
-    test "pending permission survives a later #{label} in the join snapshot and stays answerable",
+    test "pending permission survives a later #{label}, is answered, then stays cleared",
          %{id: id} do
       wrapper = join_wrapper(id)
+      @endpoint.subscribe("wrapper:" <> id)
 
       push_ok(
         wrapper,
@@ -117,36 +127,58 @@ defmodule KaoiroServerWeb.PendingRetentionTest do
         apply(__MODULE__, :__rejected__, [unquote(rejected), id, "waiting_permission"])
       )
 
-      entry = snapshot_entry(id)
+      {operator, entry} = join_snapshot(id)
       assert entry["type"] == unquote(label)
       assert entry["state"] == "waiting_permission"
-      assert get_in(entry, ["ext", "pending_permission", "request_id"]) == "req-1"
-
-      @endpoint.subscribe("wrapper:" <> id)
-      operator = join_operator()
+      request_id = get_in(entry, ["ext", "pending_permission", "request_id"])
+      assert request_id == "req-1"
 
       ref =
         push(operator, "permission_decision", %{
           "agent_id" => id,
-          "request_id" => "req-1",
+          "request_id" => request_id,
           "allow" => true
         })
 
       assert_reply ref, :ok
-      assert_broadcast "permission_decision", %{"request_id" => "req-1", "allow" => true}
+      assert_broadcast "permission_decision", %{"request_id" => ^request_id, "allow" => true}
+
+      # The wrapper's authoritative clear after the broker settles.
+      push_ok(wrapper, envelope(id, "state_change", "tool_running", %{}))
+      push_ok(wrapper, apply(__MODULE__, :__rejected__, [unquote(rejected), id, "tool_running"]))
+
+      refute_pending(snapshot_entry(id))
     end
   end
 
   def __rejected__(:instruction_rejected, id, state), do: instruction_rejected(id, state)
   def __rejected__(:attach_rejected, id, state), do: attach_rejected(id, state)
 
-  test "pending question survives a later instruction_rejected in the join snapshot", %{id: id} do
+  test "pending question survives a later instruction_rejected, is answered, then stays cleared",
+       %{id: id} do
     wrapper = join_wrapper(id)
+    @endpoint.subscribe("wrapper:" <> id)
     push_ok(wrapper, envelope(id, "state_change", "waiting_question", pending_question("q-1")))
     push_ok(wrapper, instruction_rejected(id, "waiting_question"))
 
-    entry = snapshot_entry(id)
-    assert get_in(entry, ["ext", "pending_question", "request_id"]) == "q-1"
+    {operator, entry} = join_snapshot(id)
+    request_id = get_in(entry, ["ext", "pending_question", "request_id"])
+    assert request_id == "q-1"
+
+    ref =
+      push(operator, "question_response", %{
+        "agent_id" => id,
+        "request_id" => request_id,
+        "answers" => %{"Which?" => "A"}
+      })
+
+    assert_reply ref, :ok
+    assert_broadcast "question_response", %{"request_id" => ^request_id}
+
+    push_ok(wrapper, envelope(id, "state_change", "thinking", %{}))
+    push_ok(wrapper, instruction_rejected(id, "thinking"))
+
+    refute_pending(snapshot_entry(id))
   end
 
   test "the live broadcast of the ext-less envelope carries the retained pending", %{id: id} do
@@ -178,9 +210,7 @@ defmodule KaoiroServerWeb.PendingRetentionTest do
     push_ok(wrapper, envelope(id, "state_change", "tool_running", %{}))
     push_ok(wrapper, instruction_rejected(id, "tool_running"))
 
-    entry = snapshot_entry(id)
-    refute Map.has_key?(entry["ext"] || %{}, "pending_permission")
-    refute Map.has_key?(entry["ext"] || %{}, "pending_question")
+    refute_pending(snapshot_entry(id))
   end
 
   test "the ext-less envelope's own pending wins over the retained one", %{id: id} do
@@ -200,5 +230,51 @@ defmodule KaoiroServerWeb.PendingRetentionTest do
 
     entry = snapshot_entry(id)
     assert get_in(entry, ["ext", "pending_permission", "request_id"]) == "req-5"
+  end
+
+  test "an explicit null in the incoming ext wins over the retained pending", %{id: id} do
+    wrapper = join_wrapper(id)
+
+    push_ok(
+      wrapper,
+      envelope(id, "state_change", "waiting_permission", pending_permission("req-6"))
+    )
+
+    push_ok(
+      wrapper,
+      envelope(
+        id,
+        "instruction_rejected",
+        "waiting_permission",
+        %{"pending_permission" => nil},
+        %{"reason" => "busy"}
+      )
+    )
+
+    entry = snapshot_entry(id)
+    assert Map.fetch!(entry["ext"], "pending_permission") == nil
+  end
+
+  test "a disconnect drops the retained pending and a reconnect does not revive it",
+       %{id: id} do
+    Process.flag(:trap_exit, true)
+    wrapper = join_wrapper(id)
+
+    push_ok(
+      wrapper,
+      envelope(id, "state_change", "waiting_permission", pending_permission("req-7"))
+    )
+
+    push_ok(wrapper, instruction_rejected(id, "waiting_permission"))
+    assert get_in(snapshot_entry(id), ["ext", "pending_permission", "request_id"]) == "req-7"
+
+    :ok = close(wrapper)
+    entry = snapshot_entry(id)
+    assert entry["state"] == "disconnected"
+    refute_pending(entry)
+
+    reconnected = join_wrapper(id)
+    push_ok(reconnected, instruction_rejected(id, "idle"))
+    refute_pending(snapshot_entry(id))
   end
 end

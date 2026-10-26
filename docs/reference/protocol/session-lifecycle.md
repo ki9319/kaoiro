@@ -59,7 +59,13 @@ mismatch as `agent_not_owned`; ordinary unexpected-disconnect claim rules are un
 and sends a compatibility `permission_request` envelope (the type table above), keeping the
 Promise pending until `permission_decision`. The ext field remains authoritative, so it
 survives intervening `state_change` events (thinking, tool_running, or session-init idle)
-([ADR-0022](../../adr/0022-pending-permission-authoritative-source.md)).
+([ADR-0022](../../adr/0022-pending-permission-authoritative-source.md)). Only `state_change`,
+`permission_request` and `question_request` speak about pending state: when another stored
+type such as `instruction_rejected` or `attach_rejected` becomes the latest envelope, the
+server keeps the stored `ext.pending_permission` / `ext.pending_question` that envelope does
+not carry, in the join snapshot and in its broadcast
+([issue #503](https://github.com/sakuraiyuta/kaoiro/issues/503)). A disconnect still drops
+them. `pending_*` never reaches viewers, and these two types are dropped for viewers whole.
 No response means **wait indefinitely** by default, matching the SDK (no timeout; finite
 timeouts are wrapper opt-in, with configuration in issue #60). A deny still keeps the
 session alive. The server only relays instruction and approval **without interpreting their

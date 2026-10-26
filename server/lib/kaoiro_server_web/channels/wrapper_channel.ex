@@ -1543,15 +1543,9 @@ defmodule KaoiroServerWeb.WrapperChannel do
   # `accept_inter_agent/6`).
   defp store_and_broadcast(envelope, agent_id, received_at, socket) do
     stored =
-      if envelope["type"] in ["state_change", "permission_request", "question_request"] do
-        AgentStates.put_with_delivery_policy(envelope, socket.assigns[:delivery_policy_view],
-          owner: self()
-        )
-      else
-        case store(envelope) do
-          :ok -> {:ok, envelope}
-          result -> result
-        end
+      case store(envelope, socket) do
+        :ok -> {:ok, envelope}
+        result -> result
       end
 
     case stored do
@@ -1767,8 +1761,8 @@ defmodule KaoiroServerWeb.WrapperChannel do
   end
 
   # log / result are reply transcript lines kept as history (ADR-0012);
-  # state_change / permission_request refresh the latest state.
-  defp store(%{"type" => type} = envelope) when type in ["log", "result"] do
+  # every other stored type refreshes the latest state (last clause).
+  defp store(%{"type" => type} = envelope, _socket) when type in ["log", "result"] do
     AgentStates.append_log(envelope)
   end
 
@@ -1778,15 +1772,21 @@ defmodule KaoiroServerWeb.WrapperChannel do
   # state — so overwriting the latest AgentStates entry with it would erase
   # the rich models the immediately-preceding state_change just delivered.
   # Broadcast only; do NOT store.
-  defp store(%{"type" => "refresh_models_result"}), do: :ok
+  defp store(%{"type" => "refresh_models_result"}, _socket), do: :ok
 
   # Subagent/workflow task lifecycle (issue #170, ADR-0019/0047/0048). A
   # dedicated flat table, not the per-agent_id AgentStates slot — see
   # TaskStates' moduledoc. Broadcast (below, unchanged for every type)
   # still fans this out to agents:lobby same as any other envelope.
-  defp store(%{"type" => "task"} = envelope), do: TaskStates.put(envelope)
+  defp store(%{"type" => "task"} = envelope, _socket), do: TaskStates.put(envelope)
 
-  defp store(envelope), do: AgentStates.put(envelope, owner: self())
+  # Broadcast what was stored, so a live client sees the same ext (retained
+  # pending, delivery policy) as the next join snapshot (issue 503).
+  defp store(envelope, socket) do
+    AgentStates.put_with_delivery_policy(envelope, socket.assigns[:delivery_policy_view],
+      owner: self()
+    )
+  end
 
   # "users" projection for directory_request (issue #187 段階2, ADR-0021
   # F6-8). Fail-closed (director D4): the third arg to get_env/3 is the

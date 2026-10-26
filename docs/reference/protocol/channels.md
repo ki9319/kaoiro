@@ -278,11 +278,12 @@ An accepted save remains pending. CAS conflicts require a fresh read and
 explicit reselection; lost or malformed replies are uncertain, never retried
 silently. The client does not queue policy writes while disconnected.
 
-State, permission and question envelopes retain the AgentStates policy view
-without a policy-store read. The initial envelope uses the view already read
-by the join handshake or current ack. Storage selects an existing view ahead
-of that initial seed and returns the same envelope for broadcast; wrapper
-policy fields are discarded. This display cache can lag a policy change or
+Every envelope stored as the agent's latest state (all types except `log`,
+`result`, `task`, `refresh_models_result` and `inter_agent_message`) retains
+the AgentStates policy view without a policy-store read. The initial envelope
+uses the view already read by the join handshake or current ack. Storage
+selects an existing view ahead of that initial seed and returns the same
+envelope for broadcast; wrapper policy fields are discarded. This display cache can lag a policy change or
 store outage. Fresh snapshots and non-normal admission read the current store
 and owner state; a cached on view never grants delivery permission.
 

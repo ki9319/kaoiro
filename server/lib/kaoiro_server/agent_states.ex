@@ -85,6 +85,11 @@ defmodule KaoiroServer.AgentStates do
   @disconnect_intent_ttl_ms 30_000
   @disconnect_precedence ~w(operator runner agent_self)
 
+  # Only these types speak about pending interactions (ADR-0022 / ADR-0027);
+  # any other stored type keeps the pending the agent is still blocked on.
+  @pending_authoritative_types ~w(state_change permission_request question_request)
+  @pending_keys ~w(pending_permission pending_question)
+
   @wire_projection_bytes TransportLimits.snapshot_payload_budget(
                            "snapshot",
                            "agents",
@@ -122,7 +127,10 @@ defmodule KaoiroServer.AgentStates do
   `opts[:owner]` records the writing channel pid (used by `disconnect/3`);
   `opts[:server]` overrides the GenServer (tests). Returns
   `{:error, :too_many_agents}` when a new agent_id would exceed the cap;
-  updates to known agent_ids always succeed.
+  updates to known agent_ids always succeed. An envelope whose type is not
+  `state_change`, `permission_request` or `question_request` keeps the
+  stored `ext.pending_permission` / `ext.pending_question` it does not
+  carry itself.
   """
   def put(%{"agent_id" => agent_id} = envelope, opts \\ []) do
     server = Keyword.get(opts, :server, __MODULE__)
@@ -514,7 +522,12 @@ defmodule KaoiroServer.AgentStates do
       {:reply, {:error, :too_many_agents}, state}
     else
       existing = Map.get(agents, agent_id)
-      envelope = preserve_newer_permission_control(existing, envelope)
+
+      envelope =
+        existing
+        |> preserve_newer_permission_control(envelope)
+        |> retain_pending(existing)
+
       prior = if existing, do: get_in(existing.envelope, ["ext", "delivery_policy"])
 
       # Choose inside the store call so an earlier policy refresh wins over
@@ -913,6 +926,39 @@ defmodule KaoiroServer.AgentStates do
         existing_control = get_in(existing_envelope, ["ext", "permission_control"])
         ext = Map.get(envelope, "ext", %{})
         Map.put(envelope, "ext", Map.put(ext, "permission_control", existing_control))
+    end
+  end
+
+  # issue 503: an `instruction_rejected` / `attach_rejected` (ext-less) that
+  # follows a pending permission or question must not erase it, or the next
+  # join snapshot hides a dialog the blocked agent will never re-announce.
+  # A key the incoming ext carries, even as an explicit null, wins.
+  defp retain_pending(envelope, nil), do: envelope
+
+  defp retain_pending(%{"type" => type} = envelope, _existing)
+       when type in @pending_authoritative_types,
+       do: envelope
+
+  defp retain_pending(envelope, %{envelope: existing_envelope}) do
+    carried =
+      case Map.get(existing_envelope, "ext") do
+        ext when is_map(ext) ->
+          for key <- @pending_keys, is_map(ext[key]), into: %{}, do: {key, ext[key]}
+
+        _ ->
+          %{}
+      end
+
+    if carried == %{} do
+      envelope
+    else
+      ext =
+        case Map.get(envelope, "ext") do
+          ext when is_map(ext) -> ext
+          _ -> %{}
+        end
+
+      Map.put(envelope, "ext", Map.merge(carried, ext))
     end
   end
 
