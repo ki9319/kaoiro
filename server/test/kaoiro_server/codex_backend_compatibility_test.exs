@@ -24,8 +24,7 @@ defmodule KaoiroServer.CodexBackendCompatibilityTest do
     host = "alpha.beta"
     live_id = "#{host}.live"
     offline_id = "#{host}.offline"
-    activity_name = String.to_atom("compat_activity_#{System.unique_integer([:positive])}")
-    activity = start_supervised!({AgentActivity, name: activity_name})
+    activity = start_supervised!({AgentActivity, name: nil})
 
     directory =
       start_supervised!({
