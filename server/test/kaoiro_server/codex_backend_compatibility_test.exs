@@ -273,6 +273,41 @@ defmodule KaoiroServer.CodexBackendCompatibilityTest do
              )
   end
 
+  test "conflicting pointer and wrapper engines invalidate the host observation" do
+    host = "engine-conflict"
+    agent_id = "#{host}.agent"
+
+    directory =
+      start_supervised!({KaoiroServer.CodexBackendCompatibilitySource, %{all: %{agent_id => %{}}}})
+
+    pointers =
+      start_supervised!({
+        KaoiroServer.CodexBackendCompatibilitySource,
+        %{all: %{agent_id => %{session_id: nil, engine: :codex}}}
+      })
+
+    states =
+      start_supervised!({
+        KaoiroServer.CodexBackendCompatibilitySource,
+        %{snapshot: %{agent_id => %{"ext" => %{"engine" => "claude-code"}}}, connected_ids: MapSet.new()}
+      })
+
+    resets =
+      start_supervised!({KaoiroServer.CodexBackendCompatibilitySource, %{pending_ids: MapSet.new()}})
+
+    activity =
+      start_supervised!({KaoiroServer.CodexBackendCompatibilitySource, %{pending_ids: MapSet.new()}})
+
+    assert {:error, :invalid_observation} =
+             CodexBackendCompatibility.observe_host(host,
+               directory_server: directory,
+               pointers_server: pointers,
+               states_server: states,
+               resets_server: resets,
+               activity_server: activity
+             )
+  end
+
   test "invalid host identifiers are refused" do
     assert {:error, :invalid_host_id} = CodexBackendCompatibility.observe_host("bad/host")
   end

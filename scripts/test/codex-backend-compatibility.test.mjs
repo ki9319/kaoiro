@@ -321,6 +321,15 @@ test("null engine evidence refusals use one exact stop code and do not write", a
     ["null engine with mismatched evidence identity stops with origin-evidence-invalid", { evidence: { ...originEvidence(), runner_sha: "f".repeat(40) } }, "origin-evidence-invalid"],
     ["none origin conflicts with a non-nil pointer", { hosts: [observation({ engine: null, pointer: "non_nil" })], evidence: { ...originEvidence(), agents: [{ id: AGENT_ID, origin: "none", complete: true }] } }, "origin-evidence-conflict"],
     ["null engine with app-server origin stops with origin-evidence-conflict", { evidence: { ...originEvidence(), agents: [{ id: AGENT_ID, origin: "app-server", complete: true }] } }, "origin-evidence-conflict"],
+    ["null engine with unbound attested unknown origin stops with origin-unknown", { evidence: {
+      ...originEvidence(), origin_source: "operator-attestation",
+      agents: [{ id: AGENT_ID, origin: "unknown", complete: true }],
+      attestation: {
+        accepted: true, attested_at: "2026-10-27T00:00:00Z", scope: "the measured test host",
+        release_range: "the tested release", statement: "the exact row routes through exec",
+        unknown_origin_rows: [], contrary_rows: [], unresolved_rows: [],
+      },
+    } }, "origin-unknown"],
     ["null engine with unsupported origin stops with origin-evidence-invalid", { evidence: { ...originEvidence(), agents: [{ id: AGENT_ID, origin: "other", complete: true }] } }, "origin-evidence-invalid"],
     ["null engine with missing origin stops with origin-evidence-invalid", { evidence: { ...originEvidence(), agents: [{ id: AGENT_ID, complete: true }] } }, "origin-evidence-invalid"],
   ];
@@ -540,8 +549,8 @@ function localArgv(configPath, evidencePath) {
   return args;
 }
 
-function localCommandBoundary({ configPath, projection, projectionOutput, identityOutput, reloadDiagnostic, wrapperDiagnostic, oversizedStartup = false, failObservationAt = 0, failAck = false, runnerSha = RUNNER_SHA, runnerHost = HOST }) {
-  const calls = { systemctl: 0, docker: 0, journalRows: 0, runnerIdentity: 0, runnerIdentityArgs: [], cursor: 0, acknowledgement: 0, acknowledgementArgs: [] };
+function localCommandBoundary({ configPath, projection, projectionOutput, identityOutput, reloadDiagnostic, wrapperDiagnostic, oversizedStartup = false, failObservationAt = 0, failAck = false, runnerSha = RUNNER_SHA, runnerHost = HOST, reloadTimestampOffsetUs = 1_000_000 }) {
+  const calls = { systemctl: 0, docker: 0, journalRows: 0, journalRowsArgs: [], runnerIdentity: 0, runnerIdentityArgs: [], cursor: 0, acknowledgement: 0, acknowledgementArgs: [] };
   const startup = `runner: host=${runnerHost} rev=${runnerSha} connecting to wss://example.invalid/runner\n`;
   const reloadLine = reloadDiagnostic ?? "runner: codex backend=exec for subsequent wrappers\n";
   const wrapperLine = wrapperDiagnostic ?? "codex: backend=exec\n";
@@ -586,8 +595,10 @@ function localCommandBoundary({ configPath, projection, projectionOutput, identi
         }
         if (args.includes("--output=json")) {
           calls.journalRows += 1;
+          calls.journalRowsArgs.push(args);
           const config = JSON.parse(readFileSync(configPath, "utf8"));
-          const timestamp = String(Math.floor(statSync(configPath).mtimeMs * 1000) + 1_000_000);
+          const timestampOffset = config.codex?.backend === "exec" ? reloadTimestampOffsetUs : 1_000_000;
+          const timestamp = String(Math.floor(statSync(configPath).mtimeMs * 1000) + timestampOffset);
           const message = config.codex?.backend === "exec"
             ? reloadLine.trimEnd()
             : wrapperLine.trimEnd();
@@ -723,6 +734,19 @@ test("real reload diagnostic is consumed by both default readers", async (t) => 
   assert.equal(boundary.calls.journalRows, 3);
   assert.equal(boundary.calls.acknowledgement, 1);
   assert.ok(boundary.calls.acknowledgementArgs[0].includes("--after-cursor=cursor-before-write"));
+  assert.ok(boundary.calls.acknowledgementArgs[0].includes("--output=cat"));
+});
+
+test("a reload diagnostic before the saved config mtime is not an applied receipt", async (t) => {
+  const reloadDiagnostic = await captureRealRunnerReloadDiagnostic();
+  const files = localFiles(t);
+  const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, reloadDiagnostic, reloadTimestampOffsetUs: -1 });
+  const output = io();
+
+  assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+  assert.match(output.stderr.text, /stopped \(applied-selection-unverified\)/);
+  assert.deepEqual(JSON.parse(readFileSync(files.configPath, "utf8")).codex, { backend: "exec" });
+  assert.equal(boundary.calls.acknowledgement, 1);
 });
 
 test("real wrapper backend diagnostic comes from temporary config and reaches the default reader", async (t) => {
@@ -753,6 +777,7 @@ test("the default runner observer scans the full invocation and stops when its s
     assert.ok(boundary.calls.runnerIdentityArgs.every((args) =>
       args.includes(`_SYSTEMD_INVOCATION_ID=${INVOCATION_ID}`)
         && !args.some((arg) => arg.startsWith("--lines="))));
+    assert.ok(boundary.calls.journalRowsArgs.every((args) => args.includes(`_SYSTEMD_INVOCATION_ID=${INVOCATION_ID}`)));
   });
 
   await t.test("no matching startup record returns the named stop code before any write", async (t) => {
