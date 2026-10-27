@@ -37,9 +37,11 @@ through `localAdapters` and verifies the lifecycle gate stops before a write.
 The fixture uses synthetic identifiers and contains no operator environment
 values.
 
-The golden capture record for the final implementation candidate is recorded
-with its source SHA, hakoniwa run, captured byte count, and fixture SHA after
-the final-candidate ExUnit control passes.
+The golden was captured from final implementation candidate
+`cd81058c1e94024f5eee3008ea321f1a48cd29d3` in the final-candidate ExUnit run
+`momo-cd81058-u1ecd810-1027231131-392f.e21515cfa77e42bd`. The real observer
+returned 1037 bytes; the committed fixture SHA-256 is
+`018a936bd545927d5b590735abbe07dedff365eb22c3643057d7616feba4cd1d`.
 
 ## Runner identity stop path
 
@@ -89,15 +91,24 @@ or Elixir image
 
 | Check | Run | Result |
 | --- | --- | --- |
-| Final candidate no-defect control: Node compatibility, isolation, and checker | pending | pending |
-| Final candidate no-defect control: server compatibility ExUnit and format | pending | pending |
-| Required and adopted mutations | pending | pending |
-| Final candidate CI | pending | all seven jobs pending |
+| Final candidate no-defect control: Node compatibility, isolation, and checker | `momo-cd81058-u1ccd810-1027231216-9f45.62b43234748df9aa` | Pass: 234 tests, 234 pass, 0 fail. |
+| Final candidate no-defect control: server compatibility ExUnit and format | `momo-cd81058-u1ecd810-1027231131-392f.e21515cfa77e42bd` | Pass: format check and 6/6 tests. |
+| Node mutation campaign, first 33 cases | `momo-1a7f628-u1mutn5-1027232935-f1a3.e9994c627849d76e` | All 33 mutations before the N1 case were killed by their named assertion or checker diagnostic. The run stopped when the N1 mutant survived its initially misbound focused test; that producer mutation was rerun with the corrected default-adapter test in the tail run below. |
+| Node mutation campaign, final 7 cases | `momo-c806373-u1tail8-1027233702-a7c7.32d56654576afe8b` | Pass: 7/7 killed, including N1, both 8 MiB outcomes, both reload timestamp/receipt conditions, pre-write stability, and omitted-default preservation. Each test-bearing mutant reported a failing named test; the workflow checker mutant reported its pinned workflow-entry diagnostic. |
+| ExUnit producer/binding mutation campaign | `momo-19f0b52-u1mutel4-1027234041-b963.6f3f63160ed80a43` | Pass: 6/6 killed. Each ran the 6-test compatibility suite; failures per mutant were 1, 3, 2, 2, 5, and 1. |
+| Final candidate CI | Draft PR checks on the exact pushed head | The `pull_request` run and all seven job conclusions are recorded on the draft PR. The reviewer verifies the run head SHA equals the PR head SHA; the PR check record is authoritative. |
 
 The named checker self-test `rejects workflow without compatibility-test
 entry` keeps the workflow-entry assertion active. The compatibility suite is
 the Node test command in the `test-isolation` job after wrapper and runner
-builds.
+builds. The 40 Node mutations cover pending and fail-closed gates, launcher
+identity producers and readers, invocation and cursor binding, both reload
+readers and their producer, RPC framing, runner-config reload, wrapper output,
+workflow wiring, null/non-null origin distinctions, the 8 MiB limit, dirty
+identity, reload-after-write, pre-write stability, and the omitted legacy
+default. Six ExUnit mutations cover conflicting and missing engine producers,
+directory defaults, pointer engine keys, static-fixture substitution, and host
+binding.
 
 ## Limits
 
