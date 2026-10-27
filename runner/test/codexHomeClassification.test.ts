@@ -179,7 +179,14 @@ describe("production-shaped Codex home classification", () => {
     expect(legacy.status).not.toBe(0); expect(legacy.stderr).toContain(`Unclassified Codex home entry: ${name}`);
     rmSync(join(fixture.home, name), { recursive: true }); symlinkSync("/unavailable/daemon-parent", join(fixture.home, name));
     const result = run([stateCLI, "classify", fixture.home]);
-    expect(result.status).toBe(78); expect(result.stderr).toContain(`CODEX_EXTERNAL_DAEMON_CHECK_FAILED: ${name}`);
+    expect(result.status).toBe(78); expect(result.stderr).toContain(`CODEX_EXTERNAL_DAEMON_CHECK_FAILED: ${name}\n`);
+  });
+
+  it("refuses a nested package symlink parent without following it", () => {
+    symlinkSync("/unavailable/package-root", join(fixture.home, "packages/standalone"));
+    const result = run([stateCLI, "classify", fixture.home]);
+    expect(result.status).toBe(78);
+    expect(result.stderr).toContain("CODEX_EXTERNAL_DAEMON_CHECK_FAILED: packages/standalone/install.lock.d");
   });
 
   const locks = ["app-server-control/app-server-startup.lock", "app-server-daemon/daemon.lock",
@@ -199,17 +206,18 @@ describe("production-shaped Codex home classification", () => {
     expect(run([stateCLI, "classify", fixture.home]).status).toBe(0);
   });
 
-  it.each(["success", "error", "signal", "exit", "null", "throw", "identity", "open", "opened-dev", "opened-ino", "opened-type", "opened-link", "opened-owner", "after-dev", "after-link", "after-owner"])("closes each probe descriptor on %s and lets an independent process acquire it", (fault) => {
+  it.each(["success", "error", "signal", "exit", "null", "throw", "identity", "open", "opened-dev", "opened-ino", "opened-type", "opened-link", "opened-owner", "after-dev", "after-link", "after-owner", "before-type", "before-link", "before-owner", "stat", "close"])("closes each probe descriptor on %s and lets an independent process acquire it", (fault) => {
     const result = run(["--input-type=module", "-e", `
       import fs from 'node:fs'; import cp from 'node:child_process'; import assert from 'node:assert/strict';
       import { syncBuiltinESMExports } from 'node:module';
       const home=process.argv[2], fault=process.argv[3], path=home+'/app-server-control/app-server-startup.lock';
-      const realSpawn=cp.spawnSync, realOpen=fs.openSync, realStat=fs.lstatSync, realFstat=fs.fstatSync, fds=[];
+      const realSpawn=cp.spawnSync, realOpen=fs.openSync, realStat=fs.lstatSync, realFstat=fs.fstatSync, realClose=fs.closeSync, fds=[];
       const changed=(st,kind)=>Object.assign(Object.create(st),kind==='dev'?{dev:st.dev+1}:kind==='ino'?{ino:st.ino+1}:kind==='type'?{isFile:()=>false}:kind==='link'?{nlink:2}:{uid:st.uid+1});
       fs.fstatSync=(fd,...args)=>{const st=realFstat(fd,...args);return fds.includes(fd)&&fault.startsWith('opened-')?changed(st,fault.slice(7)):st;};
       fs.openSync=(name,...args)=>{if(String(name)===path&&fault==='open')throw Error('open refused');const fd=realOpen(name,...args);if(String(name)===path)fds.push(fd);return fd;};
-      let replaceIdentity=false;
-      fs.lstatSync=(name,...args)=>{const st=realStat(name,...args);if(String(name)===path&&replaceIdentity)return changed(st,fault==='identity'?'ino':fault.slice(6));return st;};
+      fs.closeSync=fd=>{realClose(fd);if(fds.includes(fd)&&fault==='close')throw Error('close diagnostics');};
+      let replaceIdentity=false,firstStat=true;
+      fs.lstatSync=(name,...args)=>{if(String(name)===path&&fault==='stat')throw Object.assign(Error('unreadable'),{code:'EACCES'});const st=realStat(name,...args);if(String(name)===path&&firstStat&&fault.startsWith('before-')){firstStat=false;return changed(st,fault.slice(7));}if(String(name)===path&&replaceIdentity)return changed(st,fault==='identity'?'ino':fault.slice(6));return st;};
       cp.spawnSync=(file,args,opts)=>{
         const r=realSpawn(file,args,opts);if(file!=='/usr/bin/flock')return r;
         if(fault==='throw')throw Error('CHECKER_PRIVATE_SENTINEL');
