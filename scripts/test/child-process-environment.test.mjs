@@ -72,11 +72,11 @@ test("build children retain the exact selected toolchain PATH without ambient cr
 
 test("coverage check rejects separate existing and new bypasses and its own disabled guard", () => {
   const green = checkReleaseChildEnvironments(root);
-  assert.equal(green.files, 5); assert.equal(green.calls, 14);
+  assert.equal(green.files, 6); assert.equal(green.calls, 15);
   assert.equal(green.unchanged_legacy_calls, 4);
   for (const target of ["scripts/build-identity.mjs", "scripts/with-build-identity.mjs",
     "scripts/codex-backend-compatibility.mjs",
-    "server/deploy/kaoiro-server-deploy.mjs", "runner/deploy/kaoiro-runner-codex-state.mjs"]) {
+    "server/deploy/kaoiro-server-deploy.mjs", "runner/deploy/kaoiro-runner-codex-state.mjs", "runner/deploy/codex-snapshot.mjs"]) {
     assert.throws(() => checkReleaseChildEnvironments(root, (path, encoding) => {
       const source = readFileSync(path, encoding);
       return path.endsWith(target) ? source + "\nspawnSync('unsafe', []);\n" : source;
@@ -90,7 +90,7 @@ test("coverage pins import-only, spawn/fork, exact legacy count and both scope-p
     return path.endsWith(target) ? transform(source) : source;
   });
   for (const target of ["scripts/build-identity.mjs", "scripts/with-build-identity.mjs", "scripts/codex-backend-compatibility.mjs", "server/deploy/kaoiro-server-deploy.mjs",
-    "runner/deploy/kaoiro-runner-codex-state.mjs"]) {
+    "runner/deploy/kaoiro-runner-codex-state.mjs", "runner/deploy/codex-snapshot.mjs"]) {
     for (const extra of ["import cp from 'node:child_process';", "spawn('unsafe', []);", "fork('unsafe');"]) {
       assert.throws(mutate(target, source => source + "\n" + extra), /unmanaged/);
     }
