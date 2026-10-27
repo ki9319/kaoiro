@@ -255,6 +255,12 @@ and cwd. See the
 and [ADR-0058](../../adr/0058-codex-app-server-turn-steer.md).
 Steering remains disabled and approval remains `never`.
 
+Before a later release changes the omitted default, run the U1 `prepare` phase
+from the [backend switching runbook](../../operations/codex-backend-switch.md#preparation-before-a-default-change)
+on affected legacy hosts. U1 keeps omission on exec and persists an explicit
+exec setting only after the current route and complete session-origin evidence
+are established. It does not remove settings or restore sessions.
+
 ### Codex backend selection
 
 This subsection is retained as a fragment-compatible pointer. The selector,

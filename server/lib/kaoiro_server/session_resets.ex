@@ -280,6 +280,9 @@ defmodule KaoiroServer.SessionResets do
     GenServer.call(server, {:pending?, agent_id})
   end
 
+  @doc "Returns IDs with a pending reset lock, without exposing lock metadata."
+  def pending_ids(server \\ __MODULE__), do: GenServer.call(server, :pending_ids)
+
   @doc """
   Purges the agent's lock and dispatch-cooldown record. Called from the
   operator delete path so a subsequent respawn under the same agent_id
@@ -389,6 +392,10 @@ defmodule KaoiroServer.SessionResets do
 
   def handle_call({:pending?, agent_id}, _from, s) do
     {:reply, Map.has_key?(s.pending, agent_id), s}
+  end
+
+  def handle_call(:pending_ids, _from, s) do
+    {:reply, s.pending |> Map.keys() |> MapSet.new(), s}
   end
 
   def handle_call({:pending_request_id, agent_id}, _from, s) do

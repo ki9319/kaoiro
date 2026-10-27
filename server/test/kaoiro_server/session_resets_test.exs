@@ -51,6 +51,20 @@ defmodule KaoiroServer.SessionResetsTest do
   end
 
   describe "check_and_acquire/5 (F6 の TOCTOU 芯)" do
+    test "pending_ids exposes reset members without lock metadata", %{resets: sr} do
+      assert SessionResets.pending_ids(sr) == MapSet.new()
+
+      assert {:ok, first_request, _} =
+               SessionResets.check_and_acquire("a.first", "new", "idle", nil, sr)
+
+      assert {:ok, second_request, _} =
+               SessionResets.check_and_acquire("a.second", "new", "idle", nil, sr)
+
+      assert SessionResets.pending_ids(sr) == MapSet.new(["a.first", "a.second"])
+      refute inspect(SessionResets.pending_ids(sr)) =~ first_request
+      refute inspect(SessionResets.pending_ids(sr)) =~ second_request
+    end
+
     test "idle 状態で lock を獲得、request_id と previous_session_id を返す", %{resets: sr} do
       assert {:ok, request_id, "sess-A"} =
                SessionResets.check_and_acquire("a.1", "new", "idle", "sess-A", sr)

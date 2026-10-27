@@ -1,7 +1,7 @@
 ---
 title: "Codex backend switching and rollback"
 status: implemented
-last_updated: 2026-09-30
+last_updated: 2026-10-27
 ---
 
 # Codex backend switching and rollback
@@ -10,6 +10,63 @@ The runner-local setting is specified in the [runner configuration reference](..
 Package handoff measurements and limits are retained in the
 [rollback artifact evidence](../evidence/codex-app-server/backend-rollback-artifact.md). General installation and updates
 remain in the [production deployment manual](production.md).
+
+## Preparation before a default change
+
+U1 adds `scripts/codex-backend-compatibility.mjs`, whose only supported phase
+is `prepare`. Use it before deploying a later default-changing release to an
+affected host whose `codex.backend` is omitted:
+
+```sh
+node scripts/codex-backend-compatibility.mjs \
+  --phase prepare \
+  --host <host-id> \
+  --runner-sha <40-character-runner-release-sha> \
+  --compose-file <confirmed-compose-file> \
+  --runner-config <confirmed-runner-config> \
+  --runner-unit <confirmed-user-unit> \
+  --origin-evidence <private-origin-evidence.json>
+```
+
+The command reads the complete host union from the server, including directory,
+pointer, live, reset-lock, and pending-transition membership. It also verifies
+the local runner identity, current configuration, and applied backend evidence.
+Before writing, it repeats both observations and stops if any value changed or
+is unavailable. A successful preparation adds only `codex.backend: "exec"`,
+then waits for the runner's exact applied-selection diagnostic and rechecks the
+saved setting. It does not reset, restore, remove a pin, or switch an explicit
+backend.
+
+An explicit `exec` or `app-server` setting with a matching applied selection is
+left as-is, regardless of session creation origin. For an omitted setting, the
+current applied selection must be `exec`, every relevant Codex session must
+have complete exec-or-no-session origin evidence, and no reset or transition
+may be pending. Unknown or incomplete origin, unknown engine, changed roster,
+or unavailable observation stops before the write. An operator may resolve
+unknown direct origin with the separately recorded configuration-history
+attestation accepted in [issue #564](https://github.com/sakuraiyuta/kaoiro/issues/564);
+the private file must record its scope, attested time, release range, statement,
+and unknown rows, with no conflicting or unresolved rows. It remains an
+operator-attested routing assumption, not a measurement. The origin-evidence
+file must cover archived session IDs as well as current server members; UUID
+shape and missing snapshot fields are not origin evidence.
+
+The private JSON has `schema`, `host`, `config_sha256`, `config_mtime_ms`,
+`runner_sha`, `invocation_id`, `all_relevant_sessions_covered`, `origin_source`,
+`agent_ids`, and `agents` fields. `origin_source` is `measured` or
+`operator-attestation`; each `agents` row has `id`, `origin`, and `complete`.
+For an attestation, also set `attestation.accepted` and record
+`attested_at`, `scope`, `release_range`, `statement`, `unknown_origin_rows`,
+`contrary_rows`, and `unresolved_rows`. Set no operator-private values in
+public issue comments or release notes.
+
+If the write succeeds but the applied-selection acknowledgement is missing,
+the command exits without a second write, rollback, or restore. Keep the
+explicit setting in place, treat the applied state as unknown, and stop for
+operator review. For separate server and runner hosts, use only an already
+authorized adapter module; this command does not infer remote access or add an
+SSH route. The preparation is not a distributed lock, so one maintenance owner
+must exclude concurrent operator lifecycle actions while it runs.
 
 ## Codex backend selection and rollback
 

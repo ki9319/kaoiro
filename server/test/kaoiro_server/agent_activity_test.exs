@@ -112,6 +112,21 @@ defmodule KaoiroServer.AgentActivityTest do
     assert started == ts(1)
   end
 
+  test "pending_ids exposes a positive transition without transaction metadata" do
+    name = String.to_atom("pending_ids_activity_#{System.unique_integer([:positive])}")
+    store = start_supervised!({AgentActivity, name: name, pending_ttl_ms: 5_000})
+
+    assert AgentActivity.pending_ids(store) == MapSet.new()
+
+    assert :ok =
+             AgentActivity.begin_transition("a", "private-transition", :restore, ts(1),
+               server: store
+             )
+
+    assert AgentActivity.pending_ids(store) == MapSet.new(["a"])
+    refute inspect(AgentActivity.pending_ids(store)) =~ "private-transition"
+  end
+
   test "old-owner casts cannot affect an activated generation", %{store: store} do
     old_owner = self()
     AgentActivity.record_envelope(env("a", "result", "old"), old_owner, ts(1), server: store)

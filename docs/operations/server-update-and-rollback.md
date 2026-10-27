@@ -63,6 +63,13 @@ they complete the 4.6 migration.
 
 Satisfy all of the following before starting.
 
+If the target release includes the Codex omitted-backend default change, complete
+the affected host's U1 `prepare` phase before deploying that runner release. The
+observation helper is read-only and adds no DETS schema or rollback state; use
+the [Codex backend preparation runbook](codex-backend-switch.md#preparation-before-a-default-change)
+for the applied-selection and origin checks. A server update alone does not
+complete runner preparation.
+
 - **Pin the target to a full 40-character SHA.** Do not depend on `git pull`; record
   the SHA in the change log.
 - **Advance both server and runner to the same target.** Advancing one side alone

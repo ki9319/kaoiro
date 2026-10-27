@@ -1,0 +1,287 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { main } from "../codex-backend-compatibility.mjs";
+
+const HOST = "legacy-host";
+const RUNNER_SHA = "475e0d5d01d173b46be3bbb7b28564ccf8743abd";
+const CONFIG_HASH = "a".repeat(64);
+const NEXT_CONFIG_HASH = "b".repeat(64);
+const INVOCATION_ID = "1234567890abcdef1234567890abcdef";
+const AGENT_ID = `${HOST}.agent`;
+
+function observation(overrides = {}) {
+  return {
+    schema: 1,
+    host: HOST,
+    rows: [{
+      id: AGENT_ID,
+      directory: true,
+      pointer: "non_nil",
+      engine: "codex",
+      live: false,
+      connected: false,
+      reset_pending: false,
+      transition_pending: false,
+      ...overrides,
+    }],
+  };
+}
+
+function emptyObservation() {
+  return { schema: 1, host: HOST, rows: [] };
+}
+
+function runnerObservation(overrides = {}) {
+  return {
+    host: HOST,
+    configuredBackend: "omitted",
+    appliedBackend: "exec",
+    appliedReceipt: { backend: "exec", source: "wrapper", timestampUs: 2_000_000 },
+    configHash: CONFIG_HASH,
+    configMtimeMs: 1_000,
+    runnerSha: RUNNER_SHA,
+    invocationId: INVOCATION_ID,
+    ...overrides,
+  };
+}
+
+function originEvidence(runner = runnerObservation()) {
+  return {
+    schema: 1,
+    host: HOST,
+    config_sha256: runner.configHash,
+    config_mtime_ms: runner.configMtimeMs,
+    runner_sha: runner.runnerSha,
+    invocation_id: runner.invocationId,
+    all_relevant_sessions_covered: true,
+    origin_source: "measured",
+    agent_ids: [AGENT_ID],
+    agents: [{ id: AGENT_ID, origin: "exec", complete: true }],
+  };
+}
+
+function emptyOriginEvidence(runner = runnerObservation()) {
+  return {
+    ...originEvidence(runner),
+    agent_ids: [],
+    agents: [],
+  };
+}
+
+function makeAdapters({ hosts = [], runners = [], evidence, acknowledge = true, fail = {} } = {}) {
+  const calls = { host: 0, runner: 0, origin: 0, cursor: 0, writes: 0, acknowledgements: 0, restores: 0 };
+  const fallbackHost = observation();
+  const beforeRunner = runnerObservation();
+  const afterRunner = runnerObservation({
+    configuredBackend: "exec",
+    appliedBackend: "exec",
+    appliedReceipt: { backend: "exec", source: "reload", timestampUs: 2_500_000 },
+    configHash: NEXT_CONFIG_HASH,
+    configMtimeMs: 2_000,
+  });
+  return {
+    calls,
+    adapters: {
+      async observeHost() {
+        calls.host += 1;
+        if (fail.hostAt === calls.host) throw new Error("unavailable");
+        return structuredClone(hosts[calls.host - 1] ?? fallbackHost);
+      },
+      async observeRunner() {
+        calls.runner += 1;
+        if (fail.runnerAt === calls.runner) throw new Error("unavailable");
+        return structuredClone(runners[calls.runner - 1] ?? (calls.runner >= 3 ? afterRunner : beforeRunner));
+      },
+      async readOriginEvidence() {
+        calls.origin += 1;
+        if (fail.origin) throw new Error("unavailable");
+        return structuredClone(evidence ?? originEvidence(beforeRunner));
+      },
+      async captureAckCursor() {
+        calls.cursor += 1;
+        return "cursor-before-write";
+      },
+      async writeBackendExec() {
+        calls.writes += 1;
+        if (fail.write) throw new Error("write failed");
+      },
+      async waitForAppliedBackendExec() {
+        calls.acknowledgements += 1;
+        if (fail.ack) throw new Error("ack adapter failed");
+        return acknowledge;
+      },
+      async restore() {
+        calls.restores += 1;
+      },
+    },
+  };
+}
+
+function argv(phase = "prepare") {
+  return [
+    "--phase", phase,
+    "--host", HOST,
+    "--runner-sha", RUNNER_SHA,
+    "--compose-file", "compose.yml",
+    "--runner-config", "runner.config.json",
+    "--runner-unit", "kaoiro-runner.service",
+    "--origin-evidence", "origin-evidence.json",
+  ];
+}
+
+function io() {
+  return {
+    stdout: { text: "", write(value) { this.text += value; } },
+    stderr: { text: "", write(value) { this.text += value; } },
+  };
+}
+
+test("prepare pins omitted legacy exec once and confirms the applied selection", async () => {
+  const { adapters, calls } = makeAdapters();
+  const output = io();
+
+  assert.equal(await main(argv(), adapters, output), 0);
+  assert.deepEqual(JSON.parse(output.stdout.text), {
+    phase: "prepare", status: "prepared", host: HOST, backend: "exec",
+  });
+  assert.equal(calls.writes, 1);
+  assert.equal(calls.acknowledgements, 1);
+  assert.equal(calls.restores, 0);
+});
+
+test("a positive pending transition blocks the product entry before the config write", async () => {
+  const { adapters, calls } = makeAdapters({ hosts: [observation({ transition_pending: true })] });
+  const output = io();
+
+  assert.equal(await main(argv(), adapters, output), 1);
+  assert.equal(calls.writes, 0);
+  assert.equal(calls.restores, 0);
+});
+
+test("an unavailable initial or immediate pre-write server observation makes no changes", async (t) => {
+  await t.test("initial", async () => {
+    const empty = emptyObservation();
+    const { adapters, calls } = makeAdapters({
+      hosts: [empty, empty],
+      evidence: emptyOriginEvidence(),
+      fail: { hostAt: 1 },
+    });
+    assert.equal(await main(argv(), adapters, io()), 1);
+    assert.equal(calls.writes, 0);
+    assert.equal(calls.restores, 0);
+  });
+
+  await t.test("pre-write recheck", async () => {
+    const empty = emptyObservation();
+    const { adapters, calls } = makeAdapters({
+      hosts: [empty, empty],
+      evidence: emptyOriginEvidence(),
+      fail: { hostAt: 2 },
+    });
+    assert.equal(await main(argv(), adapters, io()), 1);
+    assert.equal(calls.writes, 0);
+    assert.equal(calls.restores, 0);
+  });
+});
+
+test("an unavailable runner observation makes no changes", async (t) => {
+  await t.test("initial", async () => {
+    const empty = emptyObservation();
+    const { adapters, calls } = makeAdapters({
+      hosts: [empty, empty],
+      evidence: emptyOriginEvidence(),
+      fail: { runnerAt: 1 },
+    });
+    assert.equal(await main(argv(), adapters, io()), 1);
+    assert.equal(calls.writes, 0);
+    assert.equal(calls.restores, 0);
+  });
+
+  await t.test("pre-write recheck", async () => {
+    const empty = emptyObservation();
+    const { adapters, calls } = makeAdapters({
+      hosts: [empty, empty],
+      evidence: emptyOriginEvidence(),
+      fail: { runnerAt: 2 },
+    });
+    assert.equal(await main(argv(), adapters, io()), 1);
+    assert.equal(calls.writes, 0);
+    assert.equal(calls.restores, 0);
+  });
+});
+
+test("a failed applied-selection acknowledgement does not trigger a second mutation or restore", async () => {
+  const { adapters, calls } = makeAdapters({ acknowledge: false });
+
+  assert.equal(await main(argv(), adapters, io()), 1);
+  assert.equal(calls.writes, 1);
+  assert.equal(calls.acknowledgements, 1);
+  assert.equal(calls.restores, 0);
+  assert.equal(calls.runner, 2);
+});
+
+test("unknown origin, changed roster, and malformed phase all refuse before mutation", async (t) => {
+  await t.test("unknown origin", async () => {
+    const evidence = originEvidence();
+    evidence.agents[0].origin = "unknown";
+    const { adapters, calls } = makeAdapters({ evidence });
+    assert.equal(await main(argv(), adapters, io()), 1);
+    assert.equal(calls.writes, 0);
+    assert.equal(calls.restores, 0);
+  });
+
+  await t.test("changed roster", async () => {
+    const { adapters, calls } = makeAdapters({ hosts: [observation(), observation({ id: `${HOST}.new-agent` })] });
+    assert.equal(await main(argv(), adapters, io()), 1);
+    assert.equal(calls.writes, 0);
+    assert.equal(calls.restores, 0);
+  });
+
+  await t.test("non-U1 phase", async () => {
+    const { adapters, calls } = makeAdapters();
+    assert.equal(await main(argv("restore-fresh"), adapters, io()), 1);
+    assert.equal(calls.host, 0);
+    assert.equal(calls.writes, 0);
+    assert.equal(calls.restores, 0);
+  });
+});
+
+test("an explicit complete routing attestation can resolve directly unknown origin", async () => {
+  const evidence = originEvidence();
+  evidence.origin_source = "operator-attestation";
+  evidence.agents[0].origin = "unknown";
+  evidence.attestation = {
+    accepted: true,
+    attested_at: "2026-10-27T00:00:00Z",
+    scope: "affected host and all relevant saved sessions",
+    release_range: "complete applicable runner history",
+    statement: "Every relevant route used the legacy exec backend; no imported app-server ID exists.",
+    unknown_origin_rows: [AGENT_ID],
+    contrary_rows: [],
+    unresolved_rows: [],
+  };
+  const { adapters, calls } = makeAdapters({ evidence });
+  const output = io();
+
+  assert.equal(await main(argv(), adapters, output), 0);
+  assert.equal(JSON.parse(output.stdout.text).status, "prepared");
+  assert.equal(calls.writes, 1);
+  assert.equal(calls.restores, 0);
+});
+
+test("an already-applied explicit setting is retained without origin probing or writes", async (t) => {
+  for (const backend of ["exec", "app-server"]) {
+    await t.test(backend, async () => {
+      const explicit = runnerObservation({ configuredBackend: backend, appliedBackend: backend });
+      const { adapters, calls } = makeAdapters({ runners: [explicit] });
+      const output = io();
+
+      assert.equal(await main(argv(), adapters, output), 0);
+      assert.equal(JSON.parse(output.stdout.text).status, "already-explicit");
+      assert.equal(calls.origin, 0);
+      assert.equal(calls.host, 0);
+      assert.equal(calls.writes, 0);
+      assert.equal(calls.restores, 0);
+    });
+  }
+});

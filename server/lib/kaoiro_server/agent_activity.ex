@@ -76,6 +76,9 @@ defmodule KaoiroServer.AgentActivity do
   @doc "Returns the active-entry projection map for a directory snapshot."
   def snapshot(server \\ __MODULE__), do: GenServer.call(server, :snapshot)
 
+  @doc "Returns IDs with a pending transition, without exposing transaction metadata."
+  def pending_ids(server \\ __MODULE__), do: GenServer.call(server, :pending_ids)
+
   @doc "Removes both the active entry and its pending transaction."
   def delete(agent_id, server \\ __MODULE__), do: GenServer.call(server, {:delete, agent_id})
 
@@ -188,6 +191,10 @@ defmodule KaoiroServer.AgentActivity do
   end
 
   def handle_call(:snapshot, _from, state), do: {:reply, state.entries, state}
+
+  def handle_call(:pending_ids, _from, state) do
+    {:reply, state.pending |> Map.keys() |> MapSet.new(), state}
+  end
 
   def handle_call({:delete, agent_id}, _from, state) do
     {:reply, :ok, state |> discard_pending(agent_id) |> delete_entry(agent_id)}
