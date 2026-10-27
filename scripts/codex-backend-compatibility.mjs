@@ -275,7 +275,7 @@ function run(command, argv, options = {}) {
       stdio: ["ignore", "pipe", "ignore"],
     });
   } catch (error) {
-    if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") throw error;
+    if (error?.code === "ENOBUFS") throw error;
     stop();
   }
 }
@@ -299,7 +299,7 @@ function runnerIdentity(host, invocationId, runCommand = run) {
       "--user", `_SYSTEMD_INVOCATION_ID=${invocationId}`, "--no-pager", "--output=cat",
     ]);
   } catch (error) {
-    if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") stop("runner-start-record-unavailable");
+    if (error?.code === "ENOBUFS") stop("runner-start-record-unavailable");
     throw error;
   }
   const records = output.split(/\r?\n/).filter((line) => line.startsWith("runner: host="));

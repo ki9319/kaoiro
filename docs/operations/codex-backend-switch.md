@@ -57,6 +57,9 @@ and postpone the host's default-changing update until a planned verification
 window. A `runner-identity-dirty` stop means the running artifact reports a
 dirty checkout; defer preparation until the intended clean runner release is
 active. This command never restarts the service automatically.
+The synchronous `execFileSync` capture reports this overflow as `ENOBUFS`;
+U1 preserves that error through the command boundary and maps it to
+`runner-start-record-unavailable` when reading the startup record.
 
 Before writing, it repeats both observations and stops if any value changed or
 is unavailable. A successful preparation adds only `codex.backend: "exec"`,

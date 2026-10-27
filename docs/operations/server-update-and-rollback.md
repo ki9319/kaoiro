@@ -46,6 +46,9 @@ output exceeds 8 MiB, preparation stops with
 restart creates a new startup record but stops supervised wrappers and
 interrupts active turns; defer preparation if that impact is not acceptable.
 See the [backend switching procedure](codex-backend-switch.md#preparation-before-a-default-change).
+The synchronous `execFileSync` capture reports this overflow as `ENOBUFS`;
+U1 preserves that error through the command boundary and maps it to
+`runner-start-record-unavailable` when reading the startup record.
 
 ### Update-related resolved limits
 

@@ -137,11 +137,28 @@ defmodule KaoiroServer.CodexBackendCompatibilityDefaultStoreTest do
     assert {:ok, %{"schema" => 1, "host" => ^host, "rows" => [row]}} =
              CodexBackendCompatibility.observe_host(host)
 
+    assert_live_engine_row(row, claude_id, "claude-code")
+  end
+
+  test "a static golden fails the real-engine binding assertion" do
+    fixture_path =
+      Path.expand("../../../scripts/test/fixtures/codex-backend/server-observation.json", __DIR__)
+
+    golden = fixture_path |> File.read!() |> Jason.decode!()
+    row = Enum.find(golden["rows"], &(&1["id"] == "legacy-host.live"))
+    copied_row = Map.put(row, "id", "engine-ledger.claude")
+
+    assert_raise ExUnit.AssertionError, fn ->
+      assert_live_engine_row(copied_row, "engine-ledger.claude", "claude-code")
+    end
+  end
+
+  defp assert_live_engine_row(row, agent_id, engine) do
     assert row == %{
-             "id" => claude_id,
+             "id" => agent_id,
              "directory" => true,
              "pointer" => "missing",
-             "engine" => "claude-code",
+             "engine" => engine,
              "live" => true,
              "connected" => true,
              "reset_pending" => false,

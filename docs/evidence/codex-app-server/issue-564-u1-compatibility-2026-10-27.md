@@ -51,6 +51,9 @@ the record is absent, ambiguous, malformed, or cannot be read within the
 8 MiB capture cap, U1 stops with `runner-start-record-unavailable` before
 server observation or configuration write. A record with a `-dirty` suffix
 stops with `runner-identity-dirty`. The command does not restart the service.
+The synchronous `execFileSync` capture reports this overflow as `ENOBUFS`;
+U1 preserves that error through the command boundary and maps it to
+`runner-start-record-unavailable` when reading the startup record.
 
 The operator can schedule a controlled runner-service restart to create a new
 startup record and repeat preparation. Runner shutdown stops all supervised

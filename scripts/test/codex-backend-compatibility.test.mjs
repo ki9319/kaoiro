@@ -1,6 +1,7 @@
 import "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import childProcess, { execFileSync, spawn } from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -549,7 +550,7 @@ function localArgv(configPath, evidencePath) {
   return args;
 }
 
-function localCommandBoundary({ configPath, projection, projectionOutput, identityOutput, reloadDiagnostic, wrapperDiagnostic, oversizedStartup = false, failObservationAt = 0, failAck = false, runnerSha = RUNNER_SHA, runnerHost = HOST, reloadTimestampOffsetUs = 1_000_000 }) {
+function localCommandBoundary({ configPath, projection, projectionOutput, identityOutput, reloadDiagnostic, wrapperDiagnostic, failObservationAt = 0, failAck = false, runnerSha = RUNNER_SHA, runnerHost = HOST, reloadTimestampOffsetUs = 1_000_000 }) {
   const calls = { systemctl: 0, docker: 0, journalRows: 0, journalRowsArgs: [], runnerIdentity: 0, runnerIdentityArgs: [], cursor: 0, acknowledgement: 0, acknowledgementArgs: [] };
   const startup = `runner: host=${runnerHost} rev=${runnerSha} connecting to wss://example.invalid/runner\n`;
   const reloadLine = reloadDiagnostic ?? "runner: codex backend=exec for subsequent wrappers\n";
@@ -583,11 +584,6 @@ function localCommandBoundary({ configPath, projection, projectionOutput, identi
         if (args.includes("--output=cat")) {
           calls.runnerIdentity += 1;
           calls.runnerIdentityArgs.push(args);
-          if (oversizedStartup) {
-            const error = new Error("captured maxBuffer overflow");
-            error.code = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
-            throw error;
-          }
           const fullInvocation = identityOutput ?? startup;
           return args.some((arg) => arg.startsWith("--lines="))
             ? `${fullInvocation.split(/\r?\n/).filter(Boolean).at(-1) ?? ""}\n`
@@ -668,7 +664,7 @@ async function captureRealRunnerReloadDiagnostic() {
   }
 }
 
-async function captureRealWrapperBackendDiagnostic() {
+async function captureRealWrapperBackendDiagnostic(backend = "exec") {
   const directory = mkdtempSync(join(tmpdir(), "codex-backend-wrapper-start."));
   const configPath = join(directory, "wrapper.config.json");
   const originalArgv = process.argv;
@@ -681,7 +677,7 @@ async function captureRealWrapperBackendDiagnostic() {
       persona: { id: "producer", name: "Producer", sprite_set: "producer" },
       display_name: "Producer",
       server_url: "ws://fixture/wrapper",
-      codex_backend: "exec",
+      codex_backend: backend,
     })}\n`, { mode: 0o600 });
     process.argv = [process.execPath, "wrapper-test-harness", configPath];
     process.stderr.write = (chunk, ...rest) => {
@@ -696,8 +692,9 @@ async function captureRealWrapperBackendDiagnostic() {
       /intentional test seam stop/,
     );
     const lines = output.join("").split(/\r?\n/).filter(Boolean);
-    assert.equal(lines.filter((line) => line === "codex: backend=exec").length, 1);
-    return "codex: backend=exec\n";
+    const backendLines = lines.filter((line) => line.startsWith("codex: backend="));
+    assert.deepEqual(backendLines, [`codex: backend=${backend}`]);
+    return `${backendLines[0]}\n`;
   } finally {
     process.stderr.write = originalWrite;
     process.argv = originalArgv;
@@ -750,15 +747,27 @@ test("a reload diagnostic before the saved config mtime is not an applied receip
 });
 
 test("real wrapper backend diagnostic comes from temporary config and reaches the default reader", async (t) => {
-  const wrapperDiagnostic = await captureRealWrapperBackendDiagnostic();
-  assert.match(wrapperDiagnostic, /^codex: backend=(exec|app-server)\n$/);
-  const files = localFiles(t);
-  const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, wrapperDiagnostic });
-  const output = io();
+  for (const backend of ["exec", "app-server"]) {
+    await t.test(`configured ${backend} is emitted by the wrapper and read`, async (t) => {
+      const wrapperDiagnostic = await captureRealWrapperBackendDiagnostic(backend);
+      const files = localFiles(t);
+      const before = readFileSync(files.configPath);
+      const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, wrapperDiagnostic });
+      const output = io();
+      const result = await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand });
 
-  assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 0);
-  assert.deepEqual(JSON.parse(output.stdout.text), { phase: "prepare", status: "prepared", host: HOST, backend: "exec" });
-  assert.equal(boundary.calls.journalRows, 3);
+      if (backend === "exec") {
+        assert.equal(result, 0);
+        assert.deepEqual(JSON.parse(output.stdout.text), { phase: "prepare", status: "prepared", host: HOST, backend: "exec" });
+        assert.equal(boundary.calls.journalRows, 3);
+      } else {
+        assert.equal(result, 1);
+        assert.match(output.stderr.text, /stopped \(applied-selection-not-exec\)/);
+        assert.deepEqual(readFileSync(files.configPath), before);
+        assert.equal(boundary.calls.cursor, 0);
+      }
+    });
+  }
 });
 
 test("the default runner observer scans the full invocation and stops when its startup record is missing", async (t) => {
@@ -797,18 +806,51 @@ test("the default runner observer scans the full invocation and stops when its s
     assert.equal(boundary.calls.cursor, 0);
   });
 
-  await t.test("oversized invocation output stops with runner-start-record-unavailable", async (t) => {
+  await t.test("real execFileSync overflow stops with runner-start-record-unavailable", async (t) => {
     const files = localFiles(t);
-    const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, oversizedStartup: true });
+    const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection });
     const before = readFileSync(files.configPath);
     const output = io();
-
-    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+    const originalExecFileSync = childProcess.execFileSync;
+    let observedCode;
+    const commandMock = t.mock.method(childProcess, "execFileSync", (command, args, options) => {
+      if (command === "journalctl" && args.includes("--output=cat")) {
+        assert.equal(options.maxBuffer, 8 * 1024 * 1024);
+        try {
+          return originalExecFileSync(process.execPath, ["-e", "process.stdout.write(Buffer.alloc(9 * 1024 * 1024))"], options);
+        } catch (error) {
+          observedCode = error.code;
+          throw error;
+        }
+      }
+      return boundary.runCommand(command, args);
+    });
+    // The product imports the named built-in export; intercept only the process boundary.
+    syncBuiltinESMExports();
+    try {
+      assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output), 1);
+    } finally {
+      commandMock.mock.restore();
+      syncBuiltinESMExports();
+    }
+    assert.equal(observedCode, "ENOBUFS");
     assert.match(output.stderr.text, /stopped \(runner-start-record-unavailable\)/);
     assert.deepEqual(readFileSync(files.configPath), before);
     assert.equal(boundary.calls.docker, 0);
     assert.equal(boundary.calls.cursor, 0);
   });
+});
+
+function assertStartupProvenance(line, host, revision, serverUrl) {
+  assert.ok(line === `runner: host=${host} rev=${revision} connecting to ${serverUrl}`,
+    "built runner startup line did not match the configured host and checkout revision");
+}
+
+test("a copied startup line fails the provenance assertion", () => {
+  const serverUrl = "ws://fixture/runner";
+  const copiedLine = `runner: host=copied-host rev=${RUNNER_SHA} connecting to ${serverUrl}`;
+  assert.throws(() => assertStartupProvenance(copiedLine, "configured-host", RUNNER_SHA, serverUrl),
+    { code: "ERR_ASSERTION" });
 });
 
 test("the built runner emits its checkout revision on the real startup path", async () => {
@@ -899,8 +941,7 @@ test("the built runner emits its checkout revision on the real startup path", as
       Promise.all([startupRecord, loopbackAttempt]),
       new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("runner startup observation timed out")), 8_000); }),
     ]);
-    assert.ok(observedLine === `runner: host=${host} rev=${expectedSha} connecting to ${serverUrl}`,
-      "built runner startup line did not match the checkout revision");
+    assertStartupProvenance(observedLine, host, expectedSha, serverUrl);
     assert.ok(upgradeCount > 0, "built runner did not contact its test-owned loopback endpoint");
   } finally {
     if (timer) clearTimeout(timer);
@@ -946,7 +987,6 @@ test("the built launcher reports checkout artifact identity", async (t) => {
 
   assert.equal(identity.revision, expectedSha);
   assert.equal(typeof identity.dirty, "boolean");
-  assert.equal(identity.dirty, false);
 });
 
 

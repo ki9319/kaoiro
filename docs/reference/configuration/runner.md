@@ -270,6 +270,9 @@ write. It searches the whole invocation; an 8 MiB read overflow uses the same
 stop code. A `-dirty` startup revision stops with `runner-identity-dirty`.
 Follow the runbook's controlled-restart impact or postpone path rather than
 inferring an identity. The preparation command never restarts the service.
+The synchronous `execFileSync` capture reports this overflow as `ENOBUFS`;
+U1 preserves that error through the command boundary and maps it to
+`runner-start-record-unavailable` when reading the startup record.
 
 ### Codex backend selection
 
