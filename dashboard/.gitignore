@@ -8,6 +8,10 @@ src/lib/.AgentDetail.before.bench.svelte
 # lifecycle, never a checked-in file.
 src/.App.before.bench.svelte
 
+# issue #304 bench: Playwright traces record the absolute path of the
+# script that ran, so they stay local and are never checked in.
+bench/results/candidateA/trace-*.zip
+
 # Playwright (31-10 viewport regression): runner output, never checked in
 test-results/
 playwright-report/

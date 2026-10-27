@@ -30,6 +30,9 @@ import { createServer } from "vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
+// `root` is the dashboard root; result files record paths relative to the
+// repo root so committed output carries no machine-specific absolute path.
+const repoRoot = path.resolve(root, "..");
 
 // The commit immediately before candidate A (issue #287 fuji2 round-1 M1)
 // replaced a plain `$state` sticky-badge write (set once per matching live
@@ -357,7 +360,7 @@ function summarize(raw) {
       ),
     },
     domNodeCount: { before: raw.domCountBefore, after: raw.domCountAfter },
-    tracePath: raw.tracePath,
+    tracePath: path.relative(repoRoot, raw.tracePath).split(path.sep).join("/"),
     typingError: raw.typingError,
     readFailed: raw.readFailed,
     keystrokes: { completed: raw.keystrokesCompleted, requested: raw.keystrokesRequested },

@@ -115,7 +115,12 @@ only wires the data the menu needs; this is the observation that it
 renders).
 
 Results are written to `bench/results/candidateA/candidateA-agents<N>-hist<N>-tick<N>-err<mode>[-<runLabel>].json`,
-plus one Playwright trace per variant. **The invocation exits non-zero**
+plus one Playwright trace per variant. The traces stay local: they record the
+absolute path of the script that ran, so `trace-*.zip` is git-ignored and never
+committed, and `tracePath` in the result JSON is a repo-root-relative path to a
+file that may not exist in a checkout. Traces committed by earlier measurements
+were removed; if a past diagnosis needs one, extract it from the commit before
+the removal with `git show`. **The invocation exits non-zero**
 (not just an `error` field in the printed JSON) when either variant:
 
 - fails to mount/measure at all (harness error),
