@@ -442,11 +442,11 @@ test("unknown origin, changed roster, and malformed phase stop with exact codes"
     assert.equal(calls.restores, 0);
   });
 
-  await t.test("changed roster", async () => {
+  await t.test("changed observed roster", async () => {
     const { adapters, calls } = makeAdapters({ hosts: [observation(), observation({ id: `${HOST}.new-agent` })] });
     const output = io();
     assert.equal(await main(argv(), adapters, output), 1);
-    assert.match(output.stderr.text, /stopped \(origin-evidence-invalid\)/);
+    assert.match(output.stderr.text, /stopped \(observation-changed\)/);
     assert.equal(calls.writes, 0);
     assert.equal(calls.restores, 0);
   });
