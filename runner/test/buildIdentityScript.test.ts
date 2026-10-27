@@ -208,20 +208,21 @@ describe("build-identity.mjs default CLI (issue #288)", () => {
   // Run a copy in a throwaway repo with no tags, so the expectation does not
   // depend on whether the checkout's HEAD carries a release tag (issue #816).
   it("prints the resolved identity with quoted shell values", () => {
-    tmpDir = mkdtempSync(join(tmpdir(), "kaoiro-build-identity-default-"));
+    const dir = mkdtempSync(join(tmpdir(), "kaoiro-build-identity-default-"));
+    tmpDir = dir;
     for (const file of CLI_FILES) {
-      mkdirSync(dirname(join(tmpDir, file)), { recursive: true });
-      copyFileSync(join(repoRoot, file), join(tmpDir, file));
+      mkdirSync(dirname(join(dir, file)), { recursive: true });
+      copyFileSync(join(repoRoot, file), join(dir, file));
     }
-    git(["init", "--quiet", "-b", "develop"], tmpDir);
-    git(["add", "--", ...CLI_FILES], tmpDir);
+    git(["init", "--quiet", "-b", "develop"], dir);
+    git(["add", "--", ...CLI_FILES], dir);
     git(
       ["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-m", "x", "--quiet"],
-      tmpDir,
+      dir,
     );
 
-    const out = execFileSync("node", [join(tmpDir, CLI_FILES[0])], {
-      cwd: tmpDir,
+    const out = execFileSync("node", [join(dir, CLI_FILES[0])], {
+      cwd: dir,
       encoding: "utf8",
     });
     expect(out).toContain("KAOIRO_BUILD_VERSION='untagged'");
