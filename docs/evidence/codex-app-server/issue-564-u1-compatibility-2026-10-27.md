@@ -131,6 +131,55 @@ real startup test still requires a clean checkout revision; source mutations
 that rebuild a dirty runner can also fail that test, so producer mutations
 must be judged by their intended named test rather than exit status alone.
 
+### Earlier candidate coverage retained by scope
+
+The original implementation run record reports the following controls and
+mutation campaigns for product candidate
+`cd81058c1e94024f5eee3008ea321f1a48cd29d3` (`cd81058c` in the table).
+The mutation run IDs name temporary snapshots, not different product
+candidates: comparing each snapshot with `cd81058c` shows only the added
+mutation-driver files. Results and counts below are transcribed from that run
+record; these earlier runs were not rerun for this evidence correction.
+They are historical measurements of the stated candidate, not new results
+for the current head.
+
+| Run | Product candidate / execution snapshot | Recorded result | Scope untouched by subsequent changes |
+| --- | --- | --- | --- |
+| `momo-cd81058-u1ccd810-1027231216-9f45.62b43234748df9aa` | `cd81058c` / same commit | Node compatibility, isolation and checker control: 234/234 pass. | The origin-evidence matrix, pending/refusal gates, reload acknowledgement and pre-write stability tests, RPC framing, isolation checker and CI wiring remain unchanged. The changed startup, wrapper and overflow checks use the newer controls above. |
+| `momo-cd81058-u1ecd810-1027231131-392f.e21515cfa77e42bd` | `cd81058c` / same commit | ExUnit control: format and 6/6 tests pass; real observation equals the committed golden. | Server adapters, store inputs, golden bytes and the conflict test remain unchanged. The distinct-engine assertion was factored into a shared helper; its new negative-input self-test is measured above. |
+| `momo-1a7f628-u1mutn5-1027232935-f1a3.e9994c627849d76e` | `cd81058c` / `1a7f628c564bf282b62a2f9b4a6e82ecbad29ef8` | First 33 mutations reported detected; the run stopped at a misbound dirty-identity focused test, corrected in the tail run. | V3 producer/reader cases 1–2, workflow case 7, M5's origin matrix, pending/refusal gates, invocation/cursor binding, reload readers and RPC framing. Product producers and these reader/validation paths are unchanged. The old startup guard case is not evidence for v3's checker self-test; see the exclusions below. |
+| `momo-c806373-u1tail8-1027233702-a7c7.32d56654576afe8b` | `cd81058c` / `c806373659df3f936958569baa87d3018b5edd3c` | Seven mutations reported detected: dirty identity 3/5 pass; two old overflow cases each 2/4; startup-as-ack 0/1; pre-mtime receipt 0/1; pre-write comparison 0/3; omitted default 0/1. | V3 case 5 (reload source and timestamp), case 6 (pre-write stability), dirty-identity parsing and omitted-default preservation are unchanged. The two handwritten overflow cases are superseded by the real ENOBUFS measurements above. |
+| `momo-19f0b52-u1mutel4-1027234041-b963.6f3f63160ed80a43` | `cd81058c` / `19f0b524bcc4f3ba26c3f5f21775b25a45e1f91e` | Six ExUnit mutations reported detected, six tests each; failures in order: 1, 3, 2, 2, 5, 1. | V3 producer/reader cases 1–2: conflicting engines, envelope engine, directory defaults and pointer engine. The server observer and golden are unchanged. Static-observer substitution remains distinct from removing the assertion; the latter requires the new self-test above. |
+
+The earlier Node campaign and tail run map to the design's named checks as
+follows. Mutation IDs are retained to distinguish similarly named checks.
+
+| Design coverage | Mutation IDs / named tests in the earlier candidate |
+| --- | --- |
+| V3 1–2, runner producer/reader | `m1-startup-revision-producer-only` / `the built runner emits its checkout revision on the real startup path`; `m1-startup-reader-only` / `the default runner observer scans the full invocation and stops when its startup record is missing`. Launcher revision and Boolean-dirty producer cases also targeted `the built launcher reports checkout artifact identity`. |
+| V3 1–2, server producer/reader | `m2-accept-conflicting-engines`, `m2-hide-ext-engine`, `m2-invent-directory-engine`, `m2-pointer-engine-key-only`; the real-store golden test and `conflicting pointer and wrapper engines invalidate the host observation`. The last two ExUnit cases were `m3-observer-static-golden-only` and `m3-exunit-binding-assertion-only`. |
+| V3 5 | `s2-accept-start-without-newer-reload` / `post-write applied selection requires a reload receipt`; `s2-reload-before-config-mtime-is-rejected` / `a reload diagnostic before the saved config mtime is not an applied receipt`. |
+| V3 6 | `s3-remove-prewrite-stability-comparison` / `the pre-write stability gate rejects host and runner changes`. |
+| V3 7 | `m4-remove-first-import-guard` / the isolation checker; `m4-remove-ci-test-entry` and `m4-remove-workflow-entry-assertion` / `rejects workflow without compatibility-test entry`. |
+| M5 matrix | Twelve `m5-*` cases in the first campaign: missing/unsupported origin, unknown engine, app-server origin, incomplete roster, absent evidence, none/non-nil-pointer conflict, unknown-attestation binding, Codex/none conflict, evidence identity, known non-Codex misclassified as null, null misclassified as Codex, and null misclassified as known non-Codex. Named test groups: `complete origin evidence resolves null engine rows without guessing`, `null engine evidence refusals use one exact stop code and do not write`, `origin-evidence-conflict covers known engine and origin disagreement`, and `unknown engine string stops with observation-invalid before evidence`. |
+
+From `cd81058c` to the reviewed source, the preparation script changes only
+the two overflow error-code checks. Runner/wrapper producer source, server
+adapters, the golden, isolation checker and workflow are unchanged. Node test
+changes concern startup assertion sharing, real overflow, wrapper config
+capture and the launcher Boolean-dirty requirement; ExUnit adds the shared
+engine assertion and its self-test. Thus the historical rows retain the
+unaffected coverage specified above, without claiming unchanged test bytes
+for the modified bindings.
+
+In particular, the earlier `m3-startup-provenance-guard-only` and
+`m3-exunit-binding-assertion-only` cases did not test removal of the actual
+producer-binding assertions. They do not satisfy v3 mutation 3; the new
+checker self-tests and their separate guard-removal runs above do. Likewise,
+the old overflow cases do not attest the synchronous API's error shape, and
+the earlier exec-only wrapper check does not prove config selection. The
+new ENOBUFS and app-server-config measurements supply those guarantees.
+
 ## Limits
 
 The tests do not measure live systemd/journald transport, Docker Compose RPC,
