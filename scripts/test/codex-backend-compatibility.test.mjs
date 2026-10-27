@@ -545,8 +545,10 @@ test("the default local adapter keeps unavailable observations and failed acknow
     const files = localFiles(t);
     const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, failObservationAt: 1 });
     const before = readFileSync(files.configPath);
+    const output = io();
 
-    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, io(), { runCommand: boundary.runCommand }), 1);
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+    assert.match(output.stderr.text, /stopped \(server-observation-unavailable\)/);
     assert.deepEqual(readFileSync(files.configPath), before);
     assert.equal(boundary.calls.docker, 1);
     assert.equal(boundary.calls.cursor, 0);
@@ -556,8 +558,10 @@ test("the default local adapter keeps unavailable observations and failed acknow
     const files = localFiles(t);
     const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, failObservationAt: 2 });
     const before = readFileSync(files.configPath);
+    const output = io();
 
-    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, io(), { runCommand: boundary.runCommand }), 1);
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+    assert.match(output.stderr.text, /stopped \(pre-write-observation-unavailable\)/);
     assert.deepEqual(readFileSync(files.configPath), before);
     assert.equal(boundary.calls.docker, 2);
     assert.equal(boundary.calls.cursor, 1);
