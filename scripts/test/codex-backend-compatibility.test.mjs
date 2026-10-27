@@ -153,9 +153,10 @@ test("a positive pending transition blocks the product entry before the config w
   const { adapters, calls } = makeAdapters({ hosts: [observation({ transition_pending: true })] });
   const output = io();
 
-  assert.equal(await main(argv(), adapters, output), 1);
+  const result = await main(argv(), adapters, output);
   assert.equal(calls.writes, 0);
   assert.equal(calls.restores, 0);
+  assert.equal(result, 1);
 });
 
 test("an unavailable initial or immediate pre-write server observation makes no changes", async (t) => {
@@ -166,9 +167,10 @@ test("an unavailable initial or immediate pre-write server observation makes no 
       evidence: emptyOriginEvidence(),
       fail: { hostAt: 1 },
     });
-    assert.equal(await main(argv(), adapters, io()), 1);
+    const result = await main(argv(), adapters, io());
     assert.equal(calls.writes, 0);
     assert.equal(calls.restores, 0);
+    assert.equal(result, 1);
   });
 
   await t.test("pre-write recheck", async () => {
@@ -178,9 +180,10 @@ test("an unavailable initial or immediate pre-write server observation makes no 
       evidence: emptyOriginEvidence(),
       fail: { hostAt: 2 },
     });
-    assert.equal(await main(argv(), adapters, io()), 1);
+    const result = await main(argv(), adapters, io());
     assert.equal(calls.writes, 0);
     assert.equal(calls.restores, 0);
+    assert.equal(result, 1);
   });
 });
 
@@ -192,9 +195,10 @@ test("an unavailable runner observation makes no changes", async (t) => {
       evidence: emptyOriginEvidence(),
       fail: { runnerAt: 1 },
     });
-    assert.equal(await main(argv(), adapters, io()), 1);
+    const result = await main(argv(), adapters, io());
     assert.equal(calls.writes, 0);
     assert.equal(calls.restores, 0);
+    assert.equal(result, 1);
   });
 
   await t.test("pre-write recheck", async () => {
@@ -204,20 +208,22 @@ test("an unavailable runner observation makes no changes", async (t) => {
       evidence: emptyOriginEvidence(),
       fail: { runnerAt: 2 },
     });
-    assert.equal(await main(argv(), adapters, io()), 1);
+    const result = await main(argv(), adapters, io());
     assert.equal(calls.writes, 0);
     assert.equal(calls.restores, 0);
+    assert.equal(result, 1);
   });
 });
 
 test("a failed applied-selection acknowledgement does not trigger a second mutation or restore", async () => {
   const { adapters, calls } = makeAdapters({ acknowledge: false });
 
-  assert.equal(await main(argv(), adapters, io()), 1);
+  const result = await main(argv(), adapters, io());
   assert.equal(calls.writes, 1);
   assert.equal(calls.acknowledgements, 1);
   assert.equal(calls.restores, 0);
   assert.equal(calls.runner, 2);
+  assert.equal(result, 1);
 });
 
 test("unknown origin, changed roster, and malformed phase all refuse before mutation", async (t) => {
