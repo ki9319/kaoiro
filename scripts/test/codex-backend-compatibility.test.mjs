@@ -680,7 +680,7 @@ test("the default local adapter rejects unknown runner identity and unknown engi
     const output = io();
 
     assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
-    assert.match(output.stderr.text, /stopped \(runner-observation-unavailable\)/);
+    assert.match(output.stderr.text, /stopped \(runner-start-record-unavailable\)/);
     assert.deepEqual(readFileSync(files.configPath), before);
     assert.equal(boundary.calls.docker, 0);
     assert.equal(boundary.calls.cursor, 0);
