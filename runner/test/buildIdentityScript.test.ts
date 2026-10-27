@@ -9,9 +9,15 @@ import "../../scripts/test/fixtures/test-isolation.mjs";
 // git call and lives in its own file (buildIdentityScriptDegrade.test.ts)
 // so that mock does not leak into these real-subprocess tests.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -24,6 +30,12 @@ const scriptPath = fileURLToPath(
   new URL("../../scripts/build-identity.mjs", import.meta.url),
 );
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+// The CLI and the modules it imports, at the same relative paths.
+const CLI_FILES = [
+  "scripts/build-identity.mjs",
+  "scripts/child-process-environment.mjs",
+  "runner/deploy/child-process-environment.mjs",
+];
 
 function git(args: string[], cwd: string): void {
   execFileSync("git", args, { cwd, stdio: "pipe" });
@@ -183,9 +195,33 @@ describe("formatIdentityString (issue #218 round 2)", () => {
 });
 
 describe("build-identity.mjs default CLI (issue #288)", () => {
+  let tmpDir: string | undefined;
+
+  afterEach(() => {
+    if (tmpDir !== undefined) {
+      rmSync(tmpDir, { recursive: true, force: true });
+      tmpDir = undefined;
+    }
+  });
+
+  // The default CLI resolves the identity of the repo that holds its own file.
+  // Run a copy in a throwaway repo with no tags, so the expectation does not
+  // depend on whether the checkout's HEAD carries a release tag (issue #816).
   it("prints the resolved identity with quoted shell values", () => {
-    const out = execFileSync("node", [scriptPath], {
-      cwd: repoRoot,
+    tmpDir = mkdtempSync(join(tmpdir(), "kaoiro-build-identity-default-"));
+    for (const file of CLI_FILES) {
+      mkdirSync(dirname(join(tmpDir, file)), { recursive: true });
+      copyFileSync(join(repoRoot, file), join(tmpDir, file));
+    }
+    git(["init", "--quiet", "-b", "develop"], tmpDir);
+    git(["add", "--", ...CLI_FILES], tmpDir);
+    git(
+      ["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-m", "x", "--quiet"],
+      tmpDir,
+    );
+
+    const out = execFileSync("node", [join(tmpDir, CLI_FILES[0])], {
+      cwd: tmpDir,
       encoding: "utf8",
     });
     expect(out).toContain("KAOIRO_BUILD_VERSION='untagged'");
