@@ -322,6 +322,7 @@ test("null engine evidence refusals use one exact stop code and do not write", a
     ["none origin conflicts with a non-nil pointer", { hosts: [observation({ engine: null, pointer: "non_nil" })], evidence: { ...originEvidence(), agents: [{ id: AGENT_ID, origin: "none", complete: true }] } }, "origin-evidence-conflict"],
     ["null engine with app-server origin stops with origin-evidence-conflict", { evidence: { ...originEvidence(), agents: [{ id: AGENT_ID, origin: "app-server", complete: true }] } }, "origin-evidence-conflict"],
     ["null engine with unsupported origin stops with origin-evidence-invalid", { evidence: { ...originEvidence(), agents: [{ id: AGENT_ID, origin: "other", complete: true }] } }, "origin-evidence-invalid"],
+    ["null engine with missing origin stops with origin-evidence-invalid", { evidence: { ...originEvidence(), agents: [{ id: AGENT_ID, complete: true }] } }, "origin-evidence-invalid"],
   ];
   for (const [name, options, code] of cases) {
     await t.test(name, async () => {
