@@ -2,9 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync, copyFileSync, lstatSync, mkdirSync, readFileSync,
   readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statfsSync, symlinkSync,
-  writeFileSync, openSync, closeSync, fsyncSync,
+  writeFileSync, openSync, closeSync, fsyncSync, fstatSync, constants,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { spawnChildSync } from "./child-process-environment.mjs";
 
 export const CREDENTIALS = ["auth.json", ".credentials.json", "secrets", "mcp-oauth-locks"];
 // Prior references (rust-v0.156.1, rust-v0.159.3, rust-v0.160.0): state/src/sqlite.rs,
@@ -16,9 +17,11 @@ export const CREDENTIALS = ["auth.json", ".credentials.json", "secrets", "mcp-oa
 // Extension trees have no copy-all exemption; their classification needs
 // separate review.
 const DBS = ["state_5", "logs_2", "goals_1", "memories_1", "memories_v2_1", "queue_1", "thread_history_1"];
-const STATE_DIRS = new Set(["sessions", "archived_sessions", "db-backups", "memories", "memories_v2", "memories_extensions", "rules", "skills", "agents", "hooks", "model-profiles", "plugins"]);
+const STATE_DIRS = new Set(["sessions", "archived_sessions", "db-backups", "memories", "memories_v2", "memories_extensions", "rules", "skills", "agents", "hooks", "model-profiles", "plugins", "app-server-daemon", "packages", "tui-thread-reference-capabilities"]);
 const STATE_FILES = new Set(["config.toml", "managed_config.toml", "AGENTS.md", "AGENTS.override.md", "history.jsonl", "session_index.jsonl", "installation_id", "hooks.json", ".sandbox_migration"]);
-const DISPOSABLE = new Set(["tmp", ".tmp", "thread-writer-locks", "log", "shell_snapshots", "models_cache.json", "version.json", "cache", ".sqlite-maintenance.lock"]);
+const DISPOSABLE = new Set(["tmp", ".tmp", "thread-writer-locks", "log", "shell_snapshots", "models_cache.json", "version.json", "cache", ".sqlite-maintenance.lock", "app-server-control"]);
+const DAEMON_STEMS = ["daemon", "daemon-updater", "app-server", "app-server-updater"];
+const DAEMON_ROOTS = ["app-server-control", "app-server-daemon", "packages", "tui-thread-reference-capabilities"];
 export const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 export const inside = (root, path) => { const rel = relative(root, path); return rel === "" || (rel !== ".." && !rel.startsWith("../") && !isAbsolute(rel)); };
 export function must(condition, message) { if (!condition) throw new Error(message); }
@@ -48,8 +51,64 @@ function classification(name) {
   throw new Error(`Unclassified Codex home entry: ${name}`);
 }
 
+function daemonEntry(home, rel) {
+  const parts = rel.split("/");
+  let st;
+  for (let i = 0; i < parts.length; i++) {
+    const prefix = parts.slice(0, i + 1).join("/");
+    try { st = lstatSync(join(home, prefix)); }
+    catch (error) {
+      if (error.code === "ENOENT") return undefined;
+      throw new Error(`CODEX_EXTERNAL_DAEMON_CHECK_FAILED: ${rel}`);
+    }
+    must(st.uid === process.getuid() && (i === parts.length - 1 || st.isDirectory()), `CODEX_EXTERNAL_DAEMON_CHECK_FAILED: ${rel}`);
+  }
+  return st;
+}
+function probeDaemonLock(home, rel, before) {
+  const path = join(home, rel);
+  let fd, result;
+  try {
+    must(before.isFile() && before.nlink === 1, `CODEX_EXTERNAL_DAEMON_CHECK_FAILED: ${rel}`);
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const opened = fstatSync(fd);
+    must(opened.dev === before.dev && opened.ino === before.ino && opened.isFile() && opened.nlink === 1 && opened.uid === process.getuid(), `CODEX_EXTERNAL_DAEMON_CHECK_FAILED: ${rel}`);
+    result = spawnChildSync("authority", "/usr/bin/flock", ["-n", "-E", "75", "3"], { stdio: ["ignore", "ignore", "ignore", fd], timeout: 5000 });
+    must(!result.error && !result.signal && [0, 75].includes(result.status), `CODEX_EXTERNAL_DAEMON_CHECK_FAILED: ${rel}`);
+    const after = lstatSync(path);
+    must(after.dev === opened.dev && after.ino === opened.ino && after.nlink === 1 && after.uid === process.getuid(), `CODEX_EXTERNAL_DAEMON_CHECK_FAILED: ${rel}`);
+  } catch {
+    throw new Error(`CODEX_EXTERNAL_DAEMON_CHECK_FAILED: ${rel}`);
+  } finally {
+    // flock uses the inherited open file description, so child exit alone
+    // does not release a successful probe's lock.
+    if (fd !== undefined) try { closeSync(fd); }
+    catch { throw new Error(`CODEX_EXTERNAL_DAEMON_CHECK_FAILED: ${rel}`); }
+  }
+  must(result.status !== 75, `CODEX_EXTERNAL_DAEMON_BUSY: ${rel}`);
+}
+export function assertNoExternalDaemon(home) {
+  identity(home);
+  for (const rel of DAEMON_ROOTS) {
+    const st = daemonEntry(home, rel);
+    must(!st || st.isDirectory(), `CODEX_EXTERNAL_DAEMON_CHECK_FAILED: ${rel}`);
+  }
+  const signals = ["app-server-control/app-server-control.sock",
+    ...DAEMON_STEMS.flatMap(stem => ["pid", "pid.tmp", "sock", "ready", "shutdown"].map(suffix => `app-server-daemon/${stem}.${suffix}`)),
+    ...["app-server-daemon", "standalone"].map(pkg => `packages/${pkg}/install.lock.d`)];
+  for (const rel of signals) must(!daemonEntry(home, rel), `CODEX_EXTERNAL_DAEMON_ENTRY: ${rel}`);
+  const locks = ["app-server-control/app-server-startup.lock", "app-server-daemon/daemon.lock",
+    ...DAEMON_STEMS.map(stem => `app-server-daemon/${stem}.pid.lock`),
+    ...["app-server-daemon", "standalone"].map(pkg => `packages/${pkg}/install.lock`)];
+  for (const rel of locks) {
+    const st = daemonEntry(home, rel);
+    if (st) probeDaemonLock(home, rel, st);
+  }
+}
+
 export function inventory(home, hash = false) {
   identity(home);
+  assertNoExternalDaemon(home);
   const entries = [];
   const walk = (dir, category) => {
     for (const name of readdirSync(dir).sort()) {
@@ -158,6 +217,7 @@ export function prepareRestore(snapshotPath, expectedHash, home, stage) {
   const manifest = verifySnapshot(snapshotPath, expectedHash);
   must(manifest.source.path === home, "Snapshot belongs to a different home");
   identity(home);
+  assertNoExternalDaemon(home);
   capacity(dirname(home), manifest.entries);
   copyEntries(join(snapshotPath, "state"), stage, manifest.entries);
   must(sameState(inventory(stage, true), manifest.entries), "Restore staging mismatch");

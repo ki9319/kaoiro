@@ -11,7 +11,24 @@ export const HOME_ROOT_NAMES = [
   "shell_snapshots", "skills", "state_5.sqlite", "state_5.sqlite-shm",
   "state_5.sqlite-wal", "thread-writer-locks", "thread_history_1.sqlite",
   "thread_history_1.sqlite-shm", "thread_history_1.sqlite-wal", "tmp",
+  "app-server-control", "app-server-daemon", "packages", "tui-thread-reference-capabilities",
 ];
+
+export function addStoppedDaemonEntries(home: string) {
+  const put = (name: string, bytes: string, mode = 0o600) => {
+    mkdirSync(dirname(join(home, name)), { recursive: true, mode: 0o700 });
+    writeFileSync(join(home, name), bytes, { mode });
+  };
+  put("app-server-control/app-server-startup.lock", "");
+  put("app-server-daemon/daemon.lock", "");
+  put("app-server-daemon/daemon.pid.lock", "");
+  put("app-server-daemon/daemon-updater.pid.lock", "");
+  put("app-server-daemon/settings.json", '{"updater":{"autoUpdateEnabled":false}}');
+  put("app-server-daemon/loaded-threads.json", '["retained-thread"]');
+  put("packages/app-server-daemon/releases/fixture/bin/codex", "#!/bin/sh\nexit 0\n", 0o755);
+  symlinkSync("releases/fixture", join(home, "packages/app-server-daemon/current"));
+  put("tui-thread-reference-capabilities/retained-thread", "");
+}
 
 export function createCodexHomeFixture(dir: string) {
   const home = join(dir, "home");
@@ -49,6 +66,7 @@ export function createCodexHomeFixture(dir: string) {
   put("cache/codex_apps_tools/tools.json", '{"tools":[]}');
   put("cache/remote_plugin_catalog/catalog.json", '{"plugins":[]}');
   put("cache/tui-pets/assets/frame.webp", "DISPOSABLE_IMAGE");
+  addStoppedDaemonEntries(home);
   // Native SQLite produces WAL-only rows/sidecars; fake .sqlite bytes would
   // bypass the copy-and-inspect behavior that previously mutated source DBs.
   const db = spawnSync(process.execPath, ["--input-type=module", "-e", `

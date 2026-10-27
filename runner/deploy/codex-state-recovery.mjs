@@ -289,6 +289,9 @@ export const RETHROWS = {
 // Every literal message (or template prefix) the helper's static import
 // closure can throw, and the files that throw it.
 export const REFUSALS = {
+  "CODEX_EXTERNAL_DAEMON_ENTRY: ${}": { files: ["codex-snapshot.mjs"] },
+  "CODEX_EXTERNAL_DAEMON_BUSY: ${}": { files: ["codex-snapshot.mjs"] },
+  "CODEX_EXTERNAL_DAEMON_CHECK_FAILED: ${}": { files: ["codex-snapshot.mjs"] },
   "${} declares the runtime asset ${} as an absolute path": { files: ["verify-release.mjs"] },
   "${} declares the runtime asset ${}, which is not a regular file": { files: ["verify-release.mjs"] },
   "${} declares the runtime asset ${}, which resolves outside the release: ${}": { files: ["verify-release.mjs"] },
@@ -567,11 +570,13 @@ const ADVICE = {
 // Lines printed after a refusal's message. `row` asks for the record's next
 // lines whatever the class (failures inside a run); `report` is the output of
 // `next <root>` for the lock class.
-export function render(cls, { tx, row = false, report = [], ...context } = {}) {
+export function render(cls, { message = "", tx, row = false, report = [], ...context } = {}) {
   const own = tx && (row || ["transaction", "transient", "unclassified"].includes(cls)) ? rowLines(tx, context) : [];
   // Once the run has settled the record, rerunning the same command does
   // nothing; the record's own lines are the guidance.
-  const advice = cls === "transient" && TERMINAL.includes(tx?.phase) ? [] : ADVICE[cls];
+  const advice = message.startsWith("CODEX_EXTERNAL_DAEMON_")
+    ? ["stop external same-home writers and resolve runtime entries before retrying; never remove a held lock", `see: ${ANCHORS.backup}`]
+    : cls === "transient" && TERMINAL.includes(tx?.phase) ? [] : ADVICE[cls];
   return [...own, ...advice, ...(cls === "lock" ? report : [])];
 }
 

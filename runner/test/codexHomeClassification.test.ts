@@ -1,8 +1,8 @@
 import "../../scripts/test/fixtures/test-isolation.mjs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,7 @@ describe("production-shaped Codex home classification", () => {
     dir = mkdtempSync(join(tmpdir(), "niko542-classify-"));
     fixture = createCodexHomeFixture(dir);
     expect(readdirSync(fixture.home).sort()).toEqual([...HOME_ROOT_NAMES].sort());
-    expect(HOME_ROOT_NAMES).toHaveLength(34);
+    expect(HOME_ROOT_NAMES).toHaveLength(38);
   });
   afterEach(() => {
     if (fixture) protectInstructionTargets(fixture.links, 0o700);
@@ -27,7 +27,7 @@ describe("production-shaped Codex home classification", () => {
   });
   const run = (args: string[]) => spawnSync(process.execPath, args, { encoding: "utf8" });
 
-  it("classifies the exact 34-name home through the actual CLI without following instruction links", () => {
+  it("classifies the exact 38-name home through the actual CLI without following instruction links", () => {
     protectInstructionTargets(fixture.links, 0);
     const result = run([stateCLI, "classify", fixture.home]);
     expect(result.status, result.stderr).toBe(0);
@@ -42,6 +42,8 @@ describe("production-shaped Codex home classification", () => {
     expect(entries).toContainEqual(expect.objectContaining({ path: "plugins", category: "state" }));
     expect(entries).toContainEqual(expect.objectContaining({ path: "plugins/.remote-plugin-install-staging/partial/bundle.json", category: "state" }));
     expect(entries).toContainEqual(expect.objectContaining({ path: `${fixture.plugin}/.codex-plugin/plugin.json`, category: "state" }));
+    for (const path of ["app-server-daemon", "packages", "tui-thread-reference-capabilities"]) expect(entries).toContainEqual(expect.objectContaining({ path, category: "state" }));
+    expect(entries).toContainEqual(expect.objectContaining({ path: "app-server-control", category: "disposable" }));
     expect(entries).toContainEqual(expect.objectContaining({ path: "cache", category: "disposable" }));
     expect(entries).toContainEqual(expect.objectContaining({ path: sqliteLock, category: "disposable", type: "file", size: 0 }));
     expect(entries).toContainEqual(expect.objectContaining({ path: "auth.json", category: "credential" }));
@@ -107,13 +109,23 @@ describe("production-shaped Codex home classification", () => {
     expect(existsSync(join(dir, "backup/state/auth.json"))).toBe(false);
     expect(readFileSync(join(fixture.home, "auth.json"), "utf8")).toBe("REFRESHED_AUTH");
     expect(readFileSync(join(fixture.home, "sessions/old.jsonl"), "utf8")).toBe("OLD_HISTORY\n");
+    expect(output.manifest.entries.some((e: { path: string }) => e.path.startsWith("app-server-control"))).toBe(false);
+    for (const base of [fixture.home, join(dir, "backup/state")]) {
+      expect(existsSync(join(base, "app-server-control"))).toBe(false);
+      expect(readFileSync(join(base, "app-server-daemon/loaded-threads.json"), "utf8")).toBe('["retained-thread"]');
+      expect(readFileSync(join(base, "app-server-daemon/settings.json"), "utf8")).toContain('"autoUpdateEnabled":false');
+      expect(lstatSync(join(base, "packages/app-server-daemon/releases/fixture/bin/codex")).mode & 0o777).toBe(0o755);
+      expect(readlinkSync(join(base, "packages/app-server-daemon/current"))).toBe("releases/fixture");
+      expect(lstatSync(join(base, "tui-thread-reference-capabilities/retained-thread")).size).toBe(0);
+    }
+    expect(existsSync(join(dir, "quarantine/app-server-control/app-server-startup.lock"))).toBe(true);
     expect(readFileSync(join(dir, "backup/manifest.json"), "utf8")).not.toContain("EXTERNAL_NOT_SNAPSHOTTED");
     protectInstructionTargets(fixture.links, 0o700);
     expect(readFileSync(fixture.links["AGENTS.md"]!, "utf8")).toBe("EXTERNAL_INSTRUCTIONS");
     for (const name of ["agents", "hooks", "model-profiles"]) expect(readFileSync(join(fixture.links[name]!, "private.txt"), "utf8")).toBe("EXTERNAL_NOT_SNAPSHOTTED");
   });
 
-  it.each(["unclassified", "plugins-extra", "auth.json.tmp", ".sqlite-maintenance.lock.extra", "cloud-config-bundle-cache.json", ".tmpAb12Cd"])("refuses unknown root %s before creating snapshot staging", (name) => {
+  it.each(["unclassified", "plugins-extra", "auth.json.tmp", ".sqlite-maintenance.lock.extra", "cloud-config-bundle-cache.json", ".tmpAb12Cd", "app-server-control-extra", "app-server-daemon-extra", "packages-extra", "tui-thread-reference-capabilities-extra"])("refuses unknown root %s before creating snapshot staging", (name) => {
     writeFileSync(join(fixture.home, name), "DO_NOT_COPY");
     const result = run([stateCLI, "classify", fixture.home]);
     expect(result.status).toBe(78);
@@ -138,4 +150,85 @@ describe("production-shaped Codex home classification", () => {
     expect(result.stderr).toContain("External database/session storage is unsupported");
     expect(readFileSync(target, "utf8")).toBe("DO_NOT_FOLLOW");
   });
+  it.each([
+    "app-server-control/app-server-control.sock",
+    ...["daemon", "daemon-updater", "app-server", "app-server-updater"].flatMap(stem =>
+      ["pid", "pid.tmp", "sock", "ready", "shutdown"].map(suffix => `app-server-daemon/${stem}.${suffix}`)),
+    "packages/app-server-daemon/install.lock.d", "packages/standalone/install.lock.d",
+  ])("refuses runtime signal %s before CLI admission or snapshot staging", (name) => {
+    mkdirSync(join(fixture.home, name, ".."), { recursive: true });
+    symlinkSync("/unavailable/runtime-sentinel", join(fixture.home, name));
+    const result = run([stateCLI, "classify", fixture.home]);
+    expect(result.status, result.stderr).toBe(78);
+    expect(result.stderr).toContain(`CODEX_EXTERNAL_DAEMON_ENTRY: ${name}`);
+    expect(result.stderr).toContain("stop external same-home writers");
+    const take = run(["--input-type=module", "-e", `
+      const snap=await import(process.argv[1]);
+      await snap.snapshot(process.argv[2],process.argv[3],{uuid:'fixture',staging:process.argv[4]});
+    `, snapshotModule, fixture.home, join(dir, "backup"), join(dir, ".staging.codex-fixture")]);
+    expect(take.status).not.toBe(0);
+    expect(take.stderr).toContain(`CODEX_EXTERNAL_DAEMON_ENTRY: ${name}`);
+    expect(existsSync(join(dir, ".staging.codex-fixture"))).toBe(false);
+    expect(lstatSync(join(fixture.home, name)).isSymbolicLink()).toBe(true);
+  });
+
+  it.each(["app-server-control", "app-server-daemon", "packages", "tui-thread-reference-capabilities"])("refuses symlink root %s and keeps the previous helper incompatible", (name) => {
+    const previous = fileURLToPath(new URL("./fixtures/codex-snapshot-f84297a5.mjs", import.meta.url));
+    const oldHome = join(dir, "old-helper-home"); mkdirSync(oldHome, { mode: 0o700 }); mkdirSync(join(oldHome, name));
+    const legacy = run(["--input-type=module", "-e", "(await import(process.argv[1])).inventory(process.argv[2])", previous, oldHome]);
+    expect(legacy.status).not.toBe(0); expect(legacy.stderr).toContain(`Unclassified Codex home entry: ${name}`);
+    rmSync(join(fixture.home, name), { recursive: true }); symlinkSync("/unavailable/daemon-parent", join(fixture.home, name));
+    const result = run([stateCLI, "classify", fixture.home]);
+    expect(result.status).toBe(78); expect(result.stderr).toContain(`CODEX_EXTERNAL_DAEMON_CHECK_FAILED: ${name}`);
+  });
+
+  const locks = ["app-server-control/app-server-startup.lock", "app-server-daemon/daemon.lock",
+    ...["daemon", "daemon-updater", "app-server", "app-server-updater"].map(stem => `app-server-daemon/${stem}.pid.lock`),
+    "packages/app-server-daemon/install.lock", "packages/standalone/install.lock"];
+  it.each(locks)("refuses held lock %s without changing its inode", async (name) => {
+    const path = join(fixture.home, name); mkdirSync(join(path, ".."), { recursive: true }); writeFileSync(path, "LOCK_BYTES");
+    const before = lstatSync(path);
+    const holder = spawn("/usr/bin/flock", ["-x", path, "/bin/sh", "-c", 'printf READY; read release'], { stdio: ["pipe", "pipe", "pipe"] });
+    const closed = new Promise<void>(resolve => holder.once("close", () => resolve()));
+    try {
+      await new Promise<void>((resolve, reject) => { holder.stdout.once("data", () => resolve()); holder.once("error", reject); });
+      const result = run([stateCLI, "classify", fixture.home]);
+      expect(result.status).toBe(78); expect(result.stderr).toContain(`CODEX_EXTERNAL_DAEMON_BUSY: ${name}`);
+      expect(lstatSync(path).ino).toBe(before.ino); expect(readFileSync(path, "utf8")).toBe("LOCK_BYTES");
+    } finally { holder.stdin.end("release\n"); await closed; }
+    expect(run([stateCLI, "classify", fixture.home]).status).toBe(0);
+  });
+
+  it.each(["success", "error", "signal", "exit", "null", "throw", "identity", "open", "opened-dev", "opened-ino", "opened-type", "opened-link", "opened-owner", "after-dev", "after-link", "after-owner"])("closes each probe descriptor on %s and lets an independent process acquire it", (fault) => {
+    const result = run(["--input-type=module", "-e", `
+      import fs from 'node:fs'; import cp from 'node:child_process'; import assert from 'node:assert/strict';
+      import { syncBuiltinESMExports } from 'node:module';
+      const home=process.argv[2], fault=process.argv[3], path=home+'/app-server-control/app-server-startup.lock';
+      const realSpawn=cp.spawnSync, realOpen=fs.openSync, realStat=fs.lstatSync, realFstat=fs.fstatSync, fds=[];
+      const changed=(st,kind)=>Object.assign(Object.create(st),kind==='dev'?{dev:st.dev+1}:kind==='ino'?{ino:st.ino+1}:kind==='type'?{isFile:()=>false}:kind==='link'?{nlink:2}:{uid:st.uid+1});
+      fs.fstatSync=(fd,...args)=>{const st=realFstat(fd,...args);return fds.includes(fd)&&fault.startsWith('opened-')?changed(st,fault.slice(7)):st;};
+      fs.openSync=(name,...args)=>{if(String(name)===path&&fault==='open')throw Error('open refused');const fd=realOpen(name,...args);if(String(name)===path)fds.push(fd);return fd;};
+      let replaceIdentity=false;
+      fs.lstatSync=(name,...args)=>{const st=realStat(name,...args);if(String(name)===path&&replaceIdentity)return changed(st,fault==='identity'?'ino':fault.slice(6));return st;};
+      cp.spawnSync=(file,args,opts)=>{
+        const r=realSpawn(file,args,opts);if(file!=='/usr/bin/flock')return r;
+        if(fault==='throw')throw Error('CHECKER_PRIVATE_SENTINEL');
+        if(fault==='identity'||fault.startsWith('after-'))replaceIdentity=true;
+        if(fault==='error')return {...r,error:Object.assign(Error('CHECKER_PRIVATE_SENTINEL'),{code:'ENOENT'})};
+        if(fault==='signal')return {...r,status:null,signal:'SIGTERM'};
+        if(fault==='exit')return {...r,status:1};
+        if(fault==='null')return {...r,status:null};
+        return r;
+      };syncBuiltinESMExports();
+      const snap=await import(process.argv[1]);let message='';try{snap.assertNoExternalDaemon(home);}catch(e){message=e.message;}
+      if(fault==='success')assert.equal(message,'');else assert.equal(message,'CODEX_EXTERNAL_DAEMON_CHECK_FAILED: app-server-control/app-server-startup.lock');
+      assert(!message.includes('PRIVATE_SENTINEL'));
+      for(const fd of fds)assert.throws(()=>fs.fstatSync(fd),{code:'EBADF'});
+      const reacquire=realSpawn('/usr/bin/flock',['-n',path,'true'],{encoding:'utf8'});
+      assert.equal(reacquire.status,0);console.log(JSON.stringify({message,closed:fds.length,reacquire:reacquire.status}));
+    `, snapshotModule, fixture.home, fault]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).reacquire).toBe(0);
+  });
+
 });

@@ -402,6 +402,100 @@ restore leaves it in quarantine, and Codex recreates it in the restored home
 at its next ownership attempt. Replacing an active lock's inode can admit
 competing reclamation workers: do not delete or rename it to bypass refusal.
 
+### External Codex daemons and their home entries
+
+Kaoiro uses app-server over stdio. An interactive Codex TUI can also start a
+shared Unix-listener daemon that outlives the TUI. Its independently updating
+executable can differ from the wrapper's pin. Do not launch a TUI, daemon or
+installer against the selected home during maintenance. Prefer a separate home
+for interactive use. `--no-daemon` avoids that background daemon but still writes
+the selected home, so it is not a maintenance exception.
+
+The exact root `app-server-control` is disposable. Its advertised socket alias
+and startup-lock file coordinate the Unix listener, not persisted history.
+Forward backup omits this tree from manifest/payload and leaves source inodes
+untouched. Full restore leaves it in quarantine; a later Unix-listener start
+recreates its runtime entries. Never delete a held lock or replace its inode:
+that can admit another startup. A published listener normally no longer holds
+the home startup lock. The physical temporary socket and its own lock are
+separate objects outside the home; the snapshot tool never follows or removes
+the alias target.
+
+Three other exact roots are state: `app-server-daemon` (settings, loaded-thread
+recovery and admitted regular diagnostic/lock files), `packages` (installed
+executables/resources and selection links), and
+`tui-thread-reference-capabilities` (per-thread empty files whose presence affects
+resumed task-reference tools). Backup/restore preserves their bytes, modes and
+symlink text under the usual non-following rules. Package size counts toward
+capacity. Removing a package and fetching a new one later does not restore its
+selected version or offline availability. An abandoned `install-lock-*`
+directory can remain as state; a present `install.lock.d` still refuses admission.
+No prefix exemption is granted to similar or unknown root names.
+
+Classification, transaction admission and stopped snapshot/restore boundaries
+check external-daemon signals, including a previously quarantined original
+home on resume. The following refusals use exit 78 and preserve the signal:
+
+| Code | Meaning | Required action |
+|---|---|---|
+| `CODEX_EXTERNAL_DAEMON_ENTRY` | A control alias, dedicated/legacy PID/startup/socket marker, or installer directory lock exists, even if stale or dangling | Identify and stop the intended external writers; obtain approval for any exact stale-entry disposition. |
+| `CODEX_EXTERNAL_DAEMON_BUSY` | An existing startup/daemon-operation/PID-reservation/installer file lock is held | Wait for the identified operation to stop; never unlink the lock. |
+| `CODEX_EXTERNAL_DAEMON_CHECK_FAILED` | Ownership/type/identity is invalid, a parent is a symlink, or lock inspection failed | Resolve the inspection failure and rerun; an unknown result never means unheld. |
+
+Lock inspection requires `/usr/bin/flock` on this Linux maintenance path. It
+opens existing regular owned single-link files read-only without following
+symlinks or creating/truncating files, and probes one inherited descriptor at
+a time. Every descriptor is closed, including failure paths: child exit alone
+would leave its flock attached to the parent's open file description.
+Missing/broken utility or unexpected exit/signal refuses. Live classification
+briefly takes an available lock and may race another daemon's nonblocking
+operation, so do not repeatedly classify a home with active external clients.
+These are observations, not a lease against later startups. Service cgroup
+emptiness, absent aliases and unheld locks do not prove that custom-socket
+listeners or all other same-home clients are gone. The release card must also
+confirm no external writers and prohibit their restart until validation ends.
+
+After operator authorization, the director stops the identified external pair:
+
+1. Close same-home clients and disable their restart during maintenance. Resolve
+   the intended canonical home and matching native executable explicitly.
+   Validate the listener and updater's exact positive PIDs against current UID,
+   executable, command, `CODEX_HOME` and boot/start identity immediately before
+   signalling. A PID record alone, a reused PID or unreadable identity is not
+   authority. Keep process details private; do not pattern-kill or touch another
+   home's daemon.
+2. Stop the independent updater first with `kill -TERM "$UPDATER_PID"`, using
+   only the verified PID. Wait for its identity and any in-progress installer
+   work to exit. Unknown ownership or remaining work stops maintenance; do not
+   broaden the kill target.
+3. Run `CODEX_HOME="$TARGET_CODEX_HOME" "$VERIFIED_CODEX_BIN" app-server daemon stop`.
+   Both reviewed pins support this command. Use the matching 0.164.0 CLI for a
+   0.164.0 installation. Require exit 0 and `stopped` or `notRunning`, then check
+   the postconditions. Native may force-stop the listener after its configured
+   grace, so authorize the impact on in-flight work first. An unmanaged-listener
+   error requires a separate stop decision for that verified owner.
+4. Confirm zero live external writers using the target home, including TUI,
+   listener, updater and installer processes; unknown same-user identities are
+   not zero. Confirm the control alias and listener PID disappeared. The control
+   directory/startup lock and daemon operation/reservation locks normally remain.
+   Both pins can leave the updater PID record; 0.161.0 can also leave its dead
+   updater socket, while 0.164.0 normally removes that socket alias.
+5. Residual PID/socket entries still block the guard. Stopping a daemon is not
+   approval to delete arbitrary files. Only with separate operator approval and
+   proof that the recorded identity/work is stopped, recheck metadata and unlink
+   the exact stale entry itself. Do not follow its target, remove locks or delete
+   directories/packages. An unexplained or live alias remains a stop condition.
+6. Rerun the compatible tool's classify, then the existing stopped-service
+   backup/restore procedure. Reconfirm no external restart immediately before
+   destructive work. Do not automatically restart the external daemon afterward.
+
+Use the recorded physical tool release that recognizes all four roots for
+forward and full restore, including when selecting older application/native
+code. Older helpers still refuse these names; removing state to appease them is
+not a rollback procedure. Both-pin source links, actual stop order, negative
+control and remaining-file observations are recorded in
+[the dated daemon-home evidence](../evidence/codex-app-server/daemon-home-2026-10-28.md).
+
 An isolated, credential-free local-provider
 [measurement on 2026-10-27](https://github.com/sakuraiyuta/kaoiro/issues/817#issuecomment-6428858413)
 found the same 28 home-root names on 0.161.0 and 0.164.0 with both `exec` and

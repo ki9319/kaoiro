@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { execChildSync } from "./child-process-environment.mjs";
 import { nativeIdentity } from "./codex-native.mjs";
 import { verifyRelease } from "./verify-release.mjs";
-import { CREDENTIALS, atomicJSON, capacity, digest, durableRename, hasEntry, identity, inside, inventory, must, prepareRestore, sameState, snapshot, stateEntries, syncDirectory, verifySnapshot } from "./codex-snapshot.mjs";
+import { CREDENTIALS, assertNoExternalDaemon, atomicJSON, capacity, digest, durableRename, hasEntry, identity, inside, inventory, must, prepareRestore, sameState, snapshot, stateEntries, syncDirectory, verifySnapshot } from "./codex-snapshot.mjs";
 import { assertStopped, captureBinding, checkBinding, homePath, requireCgroupV2, runnerActivity, staticBinding, systemctl } from "./codex-service.mjs";
 import { ANCHORS, PHASES, classify, render, rowLines } from "./codex-state-recovery.mjs";
 
@@ -176,6 +176,7 @@ async function reconcile(root, tx) {
 }
 async function takeSnapshot(root, tx) {
   assertStopped(tx.service, tx.home); checkBinding(root, tx.service, binding(tx)); // codex-recovery-site: PS.snapshot-stopped PS.snapshot-binding
+  assertNoExternalDaemon(tx.home);
   must(current(root) === tx.source.id, "Pre-start source link changed");
   await checkRelease(root, tx.source);
   if (tx.phase === "prepared") {
@@ -215,6 +216,7 @@ export async function guard(root, target, uuid, preflight = false) {
   checkBinding(root, tx.service, binding(tx), restoring && !hasEntry(tx.home)); // codex-recovery-site: G4.guard-entry PS.guard-nested PS.guard-nested-intent
   if (preflight) return;
   assertStopped(tx.service, tx.home);
+  assertReplacementDaemonsAbsent(tx);
   if (restoring) {
     must(tx.replacement.startRequested, "Restore start intent is missing");
     verifyReplacement(tx);
@@ -243,6 +245,7 @@ async function admitRestore(root, tx, home, service, tool) {
   const manifest = snapshotFor(tx);
   must(home === tx.home && service.replace(/(?:\.service)?$/, ".service") === tx.service, "Restore home/service differs from selected record");
   checkBinding(root, tx.service, binding(tx)); // codex-recovery-site: G4.restore
+  assertNoExternalDaemon(home);
   const from = await release(root, current(root));
   await checkRelease(root, tx.source); needCapability(root, tx.source.id); await release(root, tool);
   capacity(dirname(home), manifest.entries); requireCgroupV2();
@@ -269,6 +272,7 @@ async function prepareRollback(root, path, home, service, tool) {
 async function stageRestore(root, tx) {
   const r = tx.replacement;
   assertStopped(tx.service, tx.home); checkBinding(root, tx.service, binding(tx)); // codex-recovery-site: PS.stage
+  assertNoExternalDaemon(tx.home);
   must(current(root) === r.from.id, "Restore source link changed");
   await checkRelease(root, r.from); await checkRelease(root, tx.source);
   await cleanupStage(root, tx, r.staging);
@@ -278,9 +282,14 @@ async function stageRestore(root, tx) {
   r.stateDigest = stateDigest(manifest.entries);
   tx.phase = "replace-intent"; await publish(root, tx);
 }
+function assertReplacementDaemonsAbsent(tx) {
+  if (hasEntry(tx.home)) assertNoExternalDaemon(tx.home);
+  if (tx.replacement && hasEntry(tx.replacement.aside)) assertNoExternalDaemon(tx.replacement.aside);
+}
 async function moveReplacement(root, tx) {
   const r = tx.replacement;
   assertStopped(tx.service, tx.home); // codex-recovery-site: PS.replace-stopped
+  assertReplacementDaemonsAbsent(tx);
   checkBinding(root, tx.service, binding(tx), !hasEntry(tx.home)); // codex-recovery-site: PS.replace-binding
   if (hasEntry(tx.home) && !hasEntry(r.staging) && hasEntry(r.aside) && r.startRequested) {
     must(current(root) === tx.source.id, "Published restore home requires its source release");
@@ -313,6 +322,7 @@ function promote(root, uuid) {
   must(current(root) === tx.source.id, "Source must be selected before home promotion");
   verifyReplacement(tx);
   const r = tx.replacement;
+  assertReplacementDaemonsAbsent(tx);
   if (!hasEntry(tx.home)) durableRename(r.staging, tx.home);
   syncDirectory(dirname(tx.home));
   r.promoted = true; save(root, tx);
@@ -548,7 +558,7 @@ function report(error, [action, rootArg, ...args]) {
     try { tx = selected(root, uuid); } catch { /* not a record of this root */ }
   }
   if (cls === "lock" && root) try { held = next(root); } catch { /* records unreadable */ }
-  try { lines.push(...render(cls, { tx, row: RUNS.includes(action), report: held, ...context(root) })); } catch { /* unrenderable record */ }
+  try { lines.push(...render(cls, { message, tx, row: RUNS.includes(action), report: held, ...context(root) })); } catch { /* unrenderable record */ }
   for (const line of lines) console.error(`codex-state: ${line}`);
 }
 if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(import.meta.filename)) {

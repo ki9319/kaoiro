@@ -248,3 +248,43 @@ describe.skipIf(process.platform !== "linux")("replacement verification before e
     expect(h.current()).toBe(h.B);expect(existsSync(h.home)).toBe(false);expect(readFileSync(h.recordPath(record.uuid))).toEqual(bytes);
   });
 });
+
+describe.skipIf(process.platform !== "linux")("external daemon maintenance admission", { timeout: 45_000 }, () => {
+  const injectAfterStop = () => {
+    const text = readFileSync(h.ctl, "utf8");
+    writeFileSync(h.ctl, text.replace("if(fs.existsSync(dir+'/late-unknown'))", `if(fs.existsSync(dir+'/external-after-stop')) { fs.mkdirSync(${JSON.stringify(join(h.home, "app-server-control"))},{recursive:true});fs.symlinkSync('/unavailable/owned-runtime-alias',${JSON.stringify(join(h.home, "app-server-control/app-server-control.sock"))}); } if(fs.existsSync(dir+'/late-unknown'))`));
+    h.trigger("external-after-stop");
+  };
+  it("refuses an external alias appearing at forward stop before snapshot copying", () => {
+    injectAfterStop(); const result = h.forward();
+    expect(result.status).not.toBe(0); expect(result.stderr).toContain("CODEX_EXTERNAL_DAEMON_ENTRY");
+    expect(existsSync(join(h.dir, "backup"))).toBe(false);
+    expect(h.current()).toBe(h.A); expect(history()).toBe("HISTORY");
+    expect(readFileSync(join(h.home, "auth.json"), "utf8")).toBe("CURRENT_TOKEN");
+  });
+  it("refuses an external alias appearing at restore stop before staging or credential movement", () => {
+    ok(h.forward()); writeFileSync(join(h.home, "sessions/old.jsonl"), "NEW_HISTORY"); injectAfterStop();
+    const result = h.restore(); expect(result.status).not.toBe(0); expect(result.stderr).toContain("CODEX_EXTERNAL_DAEMON_ENTRY");
+    const r = tx().replacement;
+    expect(existsSync(r.staging)).toBe(false); expect(existsSync(r.aside)).toBe(false);
+    expect(h.current()).toBe(h.B); expect(history()).toBe("NEW_HISTORY");
+    expect(readFileSync(join(h.home, "auth.json"), "utf8")).toBe("CURRENT_TOKEN");
+  });
+  it.each(["before", "after"])("refuses external runtime entries %s quarantine before credential moves on resume", async when => {
+    ok(h.forward());
+    await interrupted(restoreCommand(), { from: "", when });
+    const record = tx(), r = record.replacement;
+    const original = when === "before" ? h.home : r.aside;
+    mkdirSync(join(original, "app-server-daemon"), { recursive: true });
+    writeFileSync(join(original, "app-server-daemon/daemon-updater.pid"), "stale runtime record");
+    const originalCredential = statSync(join(original, "auth.json")).ino;
+    const result = h.resume(record.uuid);
+    expect(result.status).not.toBe(0); expect(result.stderr).toContain("CODEX_EXTERNAL_DAEMON_ENTRY");
+    expect(statSync(join(original, "auth.json")).ino).toBe(originalCredential);
+    expect(existsSync(join(r.staging, "auth.json"))).toBe(false);
+    expect(existsSync(h.home)).toBe(when === "before");
+    rmSync(join(original, "app-server-daemon/daemon-updater.pid"));
+    ok(h.resume(record.uuid)); expect(history()).toBe("HISTORY");
+    expect(readFileSync(join(h.home, "auth.json"), "utf8")).toBe("CURRENT_TOKEN");
+  });
+});

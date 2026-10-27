@@ -91,6 +91,12 @@ version of the external ai-settings repository. `plugins`, including installed
 bundles under `plugins/cache` and plugin data, is backed-up state. The distinct
 home-root `cache` is disposable and is re-fetched after restore. Snapshots remain
 private because plugin/configuration content can include sensitive values.
+The daemon settings/recovery tree, installed packages and per-thread TUI
+capability markers are also state. The Unix listener control tree is disposable,
+but a remaining runtime alias/PID marker or held daemon lock refuses admission.
+Do not remove a lock to bypass refusal. Stop external same-home writers and
+resolve any stale entry through the authorized
+[external-daemon procedure](runner-update-and-rollback.md#external-codex-daemons-and-their-home-entries).
 Every pin update requires the candidate classifier's pre-stop check; see
 [Codex state backup](runner-update-and-rollback.md#codex-state-backup).
 After an interrupted or refused operation, the
