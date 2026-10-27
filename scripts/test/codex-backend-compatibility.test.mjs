@@ -150,7 +150,8 @@ test("prepare pins omitted legacy exec once and confirms the applied selection",
 });
 
 test("a positive pending transition blocks the product entry before the config write", async () => {
-  const { adapters, calls } = makeAdapters({ hosts: [observation({ transition_pending: true })] });
+  const pending = observation({ transition_pending: true });
+  const { adapters, calls } = makeAdapters({ hosts: [pending, pending] });
   const output = io();
 
   const result = await main(argv(), adapters, output);
