@@ -113,7 +113,10 @@ defmodule KaoiroServer.AgentActivityTest do
   end
 
   test "pending_ids exposes a positive transition without transaction metadata" do
-    store = start_supervised!({AgentActivity, name: nil, pending_ttl_ms: 5_000})
+    store =
+      start_supervised!({AgentActivity, name: nil, pending_ttl_ms: 5_000},
+        id: :pending_ids_activity
+      )
 
     assert AgentActivity.pending_ids(store) == MapSet.new()
 

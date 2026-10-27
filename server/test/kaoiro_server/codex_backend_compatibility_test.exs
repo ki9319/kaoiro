@@ -24,7 +24,7 @@ defmodule KaoiroServer.CodexBackendCompatibilityTest do
     host = "alpha.beta"
     live_id = "#{host}.live"
     offline_id = "#{host}.offline"
-    activity = start_supervised!({AgentActivity, name: nil})
+    activity = start_supervised!({AgentActivity, name: nil}, id: :compatibility_activity)
 
     directory =
       start_supervised!({
@@ -55,7 +55,9 @@ defmodule KaoiroServer.CodexBackendCompatibilityTest do
                live_id,
                "transition-secret",
                :restore,
-               "2026-10-27T00:00:00Z", server: activity)
+               "2026-10-27T00:00:00Z",
+               server: activity
+             )
 
     assert {:ok, %{"schema" => 1, "host" => ^host, "rows" => [live, offline]}} =
              CodexBackendCompatibility.observe_host(host,
