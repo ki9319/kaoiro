@@ -15,7 +15,9 @@ defmodule KaoiroServer.CodexBackendCompatibility do
   @host_id_pattern ~r/^[A-Za-z0-9._-]+$/
 
   @doc "Returns the complete allowlisted host projection or an unavailable error."
-  def observe_host(host_id, opts \\ []) when is_binary(host_id) do
+  def observe_host(host_id, opts \\ [])
+
+  def observe_host(host_id, opts) when is_binary(host_id) do
     if Regex.match?(@host_id_pattern, host_id) do
       with {:ok, directory} <-
              source(
