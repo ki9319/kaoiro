@@ -1,3 +1,4 @@
+import "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { main } from "../codex-backend-compatibility.mjs";
@@ -155,9 +156,47 @@ test("a positive pending transition blocks the product entry before the config w
   const output = io();
 
   const result = await main(argv(), adapters, output);
+  assert.equal(calls.origin, 0);
+  assert.equal(calls.cursor, 0);
   assert.equal(calls.writes, 0);
   assert.equal(calls.restores, 0);
   assert.equal(result, 1);
+});
+
+test("the pre-write lifecycle gate keeps pending work from reaching the write boundary", async () => {
+  const { adapters, calls } = makeAdapters({ hosts: [observation(), observation({ transition_pending: true })] });
+  const output = io();
+
+  assert.equal(await main(argv(), adapters, output), 1);
+  assert.match(output.stderr.text, /stopped \(pending-lifecycle\)/);
+  assert.equal(calls.writes, 0);
+  assert.equal(calls.restores, 0);
+});
+
+test("the pre-write stability gate rejects host and runner changes", async (t) => {
+  await t.test("pointer status changes without changing origin evidence", async () => {
+    const { adapters, calls } = makeAdapters({ hosts: [observation(), observation({ pointer: "nil" })] });
+    const output = io();
+
+    assert.equal(await main(argv(), adapters, output), 1);
+    assert.match(output.stderr.text, /stopped \(observation-changed\)/);
+    assert.equal(calls.writes, 0);
+    assert.equal(calls.restores, 0);
+  });
+
+  await t.test("runner receipt changes without changing origin evidence", async () => {
+    const before = runnerObservation();
+    const changed = runnerObservation({
+      appliedReceipt: { ...before.appliedReceipt, timestampUs: before.appliedReceipt.timestampUs + 1 },
+    });
+    const { adapters, calls } = makeAdapters({ runners: [before, changed] });
+    const output = io();
+
+    assert.equal(await main(argv(), adapters, output), 1);
+    assert.match(output.stderr.text, /stopped \(observation-changed\)/);
+    assert.equal(calls.writes, 0);
+    assert.equal(calls.restores, 0);
+  });
 });
 
 test("an unavailable initial or immediate pre-write server observation makes no changes", async (t) => {
@@ -225,6 +264,24 @@ test("a failed applied-selection acknowledgement does not trigger a second mutat
   assert.equal(calls.restores, 0);
   assert.equal(calls.runner, 2);
   assert.equal(result, 1);
+});
+
+test("post-write applied selection requires a reload receipt", async () => {
+  const after = runnerObservation({
+    configuredBackend: "exec",
+    appliedBackend: "exec",
+    appliedReceipt: { backend: "exec", source: "wrapper", timestampUs: 3_000_000 },
+    configHash: NEXT_CONFIG_HASH,
+    configMtimeMs: 2_000,
+  });
+  const { adapters, calls } = makeAdapters({ runners: [undefined, undefined, after] });
+  const output = io();
+
+  assert.equal(await main(argv(), adapters, output), 1);
+  assert.match(output.stderr.text, /stopped \(applied-selection-unverified\)/);
+  assert.equal(calls.writes, 1);
+  assert.equal(calls.acknowledgements, 1);
+  assert.equal(calls.restores, 0);
 });
 
 test("unknown origin, changed roster, and malformed phase all refuse before mutation", async (t) => {

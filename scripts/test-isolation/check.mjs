@@ -371,7 +371,7 @@ const CI_JOB = "test-isolation";
 // observation, and the tests keep its CLI and this reader honest. Each side
 // checks the other, so dropping either step fails the one that remains.
 const CI_STEPS = ["- run: node scripts/test-isolation/check.mjs",
-  "- run: node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs scripts/test/child-process-environment.test.mjs"];
+  "- run: node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs scripts/test/child-process-environment.test.mjs scripts/test/codex-backend-compatibility.test.mjs"];
 const CI_UNSAFE_KEY = /^(?:-\s+)?(?:continue-on-error|if)\s*:/;
 
 /** Returns how the test-isolation job of a workflow fails to run the checker and its tests. */

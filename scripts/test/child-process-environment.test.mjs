@@ -72,9 +72,10 @@ test("build children retain the exact selected toolchain PATH without ambient cr
 
 test("coverage check rejects separate existing and new bypasses and its own disabled guard", () => {
   const green = checkReleaseChildEnvironments(root);
-  assert.equal(green.files, 4); assert.equal(green.calls, 13);
+  assert.equal(green.files, 5); assert.equal(green.calls, 14);
   assert.equal(green.unchanged_legacy_calls, 4);
   for (const target of ["scripts/build-identity.mjs", "scripts/with-build-identity.mjs",
+    "scripts/codex-backend-compatibility.mjs",
     "server/deploy/kaoiro-server-deploy.mjs", "runner/deploy/kaoiro-runner-codex-state.mjs"]) {
     assert.throws(() => checkReleaseChildEnvironments(root, (path, encoding) => {
       const source = readFileSync(path, encoding);
@@ -88,7 +89,7 @@ test("coverage pins import-only, spawn/fork, exact legacy count and both scope-p
     const source = readFileSync(path, encoding);
     return path.endsWith(target) ? transform(source) : source;
   });
-  for (const target of ["scripts/build-identity.mjs", "scripts/with-build-identity.mjs", "server/deploy/kaoiro-server-deploy.mjs",
+  for (const target of ["scripts/build-identity.mjs", "scripts/with-build-identity.mjs", "scripts/codex-backend-compatibility.mjs", "server/deploy/kaoiro-server-deploy.mjs",
     "runner/deploy/kaoiro-runner-codex-state.mjs"]) {
     for (const extra of ["import cp from 'node:child_process';", "spawn('unsafe', []);", "fork('unsafe');"]) {
       assert.throws(mutate(target, source => source + "\n" + extra), /unmanaged/);
@@ -121,13 +122,13 @@ test("the checker enumerates every source directory and follows new relative dep
   try {
     for (const dir of ["scripts", "scripts/lib", "server/deploy", "runner/deploy", "extra"]) mkdirSync(join(fixture, dir), { recursive: true });
     writeFileSync(join(fixture, "runner/deploy/child-process-environment.mjs"), "export function execChildSync() {}\n");
-    for (const file of ["scripts/build-identity.mjs", "scripts/with-build-identity.mjs", "server/deploy/kaoiro-server-deploy.mjs"]) {
+    for (const file of ["scripts/build-identity.mjs", "scripts/with-build-identity.mjs", "scripts/codex-backend-compatibility.mjs", "server/deploy/kaoiro-server-deploy.mjs"]) {
       const path = file.startsWith("scripts/") ? "../runner/deploy/child-process-environment.mjs" : "../../runner/deploy/child-process-environment.mjs";
       writeFileSync(join(fixture, file), `import { execChildSync } from ${JSON.stringify(path)};\nexecChildSync('git', 'git', []);\n`);
     }
     writeFileSync(join(fixture, "runner/deploy/kaoiro-runner-codex-state.mjs"),
       "import { execChildSync } from \"./child-process-environment.mjs\";\nexecChildSync('codex-switch', 'switch', []);\n");
-    assert.equal(checkReleaseChildEnvironments(fixture).files, 4);
+    assert.equal(checkReleaseChildEnvironments(fixture).files, 5);
     for (const dir of ["scripts", "scripts/lib", "server/deploy", "runner/deploy"]) {
       const added = join(fixture, dir, "unchecked.mjs");
       writeFileSync(added, "import cp from 'node:child_process';\n");
@@ -140,7 +141,7 @@ test("the checker enumerates every source directory and follows new relative dep
     writeFileSync(dependency, "spawn('unsafe', []);\n");
     assert.throws(() => checkReleaseChildEnvironments(fixture), /unmanaged/);
     writeFileSync(dependency, "export const valid = true;\n");
-    assert.equal(checkReleaseChildEnvironments(fixture).calls, 4);
+    assert.equal(checkReleaseChildEnvironments(fixture).calls, 5);
     rmSync(dependency);
     symlinkSync(join(fixture, "runner/deploy/child-process-environment.mjs"), dependency);
     assert.throws(() => checkReleaseChildEnvironments(fixture), /regular unlinked file/);

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { open, lstat, readFile, rename, stat, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { execChildSync } from "./child-process-environment.mjs";
 
 const HOST_ID = /^[A-Za-z0-9._-]+$/;
 const FULL_SHA = /^[0-9a-f]{40}$/i;
@@ -168,6 +168,7 @@ export async function runPrepare(args, adapters) {
 
   const beforeHost = await observeHost(adapters, args.host, "server-observation-unavailable");
   validateObservation(beforeHost, args.host);
+  // Stop before reading routing evidence when a lifecycle transition is already active.
   if (beforeHost.rows.some((row) => row.reset_pending || row.transition_pending)) stop("pending-lifecycle");
 
   let evidence;
@@ -192,9 +193,10 @@ export async function runPrepare(args, adapters) {
   ]);
   validateObservation(currentHost, args.host);
   validateRunner({ ...currentRunner, expectedRunnerSha: args.runner_sha }, args.host);
+  // Evidence and cursor collection can take time; repeat the lifecycle gate at the write boundary.
+  if (currentHost.rows.some((row) => row.reset_pending || row.transition_pending)) stop("pending-lifecycle");
   if (!isStable(beforeHost, currentHost) || !isStable(beforeRunner, currentRunner)) stop("observation-changed");
   if (currentRunner.configuredBackend !== "omitted" || currentRunner.appliedBackend !== "exec") stop("applied-selection-changed");
-  if (currentHost.rows.some((row) => row.reset_pending || row.transition_pending)) stop("pending-lifecycle");
   let currentEvidence;
   try {
     currentEvidence = await adapters.readOriginEvidence(args.origin_evidence);
@@ -259,7 +261,8 @@ async function observeRunner(adapters, args, failureCode) {
 
 function run(command, argv, options = {}) {
   try {
-    return execFileSync(command, argv, {
+    const profile = command === "systemctl" || command === "journalctl" ? "systemd" : "authority";
+    return execChildSync(profile, command, argv, {
       encoding: "utf8",
       timeout: options.timeoutMs ?? 15_000,
       maxBuffer: options.maxBuffer ?? 8 * 1024 * 1024,
@@ -343,6 +346,8 @@ async function readLocalRunner(args) {
     if (match) events.push({ backend: match[1], timestampUs, pid: row._PID, source: runnerAck ? "reload" : "wrapper" });
   }
   events.sort((a, b) => a.timestampUs - b.timestampUs);
+  const latestEvent = events.at(-1) ?? null;
+  const latestReload = events.filter((event) => event.source === "reload").at(-1) ?? null;
   const endRaw = await readFile(file).catch(() => stop());
   const endStat = await stat(file).catch(() => stop());
   const finalInvocation = readInvocation(args.runner_unit);
@@ -350,8 +355,8 @@ async function readLocalRunner(args) {
   return {
     host: args.host,
     configuredBackend: configuredBackend(config),
-    appliedBackend: events.at(-1)?.backend ?? null,
-    appliedReceipt: events.at(-1) ?? null,
+    appliedBackend: latestEvent?.backend ?? null,
+    appliedReceipt: latestReload ?? latestEvent,
     configHash,
     configMtimeMs,
     runnerSha: commandIdentity(args.host, args.runner_sha),

@@ -13,9 +13,10 @@ remain in the [production deployment manual](production.md).
 
 ## Preparation before a default change
 
-U1 adds `scripts/codex-backend-compatibility.mjs`, whose only supported phase
-is `prepare`. Use it before deploying a later default-changing release to an
-affected host whose `codex.backend` is omitted:
+Use the preparation command introduced for [issue #564](https://github.com/sakuraiyuta/kaoiro/issues/564),
+`scripts/codex-backend-compatibility.mjs`, before deploying a later
+default-changing release to an affected host whose `codex.backend` is omitted.
+Its only supported phase is `prepare`:
 
 ```sh
 node scripts/codex-backend-compatibility.mjs \
