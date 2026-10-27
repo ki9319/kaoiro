@@ -1,7 +1,7 @@
 ---
 title: "Issue 564 U1 compatibility evidence"
 status: implemented
-last_updated: 2026-10-27
+last_updated: 2026-10-28
 ---
 
 # Issue 564 U1 compatibility evidence
@@ -18,14 +18,15 @@ Codex session, or account-backed operation is claimed.
 | Runner launcher `--version --json` | (a) real built artifact | Build identity assertion | Executes the built launcher with temporary HOME/TMPDIR values; compares `revision` with `git rev-parse HEAD` and requires `dirty` to be a JSON boolean. | CI checks the build artifact, not an installed host's launcher. |
 | Runner startup diagnostic (`runner/src/runner-cli.ts`) | (a) real built process | `runnerIdentity` in the U1 preparation command | Searches the complete selected systemd invocation for one `runner: host=… rev=… connecting to …` record; checks its random test host ID and full checkout SHA. The test declares `capabilities: ["codex"]` and `codex.auth_mode: "chatgpt"`; an unknown revision fails. | CI observes a real process on stderr, but not journald/systemd filtering. Missing, ambiguous, malformed, or over-8-MiB invocation output stops with `runner-start-record-unavailable`; `-dirty` stops with `runner-identity-dirty`. |
 | Runner reload diagnostic (`runner/src/runner-cli.ts:548`) | (a) real in-process producer seam | `waitForAppliedBackendExec` and `readLocalRunner` | Starts the built runner through `runRunnerCli`, changes a temporary config from `app-server` to `exec`, and captures the actual line only after the reload trigger. The same bytes pass through the journal JSON `MESSAGE` reader and `--output=cat` acknowledgement reader. The receipt must be `source=reload` and later than config mtime. | Journal cursor, filtering, retention, and service transport remain command-boundary behavior in CI. |
-| Wrapper backend diagnostic (`wrapper/codex/src/cli.ts:188`) | (a) real built CLI seam | `readLocalRunner` | Runs `runCodexCli` with a temporary config and no `dependencies.backend`; the actual `codex: backend=exec` line is passed to the default local reader as an invocation-scoped JSON message. | The CLI code is real, while system journal transport is represented at the command boundary. |
+| Wrapper backend diagnostic (`wrapper/codex/src/cli.ts:188`) | (a) real built CLI seam | `readLocalRunner` | Runs `runCodexCli` with a temporary config and no `dependencies.backend`; both `exec` and `app-server` are selected through the config. The captured backend line itself passes to the default local reader as an invocation-scoped JSON message; the latter selection refuses preparation. | The CLI code is real, while system journal transport is represented at the command boundary. |
 | Journal fields and cursor (`_SYSTEMD_INVOCATION_ID`, `_PID`, `__REALTIME_TIMESTAMP`, `--show-cursor`) | (c) product-shaped command response | `readLocalRunner`, `captureAckCursor`, and the applied-selection waiter | Invocation ID selects one service lifetime; the cursor separates records before and after the config write; timestamps bind receipts to config mtime. | These values are supplied by command-boundary fixtures in CI. Native journal behavior, cursor expiry, and retention remain unmeasured. |
-| Systemd `InvocationID` | (c) product-shaped command response | `readInvocation` | Reads the selected unit's current invocation and verifies it is unchanged across the file observation and write boundary. | `systemctl` output and changes during observation are simulated at the command boundary; live systemd is not run in hakoniwa. |
+| Systemd `InvocationID` | (c) product-shaped command response | `readInvocation` | Reads the selected unit's current invocation and verifies it is unchanged across the file observation and write boundary. | `systemctl` output and changes during observation are simulated at the command boundary; live systemd is not run in the isolated tests. |
 | Release RPC output | (a) real inner projection; (c) RPC command boundary | `localAdapters.observeHost` and `parseJsonOutput` | The inner JSON bytes come from the real server projection captured in `server-observation.json`; the default adapter sends the RPC through the configured Compose command boundary. | The observation shape is tied to the real server producer. Compose execution and RPC transport remain represented by a command-boundary fixture. |
 | `AgentDirectory` keys | (a) real default store | `CodexBackendCompatibility.observe_host/1` | A default-store ExUnit test records six synthetic rows and checks the sorted host union in the complete JSON golden. | The test uses the real in-process store; production store contents and host membership are not measured. |
 | `SessionPointers` map keys and `engine` | (a) real default store | `CodexBackendCompatibility.observe_host/1` | Real nil-session and non-nil-session pointers are joined to the directory and compared byte-for-byte in the golden. | Only the product's in-process store is exercised; no production inventory is inferred. |
 | `AgentStates.snapshot()` and envelope `ext.engine` | (a) real wrapper-channel join and store | `CodexBackendCompatibility.observe_host/1` | A real wrapper-channel join writes a pointerless live Codex state whose engine exists only at `ext.engine`; its projected row is in the golden. | The test proves the current producer and reader agree in-process; external socket delivery and production state are outside this measurement. |
 | Reset and transition pending sets | (a) real default stores | `CodexBackendCompatibility.observe_host/1` | The default `SessionResets` and `AgentActivity` stores contribute pending rows to the same golden. Test-only timeouts are one day so elapsed test time cannot expire either row. | Only in-process store state is measured. The long timeouts apply only in test configuration; normal defaults are unchanged. |
+| Synchronous child-process overflow | (a) real `execFileSync` | Default `run` and `runnerIdentity` catch branches | A real child writes 9 MiB under the production 8 MiB capture cap. The test asserts the emitted error code is `ENOBUFS`, preserves the original exception, and invokes `main` without a `runCommand` override. | The child replaces journal output at the process boundary; it does not measure a real journal. |
 | Runner config file | (a) real temporary file | `readLocalRunner` and `writeBackendExec` | The default local adapter reads a real temporary config, checks its content hash and mtime, performs an atomic write, and rereads it. | Local filesystem behavior is exercised; the operator-selected file and filesystem are not. |
 
 The golden contains directory-only, pointer-nil, pointer-non-nil, pointerless
@@ -85,33 +86,50 @@ startup line. No Codex process, external account, production service, or
 
 ## Recorded checks
 
-The focused checks below ran against the committed code candidate shown in the
-table. Mutation runs use isolated snapshots of that commit. All hakoniwa runs use the pinned
-Node runtime image
-`sha256:56cfd9fbe740e78f5d6d219772b6f5f7ba08424bf449f688b1a2597eebd469b8`
-or Elixir image
-`sha256:431e47077ade55b2acf621898f653451f542de12a51ffe538c3c5e69b8fbccc9`.
+The remaining M3 and M6 corrections were measured on source candidate
+`b8fb161645b29ee2ac9d905df14377e8ec115135`. Subsequent evidence-only edits do
+not change the measured source or tests. The final pushed head is checked by
+all seven CI jobs; its exact head SHA and run are recorded on the draft PR.
+The isolated runs used pinned Node and Elixir images:
+
+- Node: `sha256:56cfd9fbe740e78f5d6d219772b6f5f7ba08424bf449f688b1a2597eebd469b8`
+- Elixir: `sha256:431e47077ade55b2acf621898f653451f542de12a51ffe538c3c5e69b8fbccc9`
 
 | Check | Run | Result |
 | --- | --- | --- |
-| Final candidate no-defect control: Node compatibility, isolation, and checker | `momo-cd81058-u1ccd810-1027231216-9f45.62b43234748df9aa` | Pass: 234 tests, 234 pass, 0 fail. |
-| Final candidate no-defect control: server compatibility ExUnit and format | `momo-cd81058-u1ecd810-1027231131-392f.e21515cfa77e42bd` | Pass: format check and 6/6 tests. |
-| Node mutation campaign, first 33 cases | `momo-1a7f628-u1mutn5-1027232935-f1a3.e9994c627849d76e` | All 33 mutations before the N1 case were killed by their named assertion or checker diagnostic. The run stopped when the N1 mutant survived its initially misbound focused test; that producer mutation was rerun with the corrected default-adapter test in the tail run below. |
-| Node mutation campaign, final 7 cases | `momo-c806373-u1tail8-1027233702-a7c7.32d56654576afe8b` | Pass: 7/7 killed, including N1, both 8 MiB outcomes, both reload timestamp/receipt conditions, pre-write stability, and omitted-default preservation. Each test-bearing mutant reported a failing named test; the workflow checker mutant reported its pinned workflow-entry diagnostic. |
-| ExUnit producer/binding mutation campaign | `momo-19f0b52-u1mutel4-1027234041-b963.6f3f63160ed80a43` | Pass: 6/6 killed. Each ran the 6-test compatibility suite; failures per mutant were 1, 3, 2, 2, 5, and 1. |
-| Final candidate CI | Draft PR checks on the exact pushed head | The `pull_request` run and all seven job conclusions are recorded on the draft PR. The reviewer verifies the run head SHA equals the PR head SHA; the PR check record is authoritative. |
+| Node compatibility control, four mutations, restored control | `kogane-b8fb161-u1nodemut-1028001323-c9d6.a4bc7d7bef82f7c3` | Controls: 70/70. Removing the startup assertion fails `a copied startup line fails the provenance assertion` (69/70). Removing either ENOBUFS branch separately fails `real execFileSync overflow stops with runner-start-record-unavailable` (68/70, including the parent test). Ignoring wrapper config and rebuilding fails `configured app-server is emitted by the wrapper and read` (focused 2/4, including its parent); launcher identity still passes. |
+| Server compatibility and format control | `kogane-b8fb161-u1exunit-1028001041-ff25.b82d17402126bea1` | Format passes; 7/7 tests pass. |
+| ExUnit binding assertion mutation | `kogane-b8fb161-u1exmut-1028001230-e450.8a1aba0e9e0b72a2` | Control 7/7; removing the assertion fails only `a static golden fails the real-engine binding assertion` (6/7); restored 7/7. |
+
+Both checker self-tests call the same assertion as their corresponding real
+producer test. The startup negative input differs in its host ID; the static
+server golden row is normalized to the expected synthetic ID but retains its
+Codex engine, which must fail the distinct real-join engine assertion. These
+are checker tests, separate from the existing reader rejection tests.
+
+The ENOBUFS test preserves the real exception through both production catch
+branches. Its other external commands remain simulated. Removing either
+branch must fail the named overflow test, rather than merely fail an unrelated
+startup or build-identity assertion. The wrapper-config mutation is verified
+in the rebuilt output before its test runs. Each mutation is restored, and
+both campaigns finish with a passing unchanged control.
+
+Earlier mutation claims for the output cap used a handwritten error shape;
+they did not establish the behavior of the synchronous Node API. Earlier
+startup and distinct-engine passing tests also did not test removal of their
+own assertions. The runs above supply those missing measurements. Other prior
+producer/reader mutation campaigns are not repeated or newly attested here.
+The first Node control attempt stopped before running tests because the
+isolation checker needed dashboard dependencies; the successful run installed
+them as CI does. Final CI additionally runs the full isolation checker and
+all four Node suites in its `test-isolation` job.
 
 The named checker self-test `rejects workflow without compatibility-test
-entry` keeps the workflow-entry assertion active. The compatibility suite is
-the Node test command in the `test-isolation` job after wrapper and runner
-builds. The 40 Node mutations cover pending and fail-closed gates, launcher
-identity producers and readers, invocation and cursor binding, both reload
-readers and their producer, RPC framing, runner-config reload, wrapper output,
-workflow wiring, null/non-null origin distinctions, the 8 MiB limit, dirty
-identity, reload-after-write, pre-write stability, and the omitted legacy
-default. Six ExUnit mutations cover conflicting and missing engine producers,
-directory defaults, pointer engine keys, static-fixture substitution, and host
-binding.
+entry` keeps the workflow-entry assertion active. Launcher identity requires
+the expected revision and Boolean `dirty`, as specified by the design. The
+real startup test still requires a clean checkout revision; source mutations
+that rebuild a dirty runner can also fail that test, so producer mutations
+must be judged by their intended named test rather than exit status alone.
 
 ## Limits
 
