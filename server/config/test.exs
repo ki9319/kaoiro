@@ -7,6 +7,10 @@ config :kaoiro_server, KaoiroServerWeb.Endpoint,
   secret_key_base: "QuGyT2gNZpDdXTzHcZKPuBUNVFi4omSMAOW2apvMFd3dOx453osH4dzIL8LjwC6e",
   server: false
 
+config :kaoiro_server,
+  agent_activity_pending_ttl_ms: 86_400_000,
+  session_resets_timeout_ms: 86_400_000
+
 # ふじ #116 must-fix 2: BEAM-safe run-scoped nonce (2026-07-25).
 # System.unique_integer([:positive]) は同一 BEAM 内でしか一意でなく、
 # 並行 mix test invocation (16 process 同時起動) で path が衝突すると

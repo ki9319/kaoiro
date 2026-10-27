@@ -82,7 +82,7 @@ defmodule KaoiroServer.CodexBackendCompatibilityDefaultStoreTest do
     refute Map.has_key?(live_envelope, "engine")
     assert :engine not in Map.keys(AgentDirectory.get(directory_only_id))
 
-    assert {:ok, %{"schema" => 1, "host" => ^host, "rows" => rows}} =
+    assert {:ok, observation = %{"schema" => 1, "host" => ^host, "rows" => rows}} =
              CodexBackendCompatibility.observe_host(host)
 
     rows_by_id = Map.new(rows, &{&1["id"], &1})
@@ -91,13 +91,7 @@ defmodule KaoiroServer.CodexBackendCompatibilityDefaultStoreTest do
     fixture_path =
       Path.expand("../../../scripts/test/fixtures/codex-backend/server-observation.json", __DIR__)
 
-    captured_projection = fixture_path |> File.read!() |> Jason.decode!()
-
-    assert captured_projection == %{
-             "schema" => 1,
-             "host" => host,
-             "rows" => [rows_by_id[live_id]]
-           }
+    assert Jason.encode!(observation) <> "\n" == File.read!(fixture_path)
 
     assert rows_by_id[live_id]["engine"] == "codex"
     assert rows_by_id[live_id]["pointer"] == "missing"

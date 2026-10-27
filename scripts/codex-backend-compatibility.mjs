@@ -234,7 +234,8 @@ export async function runPrepare(args, adapters) {
   let afterRunner;
   try {
     afterRunner = await adapters.observeRunner(args);
-  } catch {
+  } catch (error) {
+    rethrowRunnerStartRecordUnavailable(error);
     stop("post-write-observation-unavailable");
   }
   validateRunner({ ...afterRunner, expectedRunnerSha: args.runner_sha }, args.host);
@@ -260,7 +261,8 @@ async function observeHost(adapters, host, failureCode) {
 async function observeRunner(adapters, args, failureCode) {
   try {
     return await adapters.observeRunner(args);
-  } catch {
+  } catch (error) {
+    rethrowRunnerStartRecordUnavailable(error);
     stop(failureCode);
   }
 }
@@ -294,11 +296,17 @@ function parseJsonOutput(output) {
 function runnerIdentity(host, invocationId, runCommand = run) {
   const output = runCommand("journalctl", [
     "--user", `_SYSTEMD_INVOCATION_ID=${invocationId}`, "--no-pager", "--output=cat",
-    "--grep", "^runner: host=", "--lines=1",
   ]);
-  const match = output.trim().match(/^runner: host=([A-Za-z0-9._-]+) rev=([a-f0-9]{40}) connecting to \S.*$/i);
-  if (!match || match[1] !== host) stop();
+  const records = output.split(/\r?\n/).filter((line) => line.startsWith("runner: host="));
+  if (records.length !== 1) stop("runner-start-record-unavailable");
+  const match = records[0].match(/^runner: host=([A-Za-z0-9._-]+) rev=([a-f0-9]{40}) connecting to \S.*$/i);
+  if (!match) stop("runner-start-record-unavailable");
+  if (match[1] !== host) stop();
   return match[2].toLowerCase();
+}
+
+function rethrowRunnerStartRecordUnavailable(error) {
+  if (error instanceof Stop && error.message === "runner-start-record-unavailable") throw error;
 }
 
 function configuredBackend(config) {
@@ -436,9 +444,10 @@ function localAdapters(args, runCommand = run) {
         await rename(temporary, file);
         const directory = await open(dirname(file), "r");
         try { await directory.sync(); } finally { await directory.close(); }
-      } catch {
+      } catch (error) {
         if (handle) await handle.close().catch(() => {});
         await unlink(temporary).catch(() => {});
+        rethrowRunnerStartRecordUnavailable(error);
         stop();
       }
     },
@@ -485,7 +494,7 @@ export async function main(argv = process.argv.slice(2), adapters = undefined, i
       "pending-lifecycle", "applied-selection-not-exec", "applied-selection-changed",
       "applied-selection-acknowledgement-missing", "applied-selection-unverified",
       "observation-changed", "config-write-failed", "ack-cursor-unavailable",
-      "invalid-arguments", "adapter-failed",
+      "invalid-arguments", "runner-start-record-unavailable", "adapter-failed",
     ]);
     io.stderr.write(`codex backend preparation stopped (${allowed.has(code) ? code : "adapter-failed"}); no additional write, rollback, or restore was attempted\n`);
     return 1;

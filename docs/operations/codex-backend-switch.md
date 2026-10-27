@@ -9,7 +9,9 @@ last_updated: 2026-10-27
 The runner-local setting is specified in the [runner configuration reference](../reference/configuration/runner.md#codex-backend).
 Package handoff measurements and limits are retained in the
 [rollback artifact evidence](../evidence/codex-app-server/backend-rollback-artifact.md). General installation and updates
-remain in the [production deployment manual](production.md).
+remain in the [production deployment manual](production.md). U1's producer
+coverage and remaining limits are recorded in the
+[compatibility evidence](../evidence/codex-app-server/issue-564-u1-compatibility-2026-10-27.md).
 
 ## Preparation before a default change
 
@@ -34,9 +36,22 @@ pointer, live, reset-lock, and pending-transition membership. It also verifies
 the local runner identity, current configuration, and applied backend evidence.
 Runner identity is read from the public startup diagnostic
 `runner: host=<host-id> rev=<release-sha> connecting to ...`, scoped to the
-current service invocation. The runner's public `--version --json` output is
-another source for checking a release SHA. The preparation command does not
-depend on an operator-specific release utility.
+current service invocation. The invocation is searched in full; its journal
+read is not limited to the last N lines. The runner's public `--version --json`
+output is another source for checking a release SHA (`revision` must be the
+expected full SHA and `dirty` must be the JSON boolean `false`). The preparation
+command does not invoke or depend on `kaoiro-prod`.
+
+If the current invocation has no unique, well-formed startup record, the
+command stops with `runner-start-record-unavailable` before observing the
+server or writing configuration. Do not synthesize an identity from another
+invocation. The operator can schedule a controlled runner-service restart to
+create a new startup record, then rerun preparation. A planned runner shutdown
+stops its supervised wrappers and interrupts their active turns; affected
+agents may need to be relaunched through the existing controls after the
+runner reconnects. If that impact is not acceptable, leave configuration
+untouched and postpone the host's default-changing update until a planned
+verification window. This command never restarts the service automatically.
 
 Before writing, it repeats both observations and stops if any value changed or
 is unavailable. A successful preparation adds only `codex.backend: "exec"`,

@@ -42,7 +42,8 @@ defmodule KaoiroServer.Application do
        on_viewer_visible: &KaoiroServerWeb.StatusLineAnnouncer.announce/1},
       # In-memory peer-directory activity projection (#150). Kept separate
       # from AgentStates, whose sole ownership is latest envelopes/history.
-      KaoiroServer.AgentActivity,
+      {KaoiroServer.AgentActivity,
+       pending_ttl_ms: Application.get_env(:kaoiro_server, :agent_activity_pending_ttl_ms, 60_000)},
       # Live-only wrapper artifact identities. A reconnect reports its own
       # package again; disconnect cleanup is owner-fenced.
       KaoiroServer.WrapperBuildInfos,
@@ -95,7 +96,9 @@ defmodule KaoiroServer.Application do
       KaoiroServer.TokenDenylist,
       # Session-reset pending lock (ADR-0036 F6/F7, phase-17 17-4).
       # In-memory only; a reset in flight when the server dies is a wash.
-      {KaoiroServer.SessionResets, on_failure: &KaoiroServerWeb.PeerConnectivity.fail/3},
+      {KaoiroServer.SessionResets,
+       timeout_ms: Application.get_env(:kaoiro_server, :session_resets_timeout_ms, 60_000),
+       on_failure: &KaoiroServerWeb.PeerConnectivity.fail/3},
       # Shared commit-serialization point between a session_reset
       # acquisition and a set_permission submit for the same agent
       # (issue #305 M7) — one ephemeral worker per agent_id, registered

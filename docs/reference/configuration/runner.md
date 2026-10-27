@@ -260,7 +260,12 @@ introduced for [issue 564](https://github.com/sakuraiyuta/kaoiro/issues/564),
 following the [backend switching runbook](../../operations/codex-backend-switch.md#preparation-before-a-default-change)
 on affected legacy hosts. It keeps omission on exec and persists an explicit
 exec setting only after the current route and complete session-origin evidence
-are established. It does not remove settings or restore sessions.
+are established. It does not remove settings or restore sessions. The runner's
+public `--version --json` output reports its full `revision` and JSON boolean
+`dirty`; verify the expected revision and `dirty: false` when checking a built
+artifact. Preparation also checks the active invocation's startup record; if
+that record is unavailable, follow the runbook's restart-impact or postpone
+path rather than inferring an identity.
 
 ### Codex backend selection
 

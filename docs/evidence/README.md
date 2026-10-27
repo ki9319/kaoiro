@@ -34,6 +34,7 @@ Codex exec-mode SDK measurements (pre-app-server transport).
 
 Codex app-server transport migration (ADR-0058) — historical excerpts, one file per increment area.
 
+- [issue-564-u1-compatibility-2026-10-27.md](codex-app-server/issue-564-u1-compatibility-2026-10-27.md) — U1 observation producers, gate coverage, and limits
 - [backend-rollback-artifact.md](codex-app-server/backend-rollback-artifact.md) — Stage 1 increment 6, packaged rollback artifact
 - [host-composition.md](codex-app-server/host-composition.md) — Host composition increments
 - [projection-and-history.md](codex-app-server/projection-and-history.md) — Projection/history increments

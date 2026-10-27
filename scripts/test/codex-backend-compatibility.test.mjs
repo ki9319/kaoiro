@@ -1,10 +1,13 @@
 import "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { main } from "../codex-backend-compatibility.mjs";
 
 const HOST = "legacy-host";
@@ -376,7 +379,10 @@ function localFiles(t) {
   const configMtimeMs = statSync(configPath).mtimeMs;
   const configHash = createHash("sha256").update(configBytes).digest("hex");
   const projection = JSON.parse(readFileSync(new URL("./fixtures/codex-backend/server-observation.json", import.meta.url), "utf8"));
-  const agentId = projection.rows[0].id;
+  const liveRow = projection.rows.find((row) => row.id === `${HOST}.live`);
+  assert.ok(liveRow, "the server golden must contain the live pointerless row");
+  const preparationProjection = { ...projection, rows: [liveRow] };
+  const agentId = liveRow.id;
   const evidence = {
     schema: 1,
     host: HOST,
@@ -390,7 +396,7 @@ function localFiles(t) {
     agents: [{ id: agentId, origin: "exec", complete: true }],
   };
   writeFileSync(evidencePath, `${JSON.stringify(evidence)}\n`, { mode: 0o600 });
-  return { directory, configPath, evidencePath, configBytes, projection };
+  return { directory, configPath, evidencePath, configBytes, projection: preparationProjection };
 }
 
 function localArgv(configPath, evidencePath) {
@@ -400,8 +406,8 @@ function localArgv(configPath, evidencePath) {
   return args;
 }
 
-function localCommandBoundary({ configPath, projection, failObservationAt = 0, failAck = false, runnerSha = RUNNER_SHA, runnerHost = HOST }) {
-  const calls = { systemctl: 0, docker: 0, journalRows: 0, runnerIdentity: 0, cursor: 0, acknowledgement: 0 };
+function localCommandBoundary({ configPath, projection, projectionOutput, identityOutput, failObservationAt = 0, failAck = false, runnerSha = RUNNER_SHA, runnerHost = HOST }) {
+  const calls = { systemctl: 0, docker: 0, journalRows: 0, runnerIdentity: 0, runnerIdentityArgs: [], cursor: 0, acknowledgement: 0 };
   const startup = `runner: host=${runnerHost} rev=${runnerSha} connecting to wss://example.invalid/runner\n`;
 
   return {
@@ -416,7 +422,7 @@ function localCommandBoundary({ configPath, projection, failObservationAt = 0, f
       if (command === "docker") {
         calls.docker += 1;
         if (calls.docker === failObservationAt) throw new Error("captured RPC failure");
-        return `${JSON.stringify(projection)}\n`;
+        return projectionOutput ?? `${JSON.stringify(projection)}\n`;
       }
 
       if (command === "journalctl") {
@@ -424,13 +430,17 @@ function localCommandBoundary({ configPath, projection, failObservationAt = 0, f
           calls.cursor += 1;
           return "-- cursor: cursor-before-write\n";
         }
-        if (args.includes("--grep")) {
-          calls.runnerIdentity += 1;
-          return startup;
-        }
         if (args.some((arg) => arg.startsWith("--after-cursor="))) {
           calls.acknowledgement += 1;
           return "runner: codex backend=exec for subsequent wrappers\n";
+        }
+        if (args.includes("--output=cat")) {
+          calls.runnerIdentity += 1;
+          calls.runnerIdentityArgs.push(args);
+          const fullInvocation = identityOutput ?? startup;
+          return args.some((arg) => arg.startsWith("--lines="))
+            ? `${fullInvocation.split(/\r?\n/).filter(Boolean).at(-1) ?? ""}\n`
+            : fullInvocation;
         }
         if (args.includes("--output=json")) {
           calls.journalRows += 1;
@@ -463,6 +473,173 @@ test("the default local adapter prepares with product-shaped command responses a
   assert.deepEqual(JSON.parse(readFileSync(files.configPath, "utf8")).codex, { backend: "exec" });
   assert.equal(statSync(files.configPath).mode & 0o777, 0o600);
   assert.deepEqual(readdirSync(files.directory).sort(), ["origin-evidence.json", "runner.config.json"]);
+});
+
+test("the default runner observer scans the full invocation and stops when its startup record is missing", async (t) => {
+  await t.test("a startup record before later invocation output is retained", async (t) => {
+    const files = localFiles(t);
+    const startup = `runner: host=${HOST} rev=${RUNNER_SHA} connecting to wss://example.invalid/runner\n`;
+    const boundary = localCommandBoundary({
+      configPath: files.configPath,
+      projection: files.projection,
+      identityOutput: `runner: config loaded\n${startup}${"runner: heartbeat\n".repeat(20)}`,
+    });
+    const output = io();
+
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 0);
+    assert.equal(boundary.calls.runnerIdentityArgs.length, 4);
+    assert.ok(boundary.calls.runnerIdentityArgs.every((args) =>
+      args.includes(`_SYSTEMD_INVOCATION_ID=${INVOCATION_ID}`)
+        && !args.some((arg) => arg.startsWith("--lines="))));
+  });
+
+  await t.test("no matching startup record returns the named stop code before any write", async (t) => {
+    const files = localFiles(t);
+    const boundary = localCommandBoundary({
+      configPath: files.configPath,
+      projection: files.projection,
+      identityOutput: "runner: config loaded\nrunner: heartbeat\n",
+    });
+    const before = readFileSync(files.configPath);
+    const output = io();
+
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+    assert.match(output.stderr.text, /stopped \(runner-start-record-unavailable\)/);
+    assert.deepEqual(readFileSync(files.configPath), before);
+    assert.equal(boundary.calls.docker, 0);
+    assert.equal(boundary.calls.cursor, 0);
+  });
+});
+
+test("the built runner emits its checkout revision on the real startup path", async () => {
+  const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
+  const expectedSha = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  assert.ok(/^[0-9a-f]{40}$/.test(expectedSha) && expectedSha !== "unknown", "checkout revision must be known");
+
+  const directory = mkdtempSync(join(tmpdir(), "codex-backend-runner-startup."));
+  const server = createServer((_request, response) => response.writeHead(404).end());
+  const upgradedSockets = new Set();
+  let upgradeCount = 0;
+  let resolveUpgrade;
+  const loopbackAttempt = new Promise((resolve) => { resolveUpgrade = resolve; });
+  server.on("upgrade", (_request, socket) => {
+    upgradeCount += 1;
+    upgradedSockets.add(socket);
+    socket.destroy();
+    resolveUpgrade();
+  });
+
+  let child;
+  let childClosed;
+  let startupLine;
+  let resolveStartup;
+  let rejectStartup;
+  const startupRecord = new Promise((resolve, reject) => {
+    resolveStartup = resolve;
+    rejectStartup = reject;
+  });
+  let partialLine = "";
+  let timer;
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    assert.ok(address && typeof address !== "string", "loopback endpoint did not bind");
+
+    const host = `u1-${randomUUID().replaceAll("-", "")}`;
+    const serverUrl = `ws://127.0.0.1:${address.port}/runner`;
+    const configPath = join(directory, "runner.config.json");
+    writeFileSync(configPath, `${JSON.stringify({
+      host_id: host,
+      server_url: serverUrl,
+      cwd_allowlist: [directory],
+      capabilities: ["codex"],
+      codex: { auth_mode: "chatgpt" },
+    })}\n`, { mode: 0o600 });
+    mkdirSync(join(directory, "codex-home"), { mode: 0o700 });
+
+    const runnerCli = fileURLToPath(new URL("../../runner/dist/cli.js", import.meta.url));
+    child = spawn(process.execPath, [runnerCli, configPath], {
+      cwd: directory,
+      env: {
+        PATH: process.env.PATH,
+        HOME: directory,
+        CODEX_HOME: join(directory, "codex-home"),
+        TMPDIR: directory,
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    childClosed = new Promise((resolve) => { child.once("close", resolve); });
+    child.once("error", () => rejectStartup(new Error("built runner could not start")));
+    child.stderr.on("data", (chunk) => {
+      if (startupLine !== undefined) return;
+      partialLine += chunk.toString("utf8");
+      const lines = partialLine.split(/\r?\n/);
+      partialLine = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("runner: host=")) continue;
+        startupLine = line;
+        resolveStartup(line);
+        break;
+      }
+      if (partialLine.length > 4096) partialLine = partialLine.slice(-4096);
+    });
+    child.once("close", () => {
+      if (startupLine === undefined) rejectStartup(new Error("built runner exited before startup"));
+    });
+
+    const [observedLine] = await Promise.race([
+      Promise.all([startupRecord, loopbackAttempt]),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("runner startup observation timed out")), 8_000); }),
+    ]);
+    assert.ok(observedLine === `runner: host=${host} rev=${expectedSha} connecting to ${serverUrl}`,
+      "built runner startup line did not match the checkout revision");
+    assert.ok(upgradeCount > 0, "built runner did not contact its test-owned loopback endpoint");
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (child) {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+      let cleanupTimer;
+      await Promise.race([
+        childClosed,
+        new Promise((resolve) => { cleanupTimer = setTimeout(resolve, 5_000); }),
+      ]);
+      if (cleanupTimer) clearTimeout(cleanupTimer);
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+        await childClosed;
+      }
+    }
+    for (const socket of upgradedSockets) socket.destroy();
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("the server golden projection passes through default local adapters", async (t) => {
+  const files = localFiles(t);
+  const fixtureBytes = readFileSync(new URL("./fixtures/codex-backend/server-observation.json", import.meta.url), "utf8");
+  const projection = JSON.parse(fixtureBytes);
+  const boundary = localCommandBoundary({
+    configPath: files.configPath,
+    projection,
+    projectionOutput: fixtureBytes,
+  });
+  const before = readFileSync(files.configPath);
+  const output = io();
+
+  assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+  assert.match(output.stderr.text, /stopped \(pending-lifecycle\)/);
+  assert.deepEqual(readFileSync(files.configPath), before);
+  assert.equal(boundary.calls.docker, 1);
+  assert.equal(boundary.calls.cursor, 0);
 });
 
 test("the default local adapter rejects unknown runner identity and unknown engine before mutation", async (t) => {
