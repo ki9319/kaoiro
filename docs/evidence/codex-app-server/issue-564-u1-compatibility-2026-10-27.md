@@ -36,6 +36,14 @@ through `localAdapters` and verifies the lifecycle gate stops before a write.
 The fixture uses synthetic identifiers and contains no operator environment
 values.
 
+The golden was captured from the real default-store observation produced by
+candidate code commit `ebff0d0a8e3100f57998b41c2f54e059c6ebb432`. A temporary
+measurement snapshot printed the test's `Jason.encode!/1` bytes; hakoniwa run
+`momo-b1277ce-goldencap-1027212236-0449.5b926ca9adb06a60` captured 1,037 bytes,
+which matched the fixture byte-for-byte. The output marker was removed after
+capture. The fixture SHA-256 is
+`018a936bd545927d5b590735abbe07dedff365eb22c3643057d7616feba4cd1d`.
+
 ## Runner identity stop path
 
 Runner identity searches the entire current invocation and requires one
@@ -74,8 +82,8 @@ startup line. No Codex process, external account, production service, or
 
 ## Recorded checks
 
-The final candidate and run identifiers are recorded after the committed
-candidate has completed the hakoniwa checks. All hakoniwa runs use the pinned
+The focused checks below ran against the committed code candidate shown in the
+table. Mutation runs use isolated snapshots of that commit. All hakoniwa runs use the pinned
 Node runtime image
 `sha256:56cfd9fbe740e78f5d6d219772b6f5f7ba08424bf449f688b1a2597eebd469b8`
 or Elixir image
@@ -83,12 +91,17 @@ or Elixir image
 
 | Check | Run | Result |
 | --- | --- | --- |
-| Final candidate: focused Node compatibility and isolation tests | pending | pending |
-| Final candidate: server compatibility ExUnit tests | pending | pending |
-| Mutation: hide the runner startup record by tail-limiting the journal read | pending | pending |
-| Mutation: hide `ext.engine` from the server projection | pending | pending |
-| Mutation: remove the per-file test-isolation workflow assertion | pending | pending |
-| Final candidate: CI | pending | pending |
+| Candidate `ebff0d0a`: Node compatibility, isolation suite, and workflow checker | `momo-ebff0d0-u1node-1027211138-77ca.a6e516e86c1ef058` | pass; 205 tests, 25 checker entries, 0 checker problems |
+| Candidate `ebff0d0a`: server compatibility ExUnit suite and format check | `momo-ebff0d0-u1count-1027212450-672d.61a07927db1f3362` | pass; 4 tests |
+| Mutation: tail-limit the journal read and hide an earlier runner startup record | `momo-6ba5f5f-m1tail-1027211720-4770.7b685e88f27d1356` | expected fail; 2 test failures |
+| Mutation: remove the named missing-startup stop code | `momo-cdc2e4d-startcode-1027212124-b5b9.e3559de093b51bfd` | expected fail; 2 test failures |
+| Mutation: suppress `ext.engine` in the server projection | `momo-a0d8b0c-m2exteng-1027211849-a387.43b2e6a74ec7940e` | expected fail; default-store golden test failed |
+| Mutation: drop the compatibility test from the workflow entry | `momo-8da3eb7-m4workflow-1027211937-bbc3.33786e60d20b8b64` | expected fail; workflow assertion failed |
+| Mutation: remove the post-write reload-receipt requirement | `momo-09e8ff7-s2reload-1027211748-54e1.7059a60d069bb573` | expected fail; 1 test failure |
+| Mutation: remove the pre-write stability comparison | `momo-4d8af34-s3stable-1027211819-bfd3.25b6fda733ee1b3d` | expected fail; 3 test failures |
+| Mutation: remove the initial positive-pending gate | `momo-a248c6e-pendgate-1027212019-638a.2205eb6c894e48f4` | expected fail; 1 test failure |
+| Mutation: ignore a failed applied-selection acknowledgement | `momo-3dcd21a-ackgate-1027212045-8341.4355271493dab4b8` | expected fail; 1 test failure |
+| Mutation: treat an unavailable host observation as an empty observation | `momo-e20b37a-obsfail-1027212156-2f14.9b0ff96047e5ab94` | expected fail; 3 test failures |
 
 The broad `CI` test-file registration follow-up is outside U1; this evidence
 records only the approved per-file workflow-entry assertion.
