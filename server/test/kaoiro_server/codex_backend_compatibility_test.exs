@@ -278,7 +278,9 @@ defmodule KaoiroServer.CodexBackendCompatibilityTest do
     agent_id = "#{host}.agent"
 
     directory =
-      start_supervised!({KaoiroServer.CodexBackendCompatibilitySource, %{all: %{agent_id => %{}}}})
+      start_supervised!(
+        {KaoiroServer.CodexBackendCompatibilitySource, %{all: %{agent_id => %{}}}}
+      )
 
     pointers =
       start_supervised!({
@@ -289,14 +291,21 @@ defmodule KaoiroServer.CodexBackendCompatibilityTest do
     states =
       start_supervised!({
         KaoiroServer.CodexBackendCompatibilitySource,
-        %{snapshot: %{agent_id => %{"ext" => %{"engine" => "claude-code"}}}, connected_ids: MapSet.new()}
+        %{
+          snapshot: %{agent_id => %{"ext" => %{"engine" => "claude-code"}}},
+          connected_ids: MapSet.new()
+        }
       })
 
     resets =
-      start_supervised!({KaoiroServer.CodexBackendCompatibilitySource, %{pending_ids: MapSet.new()}})
+      start_supervised!(
+        {KaoiroServer.CodexBackendCompatibilitySource, %{pending_ids: MapSet.new()}}
+      )
 
     activity =
-      start_supervised!({KaoiroServer.CodexBackendCompatibilitySource, %{pending_ids: MapSet.new()}})
+      start_supervised!(
+        {KaoiroServer.CodexBackendCompatibilitySource, %{pending_ids: MapSet.new()}}
+      )
 
     assert {:error, :invalid_observation} =
              CodexBackendCompatibility.observe_host(host,
