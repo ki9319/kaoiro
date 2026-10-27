@@ -540,7 +540,7 @@ function localArgv(configPath, evidencePath) {
 }
 
 function localCommandBoundary({ configPath, projection, projectionOutput, identityOutput, reloadDiagnostic, wrapperDiagnostic, oversizedStartup = false, failObservationAt = 0, failAck = false, runnerSha = RUNNER_SHA, runnerHost = HOST }) {
-  const calls = { systemctl: 0, docker: 0, journalRows: 0, runnerIdentity: 0, runnerIdentityArgs: [], cursor: 0, acknowledgement: 0 };
+  const calls = { systemctl: 0, docker: 0, journalRows: 0, runnerIdentity: 0, runnerIdentityArgs: [], cursor: 0, acknowledgement: 0, acknowledgementArgs: [] };
   const startup = `runner: host=${runnerHost} rev=${runnerSha} connecting to wss://example.invalid/runner\n`;
   const reloadLine = reloadDiagnostic ?? "runner: codex backend=exec for subsequent wrappers\n";
   const wrapperLine = wrapperDiagnostic ?? "codex: backend=exec\n";
@@ -567,6 +567,7 @@ function localCommandBoundary({ configPath, projection, projectionOutput, identi
         }
         if (args.some((arg) => arg.startsWith("--after-cursor="))) {
           calls.acknowledgement += 1;
+          calls.acknowledgementArgs.push(args);
           return reloadLine;
         }
         if (args.includes("--output=cat")) {
@@ -720,6 +721,7 @@ test("real reload diagnostic is consumed by both default readers", async (t) => 
   assert.deepEqual(JSON.parse(output.stdout.text), { phase: "prepare", status: "prepared", host: HOST, backend: "exec" });
   assert.equal(boundary.calls.journalRows, 3);
   assert.equal(boundary.calls.acknowledgement, 1);
+  assert.ok(boundary.calls.acknowledgementArgs[0].includes("--after-cursor=cursor-before-write"));
 });
 
 test("real wrapper backend diagnostic comes from temporary config and reaches the default reader", async (t) => {
