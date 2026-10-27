@@ -787,6 +787,8 @@ test("legacy server descriptors and history are inert on every entrance", (t) =>
     }
     return value;
   };
+  // Parent 0o755 and node_major 22 match the shape measured against the
+  // retired reader in issue #757. Today's check only lstat()s the path.
   for (const kind of ["invalid", "directory", "dangling", "exporter"]) {
     if (kind === "exporter") chmodSync(server, 0o755);
     if (kind === "directory") mkdirSync(descriptor);

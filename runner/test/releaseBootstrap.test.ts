@@ -258,6 +258,8 @@ describe("kaoiro-runner-bootstrap.sh (issue #314)", () => {
     else if (kind === "directory") mkdirSync(descriptor);
     else if (kind === "dangling") symlinkSync(join(root, "missing-descriptor"), descriptor);
     else {
+      // Parent 0o755 and node_major 22 match the shape measured against the
+      // retired reader in issue #757. Today's check only lstat()s the path.
       chmodSync(root, 0o755);
       const exporter = join(root, "legacy-exporter.mjs");
       writeFileSync(exporter, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'called'); process.exit(1);`);

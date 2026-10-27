@@ -66,6 +66,8 @@ describe("kaoiro-runner-switch.sh (issue #219)", () => {
     else if (kind === "dangling") symlinkSync(join(root, "missing-legacy"), descriptor);
     else if (kind === "invalid") writeFileSync(descriptor, "not JSON");
     else {
+      // Parent 0o755 and node_major 22 match the shape measured against the
+      // retired reader in issue #757. Today's check only lstat()s the path.
       chmodSync(root, 0o755);
       const exporter = join(root, "legacy-exporter.mjs");
       writeFileSync(exporter, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'called'); process.exit(1);`);
