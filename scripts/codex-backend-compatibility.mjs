@@ -69,9 +69,13 @@ function validateObservation(observation, host) {
     if (typeof row.directory !== "boolean" || typeof row.live !== "boolean" || typeof row.connected !== "boolean"
       || typeof row.reset_pending !== "boolean" || typeof row.transition_pending !== "boolean") stop("observation-invalid");
     if (!["missing", "nil", "non_nil"].includes(row.pointer)) stop("observation-invalid");
-    if (typeof row.engine !== "string" || !ENGINES.has(row.engine)) stop("observation-invalid");
+    if (row.engine !== null && (typeof row.engine !== "string" || !ENGINES.has(row.engine))) stop("observation-invalid");
   }
   return observation;
+}
+
+function assertKnownEngines(observation) {
+  if (observation.rows.some((row) => row.engine === null)) stop("engine-unknown");
 }
 
 function validateRunner(runner, host) {
@@ -170,6 +174,7 @@ export async function runPrepare(args, adapters) {
   validateObservation(beforeHost, args.host);
   // Stop before reading routing evidence when a lifecycle transition is already active.
   if (beforeHost.rows.some((row) => row.reset_pending || row.transition_pending)) stop("pending-lifecycle");
+  assertKnownEngines(beforeHost);
 
   let evidence;
   try {
@@ -195,6 +200,7 @@ export async function runPrepare(args, adapters) {
   validateRunner({ ...currentRunner, expectedRunnerSha: args.runner_sha }, args.host);
   // Evidence and cursor collection can take time; repeat the lifecycle gate at the write boundary.
   if (currentHost.rows.some((row) => row.reset_pending || row.transition_pending)) stop("pending-lifecycle");
+  assertKnownEngines(currentHost);
   if (!isStable(beforeHost, currentHost) || !isStable(beforeRunner, currentRunner)) stop("observation-changed");
   if (currentRunner.configuredBackend !== "omitted" || currentRunner.appliedBackend !== "exec") stop("applied-selection-changed");
   let currentEvidence;
@@ -285,12 +291,14 @@ function parseJsonOutput(output) {
   stop();
 }
 
-function commandIdentity(host, runnerSha) {
-  const row = parseJsonOutput(run("kaoiro-prod", ["runner-identity", host, runnerSha.toLowerCase()]));
-  if (row.host !== host || row.target !== runnerSha.toLowerCase() || row.verdict !== "go"
-    || row.disk_rev !== runnerSha.toLowerCase() || row.cmdline_rev !== runnerSha.toLowerCase()
-    || row.disk_dirty !== "false" || row.journal_dirty !== "false") stop();
-  return row.disk_rev;
+function runnerIdentity(host, invocationId, runCommand = run) {
+  const output = runCommand("journalctl", [
+    "--user", `_SYSTEMD_INVOCATION_ID=${invocationId}`, "--no-pager", "--output=cat",
+    "--grep", "^runner: host=", "--lines=1",
+  ]);
+  const match = output.trim().match(/^runner: host=([A-Za-z0-9._-]+) rev=([a-f0-9]{40}) connecting to \S.*$/i);
+  if (!match || match[1] !== host) stop();
+  return match[2].toLowerCase();
 }
 
 function configuredBackend(config) {
@@ -303,15 +311,15 @@ function configuredBackend(config) {
   return backend;
 }
 
-function readInvocation(unit) {
-  const output = run("systemctl", ["--user", "show", "-p", "InvocationID", "--value", unit]);
+function readInvocation(unit, runCommand = run) {
+  const output = runCommand("systemctl", ["--user", "show", "-p", "InvocationID", "--value", unit]);
   const invocationId = output.trim();
   if (!/^[0-9a-f]{32}$/.test(invocationId)) stop();
   return invocationId;
 }
 
-function journalRows(_unit, invocationId) {
-  const output = run("journalctl", [
+function journalRows(_unit, invocationId, runCommand = run) {
+  const output = runCommand("journalctl", [
     "--user", `_SYSTEMD_INVOCATION_ID=${invocationId}`,
     "--no-pager", "--output=json", "--lines=10000",
   ]);
@@ -324,7 +332,7 @@ function journalRows(_unit, invocationId) {
   });
 }
 
-async function readLocalRunner(args) {
+async function readLocalRunner(args, runCommand = run) {
   const file = resolve(args.runner_config);
   const beforeStat = await lstat(file).catch(() => stop());
   if (!beforeStat.isFile() || beforeStat.isSymbolicLink()) stop();
@@ -333,8 +341,9 @@ async function readLocalRunner(args) {
   if (!isRecord(config) || config.host_id !== args.host) stop();
   const configHash = sha256(raw);
   const configMtimeMs = beforeStat.mtimeMs;
-  const selectedInvocation = readInvocation(args.runner_unit);
-  const rows = journalRows(args.runner_unit, selectedInvocation);
+  const selectedInvocation = readInvocation(args.runner_unit, runCommand);
+  const rows = journalRows(args.runner_unit, selectedInvocation, runCommand);
+  const runnerSha = runnerIdentity(args.host, selectedInvocation, runCommand);
   const events = [];
   for (const row of rows) {
     if (typeof row.MESSAGE !== "string" || !/^\d+$/.test(String(row.__REALTIME_TIMESTAMP ?? ""))) continue;
@@ -350,7 +359,7 @@ async function readLocalRunner(args) {
   const latestReload = events.filter((event) => event.source === "reload").at(-1) ?? null;
   const endRaw = await readFile(file).catch(() => stop());
   const endStat = await stat(file).catch(() => stop());
-  const finalInvocation = readInvocation(args.runner_unit);
+  const finalInvocation = readInvocation(args.runner_unit, runCommand);
   if (sha256(endRaw) !== configHash || endStat.mtimeMs !== configMtimeMs || finalInvocation !== selectedInvocation) stop();
   return {
     host: args.host,
@@ -359,7 +368,7 @@ async function readLocalRunner(args) {
     appliedReceipt: latestReload ?? latestEvent,
     configHash,
     configMtimeMs,
-    runnerSha: commandIdentity(args.host, args.runner_sha),
+    runnerSha,
     invocationId: selectedInvocation,
   };
 }
@@ -382,19 +391,19 @@ async function parseOriginFile(file) {
   }
 }
 
-function localAdapters(args) {
+function localAdapters(args, runCommand = run) {
   return {
     async observeHost(host) {
-      const output = run("docker", [
+      const output = runCommand("docker", [
         "compose", "-f", resolve(args.compose_file), "exec", "-T", "kaoiro",
         "/app/bin/kaoiro_server", "rpc", hostObservationCommand(host),
       ]);
       return parseJsonOutput(output);
     },
-    observeRunner: readLocalRunner,
+    observeRunner: (runnerArgs) => readLocalRunner(runnerArgs, runCommand),
     readOriginEvidence: async (file) => parseOriginFile(file),
     async captureAckCursor() {
-      const output = run("journalctl", ["--user", "--no-pager", "--lines=0", "--show-cursor"]);
+      const output = runCommand("journalctl", ["--user", "--no-pager", "--lines=0", "--show-cursor"]);
       const cursor = output.match(/^-- cursor: (.+)$/m)?.[1];
       if (!cursor) stop();
       return cursor;
@@ -422,8 +431,8 @@ function localAdapters(args) {
         const current = await readFile(file);
         if (currentStat.isSymbolicLink() || sha256(current) !== expected.configHash
           || currentStat.mtimeMs !== expected.configMtimeMs
-          || readInvocation(args.runner_unit) !== expected.invocationId
-          || commandIdentity(args.host, args.runner_sha) !== expected.runnerSha.toLowerCase()) stop();
+          || readInvocation(args.runner_unit, runCommand) !== expected.invocationId
+          || runnerIdentity(args.host, expected.invocationId, runCommand) !== expected.runnerSha.toLowerCase()) stop();
         await rename(temporary, file);
         const directory = await open(dirname(file), "r");
         try { await directory.sync(); } finally { await directory.close(); }
@@ -436,8 +445,8 @@ function localAdapters(args) {
     async waitForAppliedBackendExec({ cursor, invocationId, timeoutMs }) {
       const until = Date.now() + timeoutMs;
       while (Date.now() < until) {
-        if (readInvocation(args.runner_unit) !== invocationId) return false;
-        const output = run("journalctl", [
+        if (readInvocation(args.runner_unit, runCommand) !== invocationId) return false;
+        const output = runCommand("journalctl", [
           "--user", `_SYSTEMD_INVOCATION_ID=${invocationId}`,
           `--after-cursor=${cursor}`, "--no-pager", "--output=cat",
         ]);
@@ -458,10 +467,10 @@ async function loadAdapterModule(args) {
   return adapters;
 }
 
-export async function main(argv = process.argv.slice(2), adapters = undefined, io = process) {
+export async function main(argv = process.argv.slice(2), adapters = undefined, io = process, runtime = {}) {
   try {
     const args = parseArgs(argv);
-    const selectedAdapters = adapters ?? (args.adapter_module ? await loadAdapterModule(args) : localAdapters(args));
+    const selectedAdapters = adapters ?? (args.adapter_module ? await loadAdapterModule(args) : localAdapters(args, runtime.runCommand));
     const result = await runPrepare(args, selectedAdapters);
     io.stdout.write(`${JSON.stringify(result)}\n`);
     return 0;
@@ -472,7 +481,7 @@ export async function main(argv = process.argv.slice(2), adapters = undefined, i
       "pre-write-observation-unavailable", "post-write-observation-unavailable",
       "origin-evidence-unavailable", "origin-evidence-invalid", "origin-evidence-changed",
       "origin-evidence-conflict", "origin-evidence-incomplete", "origin-unknown",
-      "observation-invalid", "runner-observation-invalid", "runner-identity-mismatch",
+      "observation-invalid", "engine-unknown", "runner-observation-invalid", "runner-identity-mismatch",
       "pending-lifecycle", "applied-selection-not-exec", "applied-selection-changed",
       "applied-selection-acknowledgement-missing", "applied-selection-unverified",
       "observation-changed", "config-write-failed", "ack-cursor-unavailable",

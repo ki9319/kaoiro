@@ -14,6 +14,146 @@ defmodule KaoiroServer.CodexBackendCompatibilitySource do
   def handle_call(request, _from, replies), do: {:reply, Map.fetch!(replies, request), replies}
 end
 
+defmodule KaoiroServer.CodexBackendCompatibilityDefaultStoreTest do
+  use KaoiroServerWeb.ChannelCase, async: false
+
+  alias KaoiroServer.AgentActivity
+  alias KaoiroServer.AgentDirectory
+  alias KaoiroServer.AgentStates
+  alias KaoiroServer.CodexBackendCompatibility
+  alias KaoiroServer.SessionPointers
+  alias KaoiroServer.SessionResets
+  alias KaoiroServerWeb.WrapperSocket
+
+  require Phoenix.ChannelTest
+
+  test "the default host observation uses real wrapper, directory, pointer, and pending stores" do
+    host = "legacy-host"
+    live_id = "#{host}.live"
+    nil_pointer_id = "#{host}.nil-pointer"
+    session_pointer_id = "#{host}.session-pointer"
+    directory_only_id = "#{host}.directory-only"
+    reset_pending_id = "#{host}.reset-pending"
+    transition_pending_id = "#{host}.transition-pending"
+
+    ids = [
+      live_id,
+      nil_pointer_id,
+      session_pointer_id,
+      directory_only_id,
+      reset_pending_id,
+      transition_pending_id
+    ]
+
+    socket = join_wrapper(live_id)
+
+    on_exit(fn ->
+      :ok = close(socket)
+
+      for id <- ids do
+        _ = SessionResets.delete(id)
+        _ = AgentActivity.delete(id)
+        _ = SessionPointers.delete(id)
+        _ = AgentDirectory.delete(id)
+        _ = AgentStates.delete(id)
+      end
+    end)
+
+    Enum.each(ids, &record_directory/1)
+
+    SessionPointers.record(nil_pointer_id, nil, nil, :codex)
+    SessionPointers.record(session_pointer_id, "persisted-session", nil, :codex)
+    assert SessionPointers.get(nil_pointer_id).session_id == nil
+    assert SessionPointers.get(session_pointer_id).session_id == "persisted-session"
+
+    assert {:ok, _request_id, nil} =
+             SessionResets.check_and_acquire(reset_pending_id, "new", "idle", nil)
+
+    assert :ok =
+             AgentActivity.begin_transition(
+               transition_pending_id,
+               "transition-proof",
+               :restore,
+               "2026-10-27T00:00:00Z"
+             )
+
+    live_envelope = AgentStates.snapshot()[live_id]
+    assert get_in(live_envelope, ["ext", "engine"]) == "codex"
+    refute Map.has_key?(live_envelope, "engine")
+    assert :engine not in Map.keys(AgentDirectory.get(directory_only_id))
+
+    assert {:ok, %{"schema" => 1, "host" => ^host, "rows" => rows}} =
+             CodexBackendCompatibility.observe_host(host)
+
+    rows_by_id = Map.new(rows, &{&1["id"], &1})
+    assert Map.keys(rows_by_id) |> Enum.sort() == Enum.sort(ids)
+
+    fixture_path =
+      Path.expand("../../../scripts/test/fixtures/codex-backend/server-observation.json", __DIR__)
+
+    captured_projection = fixture_path |> File.read!() |> Jason.decode!()
+
+    assert captured_projection == %{
+             "schema" => 1,
+             "host" => host,
+             "rows" => [rows_by_id[live_id]]
+           }
+
+    assert rows_by_id[live_id]["engine"] == "codex"
+    assert rows_by_id[live_id]["pointer"] == "missing"
+    assert rows_by_id[live_id]["live"]
+    assert rows_by_id[live_id]["connected"]
+
+    assert rows_by_id[nil_pointer_id]["engine"] == "codex"
+    assert rows_by_id[nil_pointer_id]["pointer"] == "nil"
+    refute rows_by_id[nil_pointer_id]["live"]
+
+    assert rows_by_id[session_pointer_id]["engine"] == "codex"
+    assert rows_by_id[session_pointer_id]["pointer"] == "non_nil"
+
+    assert rows_by_id[directory_only_id]["directory"]
+    assert rows_by_id[directory_only_id]["pointer"] == "missing"
+    assert rows_by_id[directory_only_id]["engine"] == nil
+
+    assert rows_by_id[reset_pending_id]["reset_pending"]
+    assert rows_by_id[reset_pending_id]["engine"] == nil
+    assert rows_by_id[transition_pending_id]["transition_pending"]
+    assert rows_by_id[transition_pending_id]["engine"] == nil
+    refute inspect(rows) =~ "transition-proof"
+  end
+
+  defp record_directory(agent_id) do
+    assert :ok = AgentDirectory.record(agent_id, "default", "Compatibility test")
+    assert AgentDirectory.get(agent_id)
+  end
+
+  defp join_wrapper(agent_id) do
+    {:ok, _reply, socket} =
+      WrapperSocket
+      |> socket(nil, %{})
+      |> subscribe_and_join(
+        KaoiroServerWeb.WrapperChannel,
+        "wrapper:" <> agent_id,
+        %{"persona_id" => "default"}
+      )
+
+    ref =
+      push(socket, "envelope", %{
+        "version" => "0",
+        "agent_id" => agent_id,
+        "persona" => %{"id" => "default", "name" => "Default", "sprite_set" => "default"},
+        "ts" => "2026-10-27T00:00:00Z",
+        "type" => "state_change",
+        "state" => "tool_running",
+        "payload" => %{},
+        "ext" => %{"engine" => "codex"}
+      })
+
+    assert_reply(ref, :ok)
+    socket
+  end
+end
+
 defmodule KaoiroServer.CodexBackendCompatibilityTest do
   use ExUnit.Case, async: true
 
@@ -41,7 +181,10 @@ defmodule KaoiroServer.CodexBackendCompatibilityTest do
     states =
       start_supervised!({
         KaoiroServer.CodexBackendCompatibilitySource,
-        %{snapshot: %{live_id => %{"engine" => "codex"}}, connected_ids: MapSet.new([live_id])}
+        %{
+          snapshot: %{live_id => %{"ext" => %{"engine" => "codex"}}},
+          connected_ids: MapSet.new([live_id])
+        }
       })
 
     resets =

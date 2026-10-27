@@ -197,17 +197,31 @@ defmodule KaoiroServer.CodexBackendCompatibility do
   defp engine(pointer, state) do
     pointer_engine = if is_map(pointer), do: Map.get(pointer, :engine), else: nil
 
-    state_engine =
-      if is_map(state), do: Map.get(state, "engine", Map.get(state, :engine)), else: nil
+    state_ext =
+      if is_map(state), do: Map.get(state, "ext", Map.get(state, :ext, :missing)), else: :missing
 
     with {:ok, pointer_engine} <- normalize_engine(pointer_engine),
-         {:ok, state_engine} <- normalize_engine(state_engine),
-         true <- is_nil(pointer_engine) or is_nil(state_engine) or pointer_engine == state_engine do
-      {:ok, pointer_engine || state_engine}
+         {:ok, ext_engine} <- state_ext_engine(state_ext) do
+      case [pointer_engine, ext_engine] |> Enum.reject(&is_nil/1) |> Enum.uniq() do
+        [] -> {:ok, nil}
+        [engine] -> {:ok, engine}
+        _ -> {:error, :invalid_observation}
+      end
     else
       _ -> {:error, :invalid_observation}
     end
   end
+
+  defp state_ext_engine(:missing), do: {:ok, nil}
+  defp state_ext_engine(nil), do: {:ok, nil}
+
+  defp state_ext_engine(ext) when is_map(ext) do
+    ext
+    |> Map.get("engine", Map.get(ext, :engine))
+    |> normalize_engine()
+  end
+
+  defp state_ext_engine(_), do: {:error, :invalid_observation}
 
   defp normalize_engine(nil), do: {:ok, nil}
   defp normalize_engine(engine) when is_binary(engine) and engine != "", do: {:ok, engine}

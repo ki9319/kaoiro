@@ -1,5 +1,9 @@
 import "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { main } from "../codex-backend-compatibility.mjs";
 
@@ -227,6 +231,18 @@ test("an unavailable initial or immediate pre-write server observation makes no 
   });
 });
 
+test("an unknown engine observation stops before origin evidence, cursor capture, or mutation", async () => {
+  const { adapters, calls } = makeAdapters({ hosts: [observation({ engine: null })] });
+  const output = io();
+
+  assert.equal(await main(argv(), adapters, output), 1);
+  assert.match(output.stderr.text, /stopped \(engine-unknown\)/);
+  assert.equal(calls.origin, 0);
+  assert.equal(calls.cursor, 0);
+  assert.equal(calls.writes, 0);
+  assert.equal(calls.restores, 0);
+});
+
 test("an unavailable runner observation makes no changes", async (t) => {
   await t.test("initial", async () => {
     const empty = emptyObservation();
@@ -348,4 +364,189 @@ test("an already-applied explicit setting is retained without origin probing or 
       assert.equal(calls.restores, 0);
     });
   }
+});
+
+function localFiles(t) {
+  const directory = mkdtempSync(join(tmpdir(), "codex-backend-compatibility."));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const configPath = join(directory, "runner.config.json");
+  const evidencePath = join(directory, "origin-evidence.json");
+  const configBytes = Buffer.from(`{"host_id":"${HOST}"}\n`);
+  writeFileSync(configPath, configBytes, { mode: 0o600 });
+  const configMtimeMs = statSync(configPath).mtimeMs;
+  const configHash = createHash("sha256").update(configBytes).digest("hex");
+  const projection = JSON.parse(readFileSync(new URL("./fixtures/codex-backend/server-observation.json", import.meta.url), "utf8"));
+  const agentId = projection.rows[0].id;
+  const evidence = {
+    schema: 1,
+    host: HOST,
+    config_sha256: configHash,
+    config_mtime_ms: configMtimeMs,
+    runner_sha: RUNNER_SHA,
+    invocation_id: INVOCATION_ID,
+    all_relevant_sessions_covered: true,
+    origin_source: "measured",
+    agent_ids: [agentId],
+    agents: [{ id: agentId, origin: "exec", complete: true }],
+  };
+  writeFileSync(evidencePath, `${JSON.stringify(evidence)}\n`, { mode: 0o600 });
+  return { directory, configPath, evidencePath, configBytes, projection };
+}
+
+function localArgv(configPath, evidencePath) {
+  const args = argv();
+  args[args.indexOf("--runner-config") + 1] = configPath;
+  args[args.indexOf("--origin-evidence") + 1] = evidencePath;
+  return args;
+}
+
+function localCommandBoundary({ configPath, projection, failObservationAt = 0, failAck = false, runnerSha = RUNNER_SHA }) {
+  const calls = { systemctl: 0, docker: 0, journalRows: 0, runnerIdentity: 0, cursor: 0, acknowledgement: 0 };
+  const startup = `runner: host=${HOST} rev=${runnerSha} connecting to wss://example.invalid/runner\n`;
+
+  return {
+    calls,
+    runCommand(command, args) {
+      if (command === "systemctl") {
+        calls.systemctl += 1;
+        if (failAck && calls.systemctl === 6) return `${"f".repeat(32)}\n`;
+        return `${INVOCATION_ID}\n`;
+      }
+
+      if (command === "docker") {
+        calls.docker += 1;
+        if (calls.docker === failObservationAt) throw new Error("captured RPC failure");
+        return `${JSON.stringify(projection)}\n`;
+      }
+
+      if (command === "journalctl") {
+        if (args.includes("--show-cursor")) {
+          calls.cursor += 1;
+          return "-- cursor: cursor-before-write\n";
+        }
+        if (args.includes("--grep")) {
+          calls.runnerIdentity += 1;
+          return startup;
+        }
+        if (args.some((arg) => arg.startsWith("--after-cursor="))) {
+          calls.acknowledgement += 1;
+          return "runner: codex backend=exec for subsequent wrappers\n";
+        }
+        if (args.includes("--output=json")) {
+          calls.journalRows += 1;
+          const config = JSON.parse(readFileSync(configPath, "utf8"));
+          const timestamp = String(Math.floor(statSync(configPath).mtimeMs * 1000) + 1_000_000);
+          const message = config.codex?.backend === "exec"
+            ? "runner: codex backend=exec for subsequent wrappers"
+            : "codex: backend=exec";
+          return `${JSON.stringify({ MESSAGE: message, __REALTIME_TIMESTAMP: timestamp, _PID: "4242" })}\n`;
+        }
+      }
+
+      throw new Error(`unexpected command ${command}`);
+    },
+  };
+}
+
+test("the default local adapter prepares with product-shaped command responses and real file operations", async (t) => {
+  const files = localFiles(t);
+  const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection });
+  const output = io();
+
+  assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 0);
+  assert.deepEqual(JSON.parse(output.stdout.text), { phase: "prepare", status: "prepared", host: HOST, backend: "exec" });
+  assert.equal(boundary.calls.docker, 2);
+  assert.equal(boundary.calls.cursor, 1);
+  assert.equal(boundary.calls.acknowledgement, 1);
+  assert.equal(boundary.calls.journalRows, 3);
+  assert.equal(boundary.calls.runnerIdentity, 4);
+  assert.deepEqual(JSON.parse(readFileSync(files.configPath, "utf8")).codex, { backend: "exec" });
+  assert.equal(statSync(files.configPath).mode & 0o777, 0o600);
+  assert.deepEqual(readdirSync(files.directory).sort(), ["origin-evidence.json", "runner.config.json"]);
+});
+
+test("the default local adapter rejects unknown runner identity and unknown engine before mutation", async (t) => {
+  await t.test("runner startup identity differs from the requested full release SHA", async (t) => {
+    const files = localFiles(t);
+    const boundary = localCommandBoundary({
+      configPath: files.configPath,
+      projection: files.projection,
+      runnerSha: "a".repeat(40),
+    });
+    const before = readFileSync(files.configPath);
+
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, io(), { runCommand: boundary.runCommand }), 1);
+    assert.deepEqual(readFileSync(files.configPath), before);
+    assert.equal(boundary.calls.docker, 0);
+    assert.equal(boundary.calls.cursor, 0);
+  });
+
+  await t.test("directory-only inventory has no engine", async (t) => {
+    const files = localFiles(t);
+    const projection = structuredClone(files.projection);
+    projection.rows[0].engine = null;
+    const boundary = localCommandBoundary({ configPath: files.configPath, projection });
+    const before = readFileSync(files.configPath);
+    const output = io();
+
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+    assert.match(output.stderr.text, /stopped \(engine-unknown\)/);
+    assert.deepEqual(readFileSync(files.configPath), before);
+    assert.equal(boundary.calls.docker, 1);
+    assert.equal(boundary.calls.cursor, 0);
+  });
+});
+
+test("the default local adapter observes positive pending state and refuses before preparation", async (t) => {
+  const files = localFiles(t);
+  const projection = structuredClone(files.projection);
+  projection.rows[0].transition_pending = true;
+  const boundary = localCommandBoundary({ configPath: files.configPath, projection });
+  const before = readFileSync(files.configPath);
+  const output = io();
+
+  assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+  assert.match(output.stderr.text, /stopped \(pending-lifecycle\)/);
+  assert.deepEqual(readFileSync(files.configPath), before);
+  assert.equal(boundary.calls.docker, 1);
+  assert.equal(boundary.calls.cursor, 0);
+});
+
+test("the default local adapter keeps unavailable observations and failed acknowledgements fail-closed", async (t) => {
+  await t.test("initial observation unavailable", async (t) => {
+    const files = localFiles(t);
+    const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, failObservationAt: 1 });
+    const before = readFileSync(files.configPath);
+
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, io(), { runCommand: boundary.runCommand }), 1);
+    assert.deepEqual(readFileSync(files.configPath), before);
+    assert.equal(boundary.calls.docker, 1);
+    assert.equal(boundary.calls.cursor, 0);
+  });
+
+  await t.test("immediate pre-write observation unavailable", async (t) => {
+    const files = localFiles(t);
+    const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, failObservationAt: 2 });
+    const before = readFileSync(files.configPath);
+
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, io(), { runCommand: boundary.runCommand }), 1);
+    assert.deepEqual(readFileSync(files.configPath), before);
+    assert.equal(boundary.calls.docker, 2);
+    assert.equal(boundary.calls.cursor, 1);
+  });
+
+  await t.test("acknowledgement failure leaves the one explicit write and starts no post-write observation", async (t) => {
+    const files = localFiles(t);
+    const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, failAck: true });
+    const output = io();
+
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+    assert.match(output.stderr.text, /stopped \(applied-selection-acknowledgement-missing\)/);
+    assert.deepEqual(JSON.parse(readFileSync(files.configPath, "utf8")).codex, { backend: "exec" });
+    assert.equal(boundary.calls.docker, 2);
+    assert.equal(boundary.calls.journalRows, 2);
+    assert.equal(boundary.calls.runnerIdentity, 3);
+    assert.equal(boundary.calls.systemctl, 6);
+    assert.equal(boundary.calls.acknowledgement, 0);
+  });
 });

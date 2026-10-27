@@ -32,6 +32,12 @@ node scripts/codex-backend-compatibility.mjs \
 The command reads the complete host union from the server, including directory,
 pointer, live, reset-lock, and pending-transition membership. It also verifies
 the local runner identity, current configuration, and applied backend evidence.
+Runner identity is read from the public startup diagnostic
+`runner: host=<host-id> rev=<release-sha> connecting to ...`, scoped to the
+current service invocation. The runner's public `--version --json` output is
+another source for checking a release SHA. The preparation command does not
+depend on an operator-specific release utility.
+
 Before writing, it repeats both observations and stops if any value changed or
 is unavailable. A successful preparation adds only `codex.backend: "exec"`,
 then waits for the runner's exact applied-selection diagnostic and rechecks the
@@ -43,8 +49,10 @@ left as-is, regardless of session creation origin. For an omitted setting, the
 current applied selection must be `exec`, every relevant Codex session must
 have complete exec-or-no-session origin evidence, and no reset or transition
 may be pending. Unknown or incomplete origin, unknown engine, changed roster,
-or unavailable observation stops before the write. An operator may resolve
-unknown direct origin with the separately recorded configuration-history
+or unavailable observation stops before the write. A directory-only entry has
+no engine field; because the engine cannot be established from that entry, it
+also stops before reading origin evidence or writing configuration. An operator
+may resolve unknown direct origin with the separately recorded configuration-history
 attestation accepted in [issue #564](https://github.com/sakuraiyuta/kaoiro/issues/564);
 the private file must record its scope, attested time, release range, statement,
 and unknown rows, with no conflicting or unresolved rows. It remains an
