@@ -15,9 +15,10 @@ Codex session, or account-backed operation is claimed.
 
 | Producer | Method | Reader | Input source and binding | Remaining risk |
 | --- | --- | --- | --- | --- |
-| Runner startup diagnostic (`runner/src/runner-cli.ts:363`) | (a) real built process | `runnerIdentity` in the U1 preparation command | Searches the complete selected systemd invocation for one `runner: host=… rev=… connecting to …` record; checks its host and full release SHA against the command arguments. CI starts the built runner and checks the line against `git rev-parse HEAD`. | CI observes the real built process on stderr, but not journald or systemd filtering. A missing or ambiguous retained record is unknown and stops with `runner-start-record-unavailable`. |
-| Runner reload diagnostic (`runner/src/runner-cli.ts:548`) | (c) product-shaped command response | `waitForAppliedBackendExec` and `readLocalRunner` | Reads `runner: codex backend=exec for subsequent wrappers` after the captured journal cursor; the post-write receipt must be from `reload` and later than the saved config mtime. | Journal cursor and message records use command-boundary responses in tests; actual service journal transport and retention are not exercised. |
-| Wrapper backend diagnostic (`wrapper/codex/src/cli.ts:188`) | (c) product-shaped command response | `readLocalRunner` | Reads `codex: backend=exec` from invocation-scoped JSON journal rows and retains its timestamp and PID. The config file must remain unchanged while the observation is collected. | The backend line and journal fields are exercised through a product-shaped command boundary; a live wrapper journal is not part of U1. |
+| Runner launcher `--version --json` | (a) real built artifact | Build identity assertion | Executes the built launcher with temporary HOME/TMPDIR values; compares `revision` with `git rev-parse HEAD` and requires `dirty` to be a JSON boolean. | CI checks the build artifact, not an installed host's launcher. |
+| Runner startup diagnostic (`runner/src/runner-cli.ts`) | (a) real built process | `runnerIdentity` in the U1 preparation command | Searches the complete selected systemd invocation for one `runner: host=… rev=… connecting to …` record; checks its random test host ID and full checkout SHA. The test declares `capabilities: ["codex"]` and `codex.auth_mode: "chatgpt"`; an unknown revision fails. | CI observes a real process on stderr, but not journald/systemd filtering. Missing, ambiguous, malformed, or over-8-MiB invocation output stops with `runner-start-record-unavailable`; `-dirty` stops with `runner-identity-dirty`. |
+| Runner reload diagnostic (`runner/src/runner-cli.ts:548`) | (a) real in-process producer seam | `waitForAppliedBackendExec` and `readLocalRunner` | Starts the built runner through `runRunnerCli`, changes a temporary config from `app-server` to `exec`, and captures the actual line only after the reload trigger. The same bytes pass through the journal JSON `MESSAGE` reader and `--output=cat` acknowledgement reader. The receipt must be `source=reload` and later than config mtime. | Journal cursor, filtering, retention, and service transport remain command-boundary behavior in CI. |
+| Wrapper backend diagnostic (`wrapper/codex/src/cli.ts:188`) | (a) real built CLI seam | `readLocalRunner` | Runs `runCodexCli` with a temporary config and no `dependencies.backend`; the actual `codex: backend=exec` line is passed to the default local reader as an invocation-scoped JSON message. | The CLI code is real, while system journal transport is represented at the command boundary. |
 | Journal fields and cursor (`_SYSTEMD_INVOCATION_ID`, `_PID`, `__REALTIME_TIMESTAMP`, `--show-cursor`) | (c) product-shaped command response | `readLocalRunner`, `captureAckCursor`, and the applied-selection waiter | Invocation ID selects one service lifetime; the cursor separates records before and after the config write; timestamps bind receipts to config mtime. | These values are supplied by command-boundary fixtures in CI. Native journal behavior, cursor expiry, and retention remain unmeasured. |
 | Systemd `InvocationID` | (c) product-shaped command response | `readInvocation` | Reads the selected unit's current invocation and verifies it is unchanged across the file observation and write boundary. | `systemctl` output and changes during observation are simulated at the command boundary; live systemd is not run in hakoniwa. |
 | Release RPC output | (a) real inner projection; (c) RPC command boundary | `localAdapters.observeHost` and `parseJsonOutput` | The inner JSON bytes come from the real server projection captured in `server-observation.json`; the default adapter sends the RPC through the configured Compose command boundary. | The observation shape is tied to the real server producer. Compose execution and RPC transport remain represented by a command-boundary fixture. |
@@ -36,21 +37,18 @@ through `localAdapters` and verifies the lifecycle gate stops before a write.
 The fixture uses synthetic identifiers and contains no operator environment
 values.
 
-The golden was captured from the real default-store observation produced by
-candidate code commit `ebff0d0a8e3100f57998b41c2f54e059c6ebb432`. A temporary
-measurement snapshot printed the test's `Jason.encode!/1` bytes; hakoniwa run
-`momo-b1277ce-goldencap-1027212236-0449.5b926ca9adb06a60` captured 1,037 bytes,
-which matched the fixture byte-for-byte. The output marker was removed after
-capture. The fixture SHA-256 is
-`018a936bd545927d5b590735abbe07dedff365eb22c3643057d7616feba4cd1d`.
+The golden capture record for the final implementation candidate is recorded
+with its source SHA, hakoniwa run, captured byte count, and fixture SHA after
+the final-candidate ExUnit control passes.
 
 ## Runner identity stop path
 
 Runner identity searches the entire current invocation and requires one
 well-formed startup record. It does not read only the last N journal lines. If
-the record is absent, ambiguous, or malformed, U1 stops with
-`runner-start-record-unavailable` before server observation or configuration
-write. The command does not restart the service.
+the record is absent, ambiguous, malformed, or cannot be read within the
+8 MiB capture cap, U1 stops with `runner-start-record-unavailable` before
+server observation or configuration write. A record with a `-dirty` suffix
+stops with `runner-identity-dirty`. The command does not restart the service.
 
 The operator can schedule a controlled runner-service restart to create a new
 startup record and repeat preparation. Runner shutdown stops all supervised
@@ -91,20 +89,15 @@ or Elixir image
 
 | Check | Run | Result |
 | --- | --- | --- |
-| Candidate `ebff0d0a`: Node compatibility, isolation suite, and workflow checker | `momo-ebff0d0-u1node-1027211138-77ca.a6e516e86c1ef058` | pass; 205 tests, 25 checker entries, 0 checker problems |
-| Candidate `ebff0d0a`: server compatibility ExUnit suite and format check | `momo-ebff0d0-u1count-1027212450-672d.61a07927db1f3362` | pass; 4 tests |
-| Mutation: tail-limit the journal read and hide an earlier runner startup record | `momo-6ba5f5f-m1tail-1027211720-4770.7b685e88f27d1356` | expected fail; 2 test failures |
-| Mutation: remove the named missing-startup stop code | `momo-cdc2e4d-startcode-1027212124-b5b9.e3559de093b51bfd` | expected fail; 2 test failures |
-| Mutation: suppress `ext.engine` in the server projection | `momo-a0d8b0c-m2exteng-1027211849-a387.43b2e6a74ec7940e` | expected fail; default-store golden test failed |
-| Mutation: drop the compatibility test from the workflow entry | `momo-8da3eb7-m4workflow-1027211937-bbc3.33786e60d20b8b64` | expected fail; workflow assertion failed |
-| Mutation: remove the post-write reload-receipt requirement | `momo-09e8ff7-s2reload-1027211748-54e1.7059a60d069bb573` | expected fail; 1 test failure |
-| Mutation: remove the pre-write stability comparison | `momo-4d8af34-s3stable-1027211819-bfd3.25b6fda733ee1b3d` | expected fail; 3 test failures |
-| Mutation: remove the initial positive-pending gate | `momo-a248c6e-pendgate-1027212019-638a.2205eb6c894e48f4` | expected fail; 1 test failure |
-| Mutation: ignore a failed applied-selection acknowledgement | `momo-3dcd21a-ackgate-1027212045-8341.4355271493dab4b8` | expected fail; 1 test failure |
-| Mutation: treat an unavailable host observation as an empty observation | `momo-e20b37a-obsfail-1027212156-2f14.9b0ff96047e5ab94` | expected fail; 3 test failures |
+| Final candidate no-defect control: Node compatibility, isolation, and checker | pending | pending |
+| Final candidate no-defect control: server compatibility ExUnit and format | pending | pending |
+| Required and adopted mutations | pending | pending |
+| Final candidate CI | pending | all seven jobs pending |
 
-The broad `CI` test-file registration follow-up is outside U1; this evidence
-records only the approved per-file workflow-entry assertion.
+The named checker self-test `rejects workflow without compatibility-test
+entry` keeps the workflow-entry assertion active. The compatibility suite is
+the Node test command in the `test-isolation` job after wrapper and runner
+builds.
 
 ## Limits
 

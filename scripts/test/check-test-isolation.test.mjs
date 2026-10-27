@@ -732,6 +732,14 @@ test("the real workflow runs the checker and its tests in the test-isolation job
   assert.deepEqual(ciWiringProblems(REAL_WORKFLOW), []);
 });
 
+test("rejects workflow without compatibility-test entry", () => {
+  const workflow = REAL_WORKFLOW.replace(" scripts/test/codex-backend-compatibility.test.mjs", "");
+  assert.notEqual(workflow, REAL_WORKFLOW, "the compatibility test must appear in the canonical workflow entry");
+  const problems = ciWiringProblems(workflow);
+  assert.ok(problems.some(problem => problem.includes("scripts/test/codex-backend-compatibility.test.mjs")),
+    problems.join("\n"));
+});
+
 const wiringMutations = {
   "the checker step is removed": [text => text.replace(CLI_STEP, ""), /missing the step `- run: node scripts\/test-isolation\/check\.mjs`/],
   "the checker step runs another file": [text => text.replace(CLI_STEP, CLI_STEP.replace("check.mjs", "other.mjs")), /missing the step `- run: node scripts\/test-isolation\/check\.mjs`/],

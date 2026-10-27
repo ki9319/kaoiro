@@ -34,7 +34,15 @@
 
 ```sh
 node dist/cli.js [configPath]   # configPath 既定 = runner.config.json
+node dist/cli.js --version --json
 ```
+
+The version command reports the built artifact's full `revision` and boolean
+`dirty` state. A running instance logs `runner: host=<host_id> rev=<sha>
+connecting to ...`; compatibility preparation checks that startup record in
+the complete active invocation and stops if it is absent, ambiguous, malformed,
+over the read cap, or marked dirty. See the [runner configuration reference](../docs/reference/configuration/runner.md)
+and [backend switching procedure](../docs/operations/codex-backend-switch.md#preparation-before-a-default-change).
 
 認証トークンは設定ファイルに置かず、環境変数 `KAOIRO_RUNNER_TOKEN` から渡す。
 サーバ側 `KAOIRO_RUNNER_TOKENS` が未設定のとき、runner 認証が無効になるのは

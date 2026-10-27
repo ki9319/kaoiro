@@ -264,8 +264,12 @@ are established. It does not remove settings or restore sessions. The runner's
 public `--version --json` output reports its full `revision` and JSON boolean
 `dirty`; verify the expected revision and `dirty: false` when checking a built
 artifact. Preparation also checks the active invocation's startup record; if
-that record is unavailable, follow the runbook's restart-impact or postpone
-path rather than inferring an identity.
+that record is unavailable, the preparation command stops with
+`runner-start-record-unavailable` before server observation or configuration
+write. It searches the whole invocation; an 8 MiB read overflow uses the same
+stop code. A `-dirty` startup revision stops with `runner-identity-dirty`.
+Follow the runbook's controlled-restart impact or postpone path rather than
+inferring an identity. The preparation command never restarts the service.
 
 ### Codex backend selection
 

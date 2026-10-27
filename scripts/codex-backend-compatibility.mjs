@@ -9,6 +9,7 @@ const HOST_ID = /^[A-Za-z0-9._-]+$/;
 const FULL_SHA = /^[0-9a-f]{40}$/i;
 const BACKENDS = new Set(["exec", "app-server"]);
 const ENGINES = new Set(["claude-code", "codex", "antigravity", "grok"]);
+const NULL_ENGINE_ORIGINS = new Set(["exec", "none", "not-codex", "unknown"]);
 const ACK_TIMEOUT_MS = 30_000;
 
 class Stop extends Error {}
@@ -72,10 +73,6 @@ function validateObservation(observation, host) {
     if (row.engine !== null && (typeof row.engine !== "string" || !ENGINES.has(row.engine))) stop("observation-invalid");
   }
   return observation;
-}
-
-function assertKnownEngines(observation) {
-  if (observation.rows.some((row) => row.engine === null)) stop("engine-unknown");
 }
 
 function validateRunner(runner, host) {
@@ -142,6 +139,9 @@ function verifyOriginEvidence(evidence, observation, runner) {
     if (row.engine === "codex") {
       if (entry.origin !== "exec" && entry.origin !== "none" && entry.origin !== "unknown") stop("origin-evidence-conflict");
       if (row.pointer === "non_nil" && entry.origin === "none") stop("origin-evidence-conflict");
+    } else if (row.engine === null) {
+      if (!NULL_ENGINE_ORIGINS.has(entry.origin)) stop("origin-evidence-conflict");
+      if (row.pointer === "non_nil" && entry.origin === "none") stop("origin-evidence-conflict");
     } else {
       if (entry.origin !== "not-codex" && entry.origin !== "none") stop("origin-evidence-conflict");
       if (row.pointer === "non_nil" && entry.origin === "none") stop("origin-evidence-conflict");
@@ -174,7 +174,6 @@ export async function runPrepare(args, adapters) {
   validateObservation(beforeHost, args.host);
   // Stop before reading routing evidence when a lifecycle transition is already active.
   if (beforeHost.rows.some((row) => row.reset_pending || row.transition_pending)) stop("pending-lifecycle");
-  assertKnownEngines(beforeHost);
 
   let evidence;
   try {
@@ -200,7 +199,6 @@ export async function runPrepare(args, adapters) {
   validateRunner({ ...currentRunner, expectedRunnerSha: args.runner_sha }, args.host);
   // Evidence and cursor collection can take time; repeat the lifecycle gate at the write boundary.
   if (currentHost.rows.some((row) => row.reset_pending || row.transition_pending)) stop("pending-lifecycle");
-  assertKnownEngines(currentHost);
   if (!isStable(beforeHost, currentHost) || !isStable(beforeRunner, currentRunner)) stop("observation-changed");
   if (currentRunner.configuredBackend !== "omitted" || currentRunner.appliedBackend !== "exec") stop("applied-selection-changed");
   let currentEvidence;
@@ -235,7 +233,7 @@ export async function runPrepare(args, adapters) {
   try {
     afterRunner = await adapters.observeRunner(args);
   } catch (error) {
-    rethrowRunnerStartRecordUnavailable(error);
+    rethrowRunnerIdentityStop(error);
     stop("post-write-observation-unavailable");
   }
   validateRunner({ ...afterRunner, expectedRunnerSha: args.runner_sha }, args.host);
@@ -262,7 +260,7 @@ async function observeRunner(adapters, args, failureCode) {
   try {
     return await adapters.observeRunner(args);
   } catch (error) {
-    rethrowRunnerStartRecordUnavailable(error);
+    rethrowRunnerIdentityStop(error);
     stop(failureCode);
   }
 }
@@ -276,7 +274,8 @@ function run(command, argv, options = {}) {
       maxBuffer: options.maxBuffer ?? 8 * 1024 * 1024,
       stdio: ["ignore", "pipe", "ignore"],
     });
-  } catch {
+  } catch (error) {
+    if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") throw error;
     stop();
   }
 }
@@ -294,19 +293,26 @@ function parseJsonOutput(output) {
 }
 
 function runnerIdentity(host, invocationId, runCommand = run) {
-  const output = runCommand("journalctl", [
-    "--user", `_SYSTEMD_INVOCATION_ID=${invocationId}`, "--no-pager", "--output=cat",
-  ]);
+  let output;
+  try {
+    output = runCommand("journalctl", [
+      "--user", `_SYSTEMD_INVOCATION_ID=${invocationId}`, "--no-pager", "--output=cat",
+    ]);
+  } catch (error) {
+    if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") stop("runner-start-record-unavailable");
+    throw error;
+  }
   const records = output.split(/\r?\n/).filter((line) => line.startsWith("runner: host="));
   if (records.length !== 1) stop("runner-start-record-unavailable");
-  const match = records[0].match(/^runner: host=([A-Za-z0-9._-]+) rev=([a-f0-9]{40}) connecting to \S.*$/i);
+  const match = records[0].match(/^runner: host=([A-Za-z0-9._-]+) rev=([a-f0-9]{40})(-dirty)? connecting to \S.*$/i);
   if (!match) stop("runner-start-record-unavailable");
   if (match[1] !== host) stop();
+  if (match[3]) stop("runner-identity-dirty");
   return match[2].toLowerCase();
 }
 
-function rethrowRunnerStartRecordUnavailable(error) {
-  if (error instanceof Stop && error.message === "runner-start-record-unavailable") throw error;
+function rethrowRunnerIdentityStop(error) {
+  if (error instanceof Stop && ["runner-start-record-unavailable", "runner-identity-dirty"].includes(error.message)) throw error;
 }
 
 function configuredBackend(config) {
@@ -447,7 +453,7 @@ function localAdapters(args, runCommand = run) {
       } catch (error) {
         if (handle) await handle.close().catch(() => {});
         await unlink(temporary).catch(() => {});
-        rethrowRunnerStartRecordUnavailable(error);
+        rethrowRunnerIdentityStop(error);
         stop();
       }
     },
@@ -494,7 +500,7 @@ export async function main(argv = process.argv.slice(2), adapters = undefined, i
       "pending-lifecycle", "applied-selection-not-exec", "applied-selection-changed",
       "applied-selection-acknowledgement-missing", "applied-selection-unverified",
       "observation-changed", "config-write-failed", "ack-cursor-unavailable",
-      "invalid-arguments", "runner-start-record-unavailable", "adapter-failed",
+      "invalid-arguments", "runner-start-record-unavailable", "runner-identity-dirty", "adapter-failed",
     ]);
     io.stderr.write(`codex backend preparation stopped (${allowed.has(code) ? code : "adapter-failed"}); no additional write, rollback, or restore was attempted\n`);
     return 1;

@@ -31,10 +31,21 @@ an already-running deployment to a new version.
 
 1. server: verify with `docker compose ps`; open the dashboard at
    `https://<host>/?token=<token from KAOIRO_CLIENT_TOKENS>`.
-2. runner: startup logs show `runner: host=<host_id> connecting to wss://...`
-   without repeated disconnects (auth failure disconnects immediately as
-   `unauthorized`).
+2. runner: startup logs show `runner: host=<host_id> rev=<40-hex-sha> connecting
+   to wss://...` without repeated disconnects (auth failure disconnects
+   immediately as `unauthorized`). Check the running invocation's full startup
+   record; a `-dirty` revision is not an accepted release identity.
 3. Confirm the host list in the dashboard contains the `host_id`.
+
+Issue 564's backend preparation reads the active runner invocation for its
+`runner: host=<host_id> rev=<40-hex-sha> connecting to ...` startup record. If
+the complete invocation has no unique, well-formed record, or its journal
+output exceeds 8 MiB, preparation stops with
+`runner-start-record-unavailable`. A `-dirty` revision stops with
+`runner-identity-dirty`. The command never restarts the service. A controlled
+restart creates a new startup record but stops supervised wrappers and
+interrupts active turns; defer preparation if that impact is not acceptable.
+See the [backend switching procedure](codex-backend-switch.md#preparation-before-a-default-change).
 
 ### Update-related resolved limits
 

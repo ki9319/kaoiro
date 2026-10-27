@@ -37,21 +37,26 @@ the local runner identity, current configuration, and applied backend evidence.
 Runner identity is read from the public startup diagnostic
 `runner: host=<host-id> rev=<release-sha> connecting to ...`, scoped to the
 current service invocation. The invocation is searched in full; its journal
-read is not limited to the last N lines. The runner's public `--version --json`
-output is another source for checking a release SHA (`revision` must be the
-expected full SHA and `dirty` must be the JSON boolean `false`). The preparation
-command does not invoke or depend on `kaoiro-prod`.
+read is not limited to the last N lines. A missing, ambiguous, malformed, or
+over-8-MiB startup read stops with `runner-start-record-unavailable`; a `-dirty`
+revision stops with `runner-identity-dirty`. The runner's public
+`--version --json` output is another source for checking a release SHA
+(`revision` must be the expected full SHA and `dirty` must be the JSON boolean
+`false`). The preparation command does not invoke or depend on `kaoiro-prod`.
 
-If the current invocation has no unique, well-formed startup record, the
-command stops with `runner-start-record-unavailable` before observing the
-server or writing configuration. Do not synthesize an identity from another
-invocation. The operator can schedule a controlled runner-service restart to
-create a new startup record, then rerun preparation. A planned runner shutdown
-stops its supervised wrappers and interrupts their active turns; affected
-agents may need to be relaunched through the existing controls after the
-runner reconnects. If that impact is not acceptable, leave configuration
-untouched and postpone the host's default-changing update until a planned
-verification window. This command never restarts the service automatically.
+If the current invocation has no unique, well-formed startup record, or the
+full invocation exceeds the 8 MiB read cap, the command stops with
+`runner-start-record-unavailable` before observing the server or writing
+configuration. Do not synthesize an identity from another invocation. The
+operator can schedule a controlled runner-service restart to create a new
+startup record, then rerun preparation. A planned runner shutdown stops its
+supervised wrappers and interrupts their active turns; affected agents may
+need to be relaunched through the existing controls after the runner
+reconnects. If that impact is not acceptable, leave configuration untouched
+and postpone the host's default-changing update until a planned verification
+window. A `runner-identity-dirty` stop means the running artifact reports a
+dirty checkout; defer preparation until the intended clean runner release is
+active. This command never restarts the service automatically.
 
 Before writing, it repeats both observations and stops if any value changed or
 is unavailable. A successful preparation adds only `codex.backend: "exec"`,
@@ -61,14 +66,15 @@ backend.
 
 An explicit `exec` or `app-server` setting with a matching applied selection is
 left as-is, regardless of session creation origin. For an omitted setting, the
-current applied selection must be `exec`, every relevant Codex session must
-have complete exec-or-no-session origin evidence, and no reset or transition
-may be pending. Unknown or incomplete origin, unknown engine, changed roster,
-or unavailable observation stops before the write. A directory-only entry has
-no engine field; because the engine cannot be established from that entry, it
-also stops before reading origin evidence or writing configuration. An operator
-may resolve unknown direct origin with the separately recorded configuration-history
-attestation accepted in [issue #564](https://github.com/sakuraiyuta/kaoiro/issues/564);
+current applied selection must be `exec`, origin evidence must completely and
+exactly cover the observed host rows, and no reset or transition may be
+pending. A null engine is resolved only by complete evidence bound to the
+current runner/config/invocation: `exec`, `not-codex`, or an attested `unknown`
+is allowed; `none` is allowed only without a non-nil pointer. `app-server`, an
+unsupported origin, conflicting evidence, and an unknown non-null engine stop
+before the write. An operator may resolve unknown direct origin with the
+separately recorded configuration-history attestation accepted in
+[issue #564](https://github.com/sakuraiyuta/kaoiro/issues/564);
 the private file must record its scope, attested time, release range, statement,
 and unknown rows, with no conflicting or unresolved rows. It remains an
 operator-attested routing assumption, not a measurement. The origin-evidence

@@ -45,6 +45,9 @@ defmodule KaoiroServer.CodexBackendCompatibilityDefaultStoreTest do
       transition_pending_id
     ]
 
+    assert Application.get_env(:kaoiro_server, :session_resets_timeout_ms) >= 86_400_000
+    assert Application.get_env(:kaoiro_server, :agent_activity_pending_ttl_ms) >= 86_400_000
+
     socket = join_wrapper(live_id)
 
     on_exit(fn ->
@@ -116,12 +119,41 @@ defmodule KaoiroServer.CodexBackendCompatibilityDefaultStoreTest do
     refute inspect(rows) =~ "transition-proof"
   end
 
+  test "a distinct real engine rejects static golden substitution" do
+    host = "engine-ledger"
+    claude_id = "#{host}.claude"
+    socket = join_wrapper(claude_id, "claude-code")
+
+    on_exit(fn ->
+      :ok = close(socket)
+      _ = AgentActivity.delete(claude_id)
+      _ = SessionPointers.delete(claude_id)
+      _ = AgentDirectory.delete(claude_id)
+      _ = AgentStates.delete(claude_id)
+    end)
+
+    record_directory(claude_id)
+    assert {:ok, %{"schema" => 1, "host" => ^host, "rows" => [row]}} =
+             CodexBackendCompatibility.observe_host(host)
+
+    assert row == %{
+             "id" => claude_id,
+             "directory" => true,
+             "pointer" => "missing",
+             "engine" => "claude-code",
+             "live" => true,
+             "connected" => true,
+             "reset_pending" => false,
+             "transition_pending" => false
+           }
+  end
+
   defp record_directory(agent_id) do
     assert :ok = AgentDirectory.record(agent_id, "default", "Compatibility test")
     assert AgentDirectory.get(agent_id)
   end
 
-  defp join_wrapper(agent_id) do
+  defp join_wrapper(agent_id, engine \\ "codex") do
     {:ok, _reply, socket} =
       WrapperSocket
       |> socket(nil, %{})
@@ -140,7 +172,7 @@ defmodule KaoiroServer.CodexBackendCompatibilityDefaultStoreTest do
         "type" => "state_change",
         "state" => "tool_running",
         "payload" => %{},
-        "ext" => %{"engine" => "codex"}
+        "ext" => %{"engine" => engine}
       })
 
     assert_reply(ref, :ok)

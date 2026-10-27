@@ -163,6 +163,7 @@ test("a positive pending transition blocks the product entry before the config w
   const output = io();
 
   const result = await main(argv(), adapters, output);
+  assert.match(output.stderr.text, /stopped \(pending-lifecycle\)/);
   assert.equal(calls.origin, 0);
   assert.equal(calls.cursor, 0);
   assert.equal(calls.writes, 0);
@@ -234,16 +235,142 @@ test("an unavailable initial or immediate pre-write server observation makes no 
   });
 });
 
-test("an unknown engine observation stops before origin evidence, cursor capture, or mutation", async () => {
-  const { adapters, calls } = makeAdapters({ hosts: [observation({ engine: null })] });
+test("unknown engine string stops with observation-invalid before evidence", async () => {
+  const { adapters, calls } = makeAdapters({ hosts: [observation({ engine: "unrecognized-engine" })] });
   const output = io();
 
   assert.equal(await main(argv(), adapters, output), 1);
-  assert.match(output.stderr.text, /stopped \(engine-unknown\)/);
+  assert.match(output.stderr.text, /stopped \(observation-invalid\)/);
   assert.equal(calls.origin, 0);
   assert.equal(calls.cursor, 0);
   assert.equal(calls.writes, 0);
   assert.equal(calls.restores, 0);
+});
+
+test("complete origin evidence resolves null engine rows without guessing", async (t) => {
+  for (const [name, row] of [
+    ["directory-only", { directory: true, pointer: "missing", live: false, connected: false }],
+    ["pointerless-live", { directory: true, pointer: "missing", live: true, connected: true }],
+  ]) {
+    await t.test(`${name} with exec origin`, async () => {
+      const nullEngine = observation({ ...row, engine: null });
+      const { adapters, calls } = makeAdapters({ hosts: [nullEngine, nullEngine] });
+      const output = io();
+
+      assert.equal(await main(argv(), adapters, output), 0);
+      assert.equal(JSON.parse(output.stdout.text).status, "prepared");
+      assert.equal(calls.origin, 2);
+      assert.equal(calls.writes, 1);
+      assert.equal(calls.restores, 0);
+    });
+  }
+
+  await t.test("none origin is accepted without a non-nil pointer", async () => {
+    const nullEngine = observation({ engine: null, pointer: "missing", live: false, connected: false });
+    const evidence = originEvidence();
+    evidence.agents[0].origin = "none";
+    const { adapters, calls } = makeAdapters({ hosts: [nullEngine, nullEngine], evidence });
+    const output = io();
+
+    assert.equal(await main(argv(), adapters, output), 0);
+    assert.equal(JSON.parse(output.stdout.text).status, "prepared");
+    assert.equal(calls.writes, 1);
+  });
+
+  await t.test("not-codex origin is accepted with complete evidence", async () => {
+    const nullEngine = observation({ engine: null, pointer: "missing", live: false, connected: false });
+    const evidence = originEvidence();
+    evidence.agents[0].origin = "not-codex";
+    const { adapters, calls } = makeAdapters({ hosts: [nullEngine, nullEngine], evidence });
+    const output = io();
+
+    assert.equal(await main(argv(), adapters, output), 0);
+    assert.equal(JSON.parse(output.stdout.text).status, "prepared");
+    assert.equal(calls.writes, 1);
+  });
+
+  await t.test("attested unknown origin is accepted for the exact null row", async () => {
+    const nullEngine = observation({ engine: null, pointer: "missing", live: false, connected: false });
+    const evidence = originEvidence();
+    evidence.origin_source = "operator-attestation";
+    evidence.agents[0].origin = "unknown";
+    evidence.attestation = {
+      accepted: true,
+      attested_at: "2026-10-27T00:00:00Z",
+      scope: "the measured test host",
+      release_range: "the tested release",
+      statement: "the exact row routes through exec",
+      unknown_origin_rows: [AGENT_ID],
+      contrary_rows: [],
+      unresolved_rows: [],
+    };
+    const { adapters, calls } = makeAdapters({ hosts: [nullEngine, nullEngine], evidence });
+    const output = io();
+
+    assert.equal(await main(argv(), adapters, output), 0);
+    assert.equal(JSON.parse(output.stdout.text).status, "prepared");
+    assert.equal(calls.writes, 1);
+  });
+});
+
+test("null engine evidence refusals use one exact stop code and do not write", async (t) => {
+  const nullEngine = observation({ engine: null, pointer: "missing", live: false, connected: false });
+  const cases = [
+    ["null engine without evidence stops with origin-evidence-unavailable", { fail: { origin: true } }, "origin-evidence-unavailable"],
+    ["null engine with incomplete roster stops with origin-evidence-incomplete", { evidence: { ...originEvidence(), agents: [] } }, "origin-evidence-incomplete"],
+    ["null engine with mismatched evidence identity stops with origin-evidence-invalid", { evidence: { ...originEvidence(), runner_sha: "f".repeat(40) } }, "origin-evidence-invalid"],
+    ["none origin conflicts with a non-nil pointer", { hosts: [observation({ engine: null, pointer: "non_nil" })], evidence: { ...originEvidence(), agents: [{ id: AGENT_ID, origin: "none", complete: true }] } }, "origin-evidence-conflict"],
+    ["null engine with app-server origin stops with origin-evidence-conflict", { evidence: { ...originEvidence(), agents: [{ id: AGENT_ID, origin: "app-server", complete: true }] } }, "origin-evidence-conflict"],
+    ["null engine with unsupported origin stops with origin-evidence-invalid", { evidence: { ...originEvidence(), agents: [{ id: AGENT_ID, origin: "other", complete: true }] } }, "origin-evidence-invalid"],
+  ];
+  for (const [name, options, code] of cases) {
+    await t.test(name, async () => {
+      const { adapters, calls } = makeAdapters({ hosts: [nullEngine], ...options });
+      const output = io();
+
+      assert.equal(await main(argv(), adapters, output), 1);
+      assert.match(output.stderr.text, new RegExp(`stopped \\(${code}\\)`));
+      assert.equal(calls.cursor, 0);
+      assert.equal(calls.writes, 0);
+      assert.equal(calls.restores, 0);
+    });
+  }
+});
+
+test("origin-evidence-conflict covers known engine and origin disagreement", async (t) => {
+  const cases = [
+    ["codex engine conflicts with not-codex origin", observation({ engine: "codex", pointer: "nil" }), "not-codex", false],
+    ["codex non-nil pointer conflicts with none origin", observation({ engine: "codex", pointer: "non_nil" }), "none", false],
+    ["claude-code engine conflicts with exec origin", observation({ engine: "claude-code", pointer: "missing" }), "exec", false],
+    ["claude-code engine conflicts with attested unknown origin", observation({ engine: "claude-code", pointer: "missing" }), "unknown", true],
+  ];
+  for (const [name, hostRow, origin, attest] of cases) {
+    await t.test(name, async () => {
+      const evidence = originEvidence();
+      evidence.agents[0].origin = origin;
+      if (attest) {
+        evidence.origin_source = "operator-attestation";
+        evidence.attestation = {
+          accepted: true,
+          attested_at: "2026-10-27T00:00:00Z",
+          scope: "the measured test host",
+          release_range: "the tested release",
+          statement: "the exact row routes through exec",
+          unknown_origin_rows: [AGENT_ID],
+          contrary_rows: [],
+          unresolved_rows: [],
+        };
+      }
+      const { adapters, calls } = makeAdapters({ hosts: [hostRow], evidence });
+      const output = io();
+
+      assert.equal(await main(argv(), adapters, output), 1);
+      assert.match(output.stderr.text, /stopped \(origin-evidence-conflict\)/);
+      assert.equal(calls.cursor, 0);
+      assert.equal(calls.writes, 0);
+      assert.equal(calls.restores, 0);
+    });
+  }
 });
 
 test("an unavailable runner observation makes no changes", async (t) => {
@@ -303,26 +430,32 @@ test("post-write applied selection requires a reload receipt", async () => {
   assert.equal(calls.restores, 0);
 });
 
-test("unknown origin, changed roster, and malformed phase all refuse before mutation", async (t) => {
+test("unknown origin, changed roster, and malformed phase stop with exact codes", async (t) => {
   await t.test("unknown origin", async () => {
     const evidence = originEvidence();
     evidence.agents[0].origin = "unknown";
     const { adapters, calls } = makeAdapters({ evidence });
-    assert.equal(await main(argv(), adapters, io()), 1);
+    const output = io();
+    assert.equal(await main(argv(), adapters, output), 1);
+    assert.match(output.stderr.text, /stopped \(origin-unknown\)/);
     assert.equal(calls.writes, 0);
     assert.equal(calls.restores, 0);
   });
 
   await t.test("changed roster", async () => {
     const { adapters, calls } = makeAdapters({ hosts: [observation(), observation({ id: `${HOST}.new-agent` })] });
-    assert.equal(await main(argv(), adapters, io()), 1);
+    const output = io();
+    assert.equal(await main(argv(), adapters, output), 1);
+    assert.match(output.stderr.text, /stopped \(origin-evidence-invalid\)/);
     assert.equal(calls.writes, 0);
     assert.equal(calls.restores, 0);
   });
 
   await t.test("non-U1 phase", async () => {
     const { adapters, calls } = makeAdapters();
-    assert.equal(await main(argv("restore-fresh"), adapters, io()), 1);
+    const output = io();
+    assert.equal(await main(argv("restore-fresh"), adapters, output), 1);
+    assert.match(output.stderr.text, /stopped \(invalid-arguments\)/);
     assert.equal(calls.host, 0);
     assert.equal(calls.writes, 0);
     assert.equal(calls.restores, 0);
@@ -406,9 +539,11 @@ function localArgv(configPath, evidencePath) {
   return args;
 }
 
-function localCommandBoundary({ configPath, projection, projectionOutput, identityOutput, failObservationAt = 0, failAck = false, runnerSha = RUNNER_SHA, runnerHost = HOST }) {
+function localCommandBoundary({ configPath, projection, projectionOutput, identityOutput, reloadDiagnostic, wrapperDiagnostic, oversizedStartup = false, failObservationAt = 0, failAck = false, runnerSha = RUNNER_SHA, runnerHost = HOST }) {
   const calls = { systemctl: 0, docker: 0, journalRows: 0, runnerIdentity: 0, runnerIdentityArgs: [], cursor: 0, acknowledgement: 0 };
   const startup = `runner: host=${runnerHost} rev=${runnerSha} connecting to wss://example.invalid/runner\n`;
+  const reloadLine = reloadDiagnostic ?? "runner: codex backend=exec for subsequent wrappers\n";
+  const wrapperLine = wrapperDiagnostic ?? "codex: backend=exec\n";
 
   return {
     calls,
@@ -432,11 +567,16 @@ function localCommandBoundary({ configPath, projection, projectionOutput, identi
         }
         if (args.some((arg) => arg.startsWith("--after-cursor="))) {
           calls.acknowledgement += 1;
-          return "runner: codex backend=exec for subsequent wrappers\n";
+          return reloadLine;
         }
         if (args.includes("--output=cat")) {
           calls.runnerIdentity += 1;
           calls.runnerIdentityArgs.push(args);
+          if (oversizedStartup) {
+            const error = new Error("captured maxBuffer overflow");
+            error.code = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+            throw error;
+          }
           const fullInvocation = identityOutput ?? startup;
           return args.some((arg) => arg.startsWith("--lines="))
             ? `${fullInvocation.split(/\r?\n/).filter(Boolean).at(-1) ?? ""}\n`
@@ -447,8 +587,8 @@ function localCommandBoundary({ configPath, projection, projectionOutput, identi
           const config = JSON.parse(readFileSync(configPath, "utf8"));
           const timestamp = String(Math.floor(statSync(configPath).mtimeMs * 1000) + 1_000_000);
           const message = config.codex?.backend === "exec"
-            ? "runner: codex backend=exec for subsequent wrappers"
-            : "codex: backend=exec";
+            ? reloadLine.trimEnd()
+            : wrapperLine.trimEnd();
           return `${JSON.stringify({ MESSAGE: message, __REALTIME_TIMESTAMP: timestamp, _PID: "4242" })}\n`;
         }
       }
@@ -456,6 +596,100 @@ function localCommandBoundary({ configPath, projection, projectionOutput, identi
       throw new Error(`unexpected command ${command}`);
     },
   };
+}
+
+async function captureRealRunnerReloadDiagnostic() {
+  const directory = mkdtempSync(join(tmpdir(), "codex-backend-runner-reload."));
+  const configPath = join(directory, "runner.config.json");
+  const host = `u1-${randomUUID().replaceAll("-", "")}`;
+  const writeConfig = (backend) => writeFileSync(configPath, `${JSON.stringify({
+    host_id: host,
+    server_url: "ws://fixture/runner",
+    cwd_allowlist: [directory],
+    capabilities: ["codex"],
+    codex: { auth_mode: "chatgpt", backend },
+  })}\n`, { mode: 0o600 });
+  const output = [];
+  const originalWrite = process.stderr.write;
+  let reload;
+  let runtime;
+  const generatedLines = () => output.join("").split(/\r?\n/).filter(Boolean);
+
+  try {
+    writeConfig("app-server");
+    const [{ runRunnerCli }, { loadRunnerConfig }] = await Promise.all([
+      import(new URL("../../runner/dist/runner-cli.js", import.meta.url)),
+      import(new URL("../../runner/dist/config.js", import.meta.url)),
+    ]);
+    process.stderr.write = (chunk, ...rest) => {
+      output.push(String(chunk));
+      const callback = rest.at(-1);
+      if (typeof callback === "function") callback();
+      return true;
+    };
+    runtime = await runRunnerCli({
+      makeLauncher: () => () => { throw new Error("no wrapper launch expected"); },
+      createRunnerLink: (_url, _id, _options) => ({
+        sendSpawnResult() {}, sendSessions() {}, sendResetResult() {}, sendStopAgent() {},
+        sendCatalogResult() {}, updateRegister() {}, reconnect() {}, close() {},
+      }),
+      watchRunnerConfig: (_path, onReload) => {
+        reload = onReload;
+        return { close() {} };
+      },
+      installSignalHandlers: false,
+    }, [configPath]);
+
+    const before = generatedLines().filter((line) => line === "runner: codex backend=exec for subsequent wrappers");
+    assert.deepEqual(before, [], "the reload diagnostic must not exist before the config reload trigger");
+    writeConfig("exec");
+    reload(loadRunnerConfig(configPath));
+    await runtime.waitForReloads();
+    const after = generatedLines().filter((line) => line === "runner: codex backend=exec for subsequent wrappers");
+    assert.equal(after.length, 1, "the real runner reload must emit one backend diagnostic after the trigger");
+    return `${after[0]}\n`;
+  } finally {
+    runtime?.close();
+    process.stderr.write = originalWrite;
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+async function captureRealWrapperBackendDiagnostic() {
+  const directory = mkdtempSync(join(tmpdir(), "codex-backend-wrapper-start."));
+  const configPath = join(directory, "wrapper.config.json");
+  const originalArgv = process.argv;
+  const originalWrite = process.stderr.write;
+  const output = [];
+  const cliPath = fileURLToPath(new URL("../../wrapper/codex/dist/cli.js", import.meta.url));
+  try {
+    writeFileSync(configPath, `${JSON.stringify({
+      agent_id: "u1-producer.agent",
+      persona: { id: "producer", name: "Producer", sprite_set: "producer" },
+      display_name: "Producer",
+      server_url: "ws://fixture/wrapper",
+      codex_backend: "exec",
+    })}\n`, { mode: 0o600 });
+    process.argv = [process.execPath, "wrapper-test-harness", configPath];
+    process.stderr.write = (chunk, ...rest) => {
+      output.push(String(chunk));
+      const callback = rest.at(-1);
+      if (typeof callback === "function") callback();
+      return true;
+    };
+    const { runCodexCli } = await import(new URL("../../wrapper/codex/dist/cli.js", import.meta.url));
+    await assert.rejects(
+      runCodexCli({ createServerLink: () => { throw new Error("intentional test seam stop after startup diagnostic"); } }),
+      /intentional test seam stop/,
+    );
+    const lines = output.join("").split(/\r?\n/).filter(Boolean);
+    assert.equal(lines.filter((line) => line === "codex: backend=exec").length, 1);
+    return "codex: backend=exec\n";
+  } finally {
+    process.stderr.write = originalWrite;
+    process.argv = originalArgv;
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 test("the default local adapter prepares with product-shaped command responses and real file operations", async (t) => {
@@ -473,6 +707,31 @@ test("the default local adapter prepares with product-shaped command responses a
   assert.deepEqual(JSON.parse(readFileSync(files.configPath, "utf8")).codex, { backend: "exec" });
   assert.equal(statSync(files.configPath).mode & 0o777, 0o600);
   assert.deepEqual(readdirSync(files.directory).sort(), ["origin-evidence.json", "runner.config.json"]);
+});
+
+test("real reload diagnostic is consumed by both default readers", async (t) => {
+  const reloadDiagnostic = await captureRealRunnerReloadDiagnostic();
+  assert.match(reloadDiagnostic, /^runner: codex backend=exec for subsequent wrappers\n$/);
+  const files = localFiles(t);
+  const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, reloadDiagnostic });
+  const output = io();
+
+  assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 0);
+  assert.deepEqual(JSON.parse(output.stdout.text), { phase: "prepare", status: "prepared", host: HOST, backend: "exec" });
+  assert.equal(boundary.calls.journalRows, 3);
+  assert.equal(boundary.calls.acknowledgement, 1);
+});
+
+test("real wrapper backend diagnostic comes from temporary config and reaches the default reader", async (t) => {
+  const wrapperDiagnostic = await captureRealWrapperBackendDiagnostic();
+  assert.match(wrapperDiagnostic, /^codex: backend=(exec|app-server)\n$/);
+  const files = localFiles(t);
+  const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, wrapperDiagnostic });
+  const output = io();
+
+  assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 0);
+  assert.deepEqual(JSON.parse(output.stdout.text), { phase: "prepare", status: "prepared", host: HOST, backend: "exec" });
+  assert.equal(boundary.calls.journalRows, 3);
 });
 
 test("the default runner observer scans the full invocation and stops when its startup record is missing", async (t) => {
@@ -500,6 +759,19 @@ test("the default runner observer scans the full invocation and stops when its s
       projection: files.projection,
       identityOutput: "runner: config loaded\nrunner: heartbeat\n",
     });
+    const before = readFileSync(files.configPath);
+    const output = io();
+
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+    assert.match(output.stderr.text, /stopped \(runner-start-record-unavailable\)/);
+    assert.deepEqual(readFileSync(files.configPath), before);
+    assert.equal(boundary.calls.docker, 0);
+    assert.equal(boundary.calls.cursor, 0);
+  });
+
+  await t.test("oversized invocation output stops with runner-start-record-unavailable", async (t) => {
+    const files = localFiles(t);
+    const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, oversizedStartup: true });
     const before = readFileSync(files.configPath);
     const output = io();
 
@@ -623,6 +895,33 @@ test("the built runner emits its checkout revision on the real startup path", as
   }
 });
 
+test("the built launcher reports checkout artifact identity", async (t) => {
+  const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
+  const expectedSha = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  assert.match(expectedSha, /^[0-9a-f]{40}$/);
+
+  const directory = mkdtempSync(join(tmpdir(), "codex-backend-runner-version."));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const runnerCli = fileURLToPath(new URL("../../runner/dist/cli.js", import.meta.url));
+  const output = execFileSync(process.execPath, [runnerCli, "--version", "--json"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    timeout: 5_000,
+    env: { PATH: process.env.PATH, HOME: directory, TMPDIR: directory },
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const identity = JSON.parse(output);
+
+  assert.equal(identity.revision, expectedSha);
+  assert.equal(typeof identity.dirty, "boolean");
+  assert.equal(identity.dirty, false);
+});
+
+
 test("the server golden projection passes through default local adapters", async (t) => {
   const files = localFiles(t);
   const fixtureBytes = readFileSync(new URL("./fixtures/codex-backend/server-observation.json", import.meta.url), "utf8");
@@ -642,7 +941,44 @@ test("the server golden projection passes through default local adapters", async
   assert.equal(boundary.calls.cursor, 0);
 });
 
-test("the default local adapter rejects unknown runner identity and unknown engine before mutation", async (t) => {
+test("the default RPC reader selects the final observation frame and rejects a missing frame", async (t) => {
+  await t.test("an earlier JSON record does not replace the server observation", async () => {
+    const files = localFiles(t);
+    const fixtureBytes = readFileSync(new URL("./fixtures/codex-backend/server-observation.json", import.meta.url), "utf8");
+    const projection = JSON.parse(fixtureBytes);
+    const boundary = localCommandBoundary({
+      configPath: files.configPath,
+      projection,
+      projectionOutput: `{"notice":"compose heading"}\n${fixtureBytes}`,
+    });
+    const output = io();
+
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+    assert.match(output.stderr.text, /stopped \(pending-lifecycle\)/);
+    assert.equal(boundary.calls.docker, 1);
+    assert.equal(boundary.calls.cursor, 0);
+    assert.equal(boundary.calls.acknowledgement, 0);
+  });
+
+  await t.test("missing JSON frame stops with server-observation-unavailable", async () => {
+    const files = localFiles(t);
+    const boundary = localCommandBoundary({
+      configPath: files.configPath,
+      projection: files.projection,
+      projectionOutput: "compose command completed without an observation frame\n",
+    });
+    const before = readFileSync(files.configPath);
+    const output = io();
+
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+    assert.match(output.stderr.text, /stopped \(server-observation-unavailable\)/);
+    assert.deepEqual(readFileSync(files.configPath), before);
+    assert.equal(boundary.calls.docker, 1);
+    assert.equal(boundary.calls.cursor, 0);
+  });
+});
+
+test("the default local adapter rejects invalid runner identity and resolves null engines by evidence", async (t) => {
   await t.test("runner startup identity differs from the requested full release SHA", async (t) => {
     const files = localFiles(t);
     const boundary = localCommandBoundary({
@@ -673,20 +1009,20 @@ test("the default local adapter rejects unknown runner identity and unknown engi
     assert.equal(boundary.calls.cursor, 0);
   });
 
-  await t.test("runner startup identity includes a dirty suffix", async (t) => {
+  await t.test("runner startup identity with dirty suffix stops with runner-identity-dirty", async (t) => {
     const files = localFiles(t);
     const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, runnerSha: `${RUNNER_SHA}-dirty` });
     const before = readFileSync(files.configPath);
     const output = io();
 
     assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
-    assert.match(output.stderr.text, /stopped \(runner-start-record-unavailable\)/);
+    assert.match(output.stderr.text, /stopped \(runner-identity-dirty\)/);
     assert.deepEqual(readFileSync(files.configPath), before);
     assert.equal(boundary.calls.docker, 0);
     assert.equal(boundary.calls.cursor, 0);
   });
 
-  await t.test("directory-only inventory has no engine", async (t) => {
+  await t.test("directory-only inventory with engine=null and complete exec evidence is resolved", async (t) => {
     const files = localFiles(t);
     const projection = structuredClone(files.projection);
     projection.rows[0].engine = null;
@@ -694,11 +1030,11 @@ test("the default local adapter rejects unknown runner identity and unknown engi
     const before = readFileSync(files.configPath);
     const output = io();
 
-    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
-    assert.match(output.stderr.text, /stopped \(engine-unknown\)/);
-    assert.deepEqual(readFileSync(files.configPath), before);
-    assert.equal(boundary.calls.docker, 1);
-    assert.equal(boundary.calls.cursor, 0);
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 0);
+    assert.deepEqual(JSON.parse(output.stdout.text), { phase: "prepare", status: "prepared", host: HOST, backend: "exec" });
+    assert.notDeepEqual(readFileSync(files.configPath), before);
+    assert.equal(boundary.calls.docker, 2);
+    assert.equal(boundary.calls.cursor, 1);
   });
 });
 
