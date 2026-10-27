@@ -206,7 +206,7 @@ describe("production-shaped Codex home classification", () => {
     expect(run([stateCLI, "classify", fixture.home]).status).toBe(0);
   });
 
-  it.each(["success", "error", "signal", "exit", "null", "throw", "identity", "open", "opened-dev", "opened-ino", "opened-type", "opened-link", "opened-owner", "after-dev", "after-link", "after-owner", "before-type", "before-link", "before-owner", "stat", "close"])("closes each probe descriptor on %s and lets an independent process acquire it", (fault) => {
+  it.each(["success", "error", "signal", "signal-success", "exit", "null", "throw", "identity", "open", "opened-dev", "opened-ino", "opened-type", "opened-link", "opened-owner", "after-dev", "after-link", "after-owner", "before-type", "before-link", "before-owner", "stat", "close"])("closes each probe descriptor on %s and lets an independent process acquire it", (fault) => {
     const result = run(["--input-type=module", "-e", `
       import fs from 'node:fs'; import cp from 'node:child_process'; import assert from 'node:assert/strict';
       import { syncBuiltinESMExports } from 'node:module';
@@ -224,6 +224,7 @@ describe("production-shaped Codex home classification", () => {
         if(fault==='identity'||fault.startsWith('after-'))replaceIdentity=true;
         if(fault==='error')return {...r,error:Object.assign(Error('CHECKER_PRIVATE_SENTINEL'),{code:'ENOENT'})};
         if(fault==='signal')return {...r,status:null,signal:'SIGTERM'};
+        if(fault==='signal-success')return {...r,status:0,signal:'SIGTERM'};
         if(fault==='exit')return {...r,status:1};
         if(fault==='null')return {...r,status:null};
         return r;
