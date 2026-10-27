@@ -400,9 +400,9 @@ function localArgv(configPath, evidencePath) {
   return args;
 }
 
-function localCommandBoundary({ configPath, projection, failObservationAt = 0, failAck = false, runnerSha = RUNNER_SHA }) {
+function localCommandBoundary({ configPath, projection, failObservationAt = 0, failAck = false, runnerSha = RUNNER_SHA, runnerHost = HOST }) {
   const calls = { systemctl: 0, docker: 0, journalRows: 0, runnerIdentity: 0, cursor: 0, acknowledgement: 0 };
-  const startup = `runner: host=${HOST} rev=${runnerSha} connecting to wss://example.invalid/runner\n`;
+  const startup = `runner: host=${runnerHost} rev=${runnerSha} connecting to wss://example.invalid/runner\n`;
 
   return {
     calls,
@@ -474,8 +474,36 @@ test("the default local adapter rejects unknown runner identity and unknown engi
       runnerSha: "a".repeat(40),
     });
     const before = readFileSync(files.configPath);
+    const output = io();
 
-    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, io(), { runCommand: boundary.runCommand }), 1);
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+    assert.match(output.stderr.text, /stopped \(runner-identity-mismatch\)/);
+    assert.deepEqual(readFileSync(files.configPath), before);
+    assert.equal(boundary.calls.docker, 0);
+    assert.equal(boundary.calls.cursor, 0);
+  });
+
+  await t.test("runner startup identity names a different host", async (t) => {
+    const files = localFiles(t);
+    const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, runnerHost: "another-host" });
+    const before = readFileSync(files.configPath);
+    const output = io();
+
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+    assert.match(output.stderr.text, /stopped \(runner-observation-unavailable\)/);
+    assert.deepEqual(readFileSync(files.configPath), before);
+    assert.equal(boundary.calls.docker, 0);
+    assert.equal(boundary.calls.cursor, 0);
+  });
+
+  await t.test("runner startup identity includes a dirty suffix", async (t) => {
+    const files = localFiles(t);
+    const boundary = localCommandBoundary({ configPath: files.configPath, projection: files.projection, runnerSha: `${RUNNER_SHA}-dirty` });
+    const before = readFileSync(files.configPath);
+    const output = io();
+
+    assert.equal(await main(localArgv(files.configPath, files.evidencePath), undefined, output, { runCommand: boundary.runCommand }), 1);
+    assert.match(output.stderr.text, /stopped \(runner-observation-unavailable\)/);
     assert.deepEqual(readFileSync(files.configPath), before);
     assert.equal(boundary.calls.docker, 0);
     assert.equal(boundary.calls.cursor, 0);
