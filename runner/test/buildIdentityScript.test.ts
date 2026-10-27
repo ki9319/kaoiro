@@ -221,7 +221,7 @@ describe("build-identity.mjs default CLI (issue #288)", () => {
       dir,
     );
 
-    const out = execFileSync("node", [join(dir, CLI_FILES[0])], {
+    const out = execFileSync("node", [join(dir, "scripts", "build-identity.mjs")], {
       cwd: dir,
       encoding: "utf8",
     });
