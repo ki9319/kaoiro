@@ -133,6 +133,7 @@ defmodule KaoiroServer.CodexBackendCompatibilityDefaultStoreTest do
     end)
 
     record_directory(claude_id)
+
     assert {:ok, %{"schema" => 1, "host" => ^host, "rows" => [row]}} =
              CodexBackendCompatibility.observe_host(host)
 
