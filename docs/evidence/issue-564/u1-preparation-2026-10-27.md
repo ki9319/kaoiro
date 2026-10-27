@@ -1,14 +1,15 @@
 ---
-title: "Issue 564 U1 preparation evidence"
+title: "Issue 564 preparation evidence"
 status: implemented
 last_updated: 2026-10-27
 ---
 
-# Issue 564 U1 preparation evidence
+# Issue 564 preparation evidence
 
-This record covers U1's read-only observations and the `prepare` action that
-pins an omitted backend to the existing `exec` selection. It does not cover
-U2's omitted-setting default change, pin removal, or fresh restore.
+This record covers the read-only observations and preparation command
+introduced for issue 564, which pins an omitted backend to the existing `exec`
+selection. It does not cover changing the omitted-setting default, pin removal,
+or fresh restore.
 
 ## Artifact and observation contract
 
@@ -69,7 +70,8 @@ test-isolation CI job. Its first import is covered by the isolation guard.
 ## Scope and limits
 
 No production inventory, account-backed run, or native Codex lifecycle test is
-claimed here. U1 makes no exec-to-app-server or app-server-to-exec session
-compatibility claim. The preparation still requires complete, private
-origin-evidence supplied by the operator; public test fixtures and this record
-do not establish a real host's inventory or session origin.
+claimed here. The preparation command makes no exec-to-app-server or
+app-server-to-exec session compatibility claim. The preparation still requires
+complete, private origin-evidence supplied by the operator; public test
+fixtures and this record do not establish a real host's inventory or session
+origin.
