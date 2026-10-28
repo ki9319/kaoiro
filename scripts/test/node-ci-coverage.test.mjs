@@ -49,13 +49,15 @@ test("an all-skipped exception is reached and accepted", () => fixture({ "except
   assert.deepEqual(runNodeEntries(root, entries, exception(entries[0])), []);
 }));
 
-test("an exception cannot hide a failure or a newly running test", () => {
-  for (const body of [testFile('test("fail", () => { throw Error("bad"); });'), testFile('test("ok", () => {});')]) {
-    fixture({ "except.test.mjs": body }, (root, entries) => {
-      assert.notEqual(runNodeEntries(root, entries, exception(entries[0])).length, 0);
-    });
-  }
-});
+test("an exception cannot hide a failure", () => fixture({ "except.test.mjs":
+  testFile('test("fail", () => { throw Error("bad"); });') }, (root, entries) => {
+  has(runNodeEntries(root, entries, exception(entries[0])), "test failed: fail");
+}));
+
+test("a real test makes its exception stale", () => fixture({ "except.test.mjs":
+  testFile('test("ok", () => {});') }, (root, entries) => {
+  has(runNodeEntries(root, entries, exception(entries[0])), "stale exception, a real test ran");
+}));
 
 test("an exception must remain present, tracked, unique and issue-linked", () => fixture({ "except.test.mjs": skipped }, (root, entries) => {
   for (const records of [exception("missing.test.mjs"), [...exception(entries[0]), ...exception(entries[0])],
