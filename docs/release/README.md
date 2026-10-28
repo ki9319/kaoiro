@@ -2,7 +2,7 @@
 title: Release notes
 description: One page per production release, listing what changed since the previous production release.
 status: accepted
-last_updated: 2026-10-27
+last_updated: 2026-10-28
 ---
 
 # Release notes
@@ -66,7 +66,7 @@ production run records outside the repository.
 
 | Release | Date | Previous | Highlights |
 |---|---|---|---|
-| [v2026.10.27.1](v2026.10.27.1.md) | 2026-10-27 | v2026.10.26.1 | Codex CLI and SDK 0.164.0 with GPT-6.1 Terra, preparation tool for the Codex backend default change, pending dialogs kept across later envelopes, delivery binding that survives a ledger restart |
+| [v2026.10.28.1](v2026.10.28.1.md) | 2026-10-28 | v2026.10.26.1 | Codex CLI and SDK 0.164.0 with GPT-6.1 Terra, Codex state classification that recognizes external daemon home entries, preparation tool for the Codex backend default change, pending dialogs kept across later envelopes, delivery binding that survives a ledger restart (v2026.10.27.1 was tagged but never deployed) |
 | [v2026.10.26.1](v2026.10.26.1.md) | 2026-10-26 | v2026.10.25.1 | Configurable work-item admission limits with operator controls, Bandit 1.14.0 |
 | [v2026.10.25.1](v2026.10.25.1.md) | 2026-10-25 | v2026.10.24.1 | Minimized native Codex state, Codex recovery hints from one table, retired landing tags and release publication, Bandit 1.13.1 and xmldom 0.9.12 |
 | [v2026.10.24.1](v2026.10.24.1.md) | 2026-10-24 | v2026.10.22.11 | First schema-2 release tag, Antigravity weekly rate limit and result size, surrogate-safe text cuts, directory names in the remaining dashboard places |
