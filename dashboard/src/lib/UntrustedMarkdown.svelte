@@ -67,7 +67,9 @@
     overflow-x: auto;
   }
   .untrusted-markdown :global(a),
+  .untrusted-markdown :global(a:visited),
   .untrusted-markdown :global(.md-link) {
+    color: var(--c-thinking);
     text-decoration: underline;
   }
   .untrusted-markdown.inline :global(code) {

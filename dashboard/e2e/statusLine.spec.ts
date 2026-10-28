@@ -99,6 +99,43 @@ test.describe("status line change log renders untrusted markdown (issue 482)", (
 const CARD = "/e2e/harness/index.html?view=lobby&role=operator&statusLine=hostile";
 const DETAIL = "/e2e/harness/index.html?view=detail&statusLine=hostile";
 
+test("status links use the theme colour and retain a focus ring", async ({ page }) => {
+  await page.goto(CARD);
+  const cardLink = page.locator("button.status-line .md-link").first();
+  const cardColour = await cardLink.evaluate((el) => getComputedStyle(el).color);
+  expect(await effectiveContrast(cardLink)).toBeGreaterThanOrEqual(4.5);
+
+  await page.goto(DETAIL);
+  const detailLink = page.locator(".status-line-panel .body a").first();
+  await expect(detailLink).toHaveCSS("color", cardColour);
+  expect(await effectiveContrast(detailLink)).toBeGreaterThanOrEqual(4.5);
+  await detailLink.hover();
+  await expect(detailLink).toHaveCSS("color", cardColour);
+  await detailLink.focus();
+  const focus = await detailLink.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { color: style.color, outline: style.outlineStyle, width: parseFloat(style.outlineWidth) };
+  });
+  expect(focus.color).toBe(cardColour);
+  expect(focus.outline).not.toBe("none");
+  expect(focus.width).toBeGreaterThan(0);
+
+  await openLog(page);
+  const historyLink = newest(page).locator("a").first();
+  await expect(historyLink).toHaveCSS("color", cardColour);
+  expect(await effectiveContrast(historyLink)).toBeGreaterThanOrEqual(4.5);
+  const visitedRule = await historyLink.evaluate((el) => {
+    for (const sheet of Array.from(document.styleSheets)) {
+      for (const rule of Array.from(sheet.cssRules)) {
+        if (rule instanceof CSSStyleRule && rule.selectorText.includes("a:visited") &&
+            rule.selectorText.includes("untrusted-markdown")) return rule.style.color;
+      }
+    }
+    return "";
+  });
+  expect(visitedRule).toBe("var(--c-thinking)");
+});
+
 const pwned = (page: Page) => page.evaluate(() => (window as { __pwned?: unknown }).__pwned);
 
 /** WCAG contrast of two CSS colours. Both are painted on a canvas first, so any
