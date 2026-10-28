@@ -44,6 +44,7 @@ function check(css: string, link: Element): void {
   for (const visited of [false, true]) {
     const covered = rules.some((rule) => rule.colour && rule.selectors.some((selector) => {
       if (visited && /:link\b/.test(selector)) return false;
+      // jsdom never matches :visited, so removing this check cannot be pinned here.
       if (!visited && /:visited\b/.test(selector)) return false;
       return link.matches(visited ? selector.replace(/:visited\b/g, "") : selector);
     }));
@@ -82,6 +83,7 @@ describe("markdown link CSS guard", () => {
     ["at-rule", `${valid} @property --x {}`],
     ["escape", `${valid} a { c\\6flor: red; }`],
     ["quote", `${valid} a { content: 'x'; }`],
+    ["double quote", `${valid} a { content: "x"; }`],
     ["nesting", `${valid} a { & b { color: red; } }`],
     ["syntax", `${valid} garbage`],
     ["pseudo", `${valid} a:open { color: var(--c-thinking); }`],
@@ -91,18 +93,22 @@ describe("markdown link CSS guard", () => {
     ["fill", `${valid} a { -webkit-text-fill-color: red; }`],
     ["variable", `${valid} a { --c-thinking: red; }`],
     ["animation", `${valid} a { animation-name: paint; }`],
+    ["bare animation", `${valid} a { animation: paint 1s; }`],
     ["existing colour", valid.replace("var(--c-thinking)", "red")],
     ["new colour", `${valid} a:hover { COLOR: red; }`],
     ["unvisited", ".untrusted-markdown a:visited { color: var(--c-thinking); }"],
     ["visited", ".untrusted-markdown a:link { color: var(--c-thinking); }"],
+    ["colourless", ".untrusted-markdown a, .untrusted-markdown .md-link { text-decoration: underline; }"],
     ["inline", ".untrusted-markdown a { color: var(--c-thinking); }"],
   ])("rejects %s", (name, css) => {
     const reasons: Record<string, string> = {
       comment: "unclosed comment", "at-rule": "at-rule, escape, quote or nesting",
       escape: "at-rule, escape, quote or nesting", quote: "at-rule, escape, quote or nesting",
+      "double quote": "at-rule, escape, quote or nesting",
       nesting: "at-rule, escape, quote or nesting", syntax: "unknown syntax or nesting",
       pseudo: "unsupported pseudo-class", selector: "unsupported selector", declaration: "unsupported declaration",
       all: "forbidden declaration", fill: "forbidden declaration", variable: "forbidden declaration", animation: "forbidden declaration",
+      "bare animation": "forbidden declaration", colourless: "unvisited colour missing",
       "existing colour": "competing colour", "new colour": "competing colour",
       unvisited: "unvisited colour missing", visited: "visited colour missing", inline: "unvisited colour missing",
     };
