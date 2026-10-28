@@ -123,7 +123,7 @@ jobs:
   # test scripts build first (wrapper, including antigravity and grok, and runner).
   test-isolation:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -140,6 +140,7 @@ jobs:
       - run: pnpm -C wrapper build
       - run: pnpm -C runner build
       - run: node scripts/test-isolation/check.mjs
+      - run: node scripts/test-isolation/run-node-tests.mjs
       - run: node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs scripts/test/child-process-environment.test.mjs scripts/test/codex-backend-compatibility.test.mjs
 
   # Checks out on the host, then runs mix inside a pinned Elixir image.

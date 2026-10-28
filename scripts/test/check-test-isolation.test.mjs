@@ -311,25 +311,25 @@ test("a node:test import is not treated as a Vitest package import", () => {
   assert.deepEqual(contentProblems(path, source), []);
 });
 
-test("the shared guard implementation may import node:test", () => {
+test("the shared guard implementation cannot import node:test", () => {
   const root = fixtureRepository();
   try {
     const source = readFileSync(join(root, MODULE), "utf8") + '\nimport { test } from "node:test";\n';
     write(root, MODULE, source);
-    assert.deepEqual(checkTestIsolation(root, { observe: () => [] }).problems, []);
+    assert.ok(checkTestIsolation(root, { observe: () => [] }).problems.includes(`${MODULE}: node:test importer is not a canonical entry`));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("a declared node helper may import node:test", () => {
+test("a declared node helper cannot import node:test", () => {
   const path = "scripts/test/mock-github-api.mjs";
   const problems = problemsAfter(root => write(root, path, 'import { test } from "node:test";\n'));
-  assert.deepEqual(problems, []);
+  assert.ok(problems.includes(`${path}: node:test importer is not a canonical entry`));
 });
 
-test("a node:test fixture may import node:test", () => {
+test("a node:test fixture cannot import node:test", () => {
   const path = "scripts/test/fixtures/helper.mjs";
   const problems = problemsAfter(root => write(root, path, 'import { test } from "node:test";\n'));
-  assert.deepEqual(problems, []);
+  assert.ok(problems.includes(`${path}: node:test importer is not a canonical entry`));
 });
 
 test("the CommonJS guard facade is exempt from first-import enforcement", () => {
@@ -463,7 +463,7 @@ test("a comment or string containing a test-module name does not select its file
     '// import { it } from "vitest";\nconst note = "require(\'node:test\')";\n'), []);
 });
 
-for (const module of ["vitest", "node:test"]) {
+for (const module of ["vitest"]) {
   test("a static " + module + " import is accepted after the guard", () => {
     const path = "wrapper/core/test/ordinary-import.ts";
     assert.deepEqual(contentProblems(path, importLine(path) + 'import { it } from "' + module + '";\n'), []);
@@ -753,6 +753,7 @@ const wiringMutations = {
   "the test step drops the checker tests": [text => text.replace(" scripts/test/check-test-isolation.test.mjs", ""), /missing the step `- run: node --test scripts\/test\/test-isolation\.test\.mjs/],
   "the test step drops the child environment test": [text => text.replace(" scripts/test/child-process-environment.test.mjs", ""), /missing the step `- run: node --test scripts\/test\/test-isolation\.test\.mjs/],
   "the test step drops the compatibility test": [text => text.replace(" scripts/test/codex-backend-compatibility.test.mjs\n", "\n"), /missing the step `- run: node --test scripts\/test\/test-isolation\.test\.mjs/],
+  "the runner step is removed": [text => text.replace("      - run: node scripts/test-isolation/run-node-tests.mjs\n", ""), /missing the step `- run: node scripts\/test-isolation\/run-node-tests\.mjs`/],
   "the job is renamed": [text => text.replace("  test-isolation:\n", "  test-isolation-renamed:\n"), /job test-isolation not found/],
 };
 
@@ -767,6 +768,7 @@ for (const [name, [mutate, expected]] of Object.entries(wiringMutations)) {
 
 const JOB = (...steps) => `jobs:\n  test-isolation:\n    runs-on: ubuntu-latest\n    steps:\n${steps.map(step => `      ${step}\n`).join("")}`;
 const CLI_JOB_STEP = "- run: node scripts/test-isolation/check.mjs";
+const RUNNER_JOB_STEP = "- run: node scripts/test-isolation/run-node-tests.mjs";
 const TEST_JOB_STEP = "- run: node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs scripts/test/child-process-environment.test.mjs scripts/test/codex-backend-compatibility.test.mjs";
 
 // The fixture repository plus the three entries the job's test step names.
@@ -774,7 +776,7 @@ function connectedRepository() {
   const root = fixtureRepository();
   for (const path of ["scripts/test/test-isolation.test.mjs", "scripts/test/check-test-isolation.test.mjs",
     "scripts/test/child-process-environment.test.mjs", "scripts/test/codex-backend-compatibility.test.mjs"]) write(root, path, entry(path));
-  write(root, ".github/workflows/ci.yml", JOB(CLI_JOB_STEP, TEST_JOB_STEP));
+  write(root, ".github/workflows/ci.yml", JOB(CLI_JOB_STEP, RUNNER_JOB_STEP, TEST_JOB_STEP));
   return root;
 }
 
@@ -788,7 +790,7 @@ test("checkRepository reports a connected repository without problems", () => {
 test("checkRepository adds the workflow problems to the checker's own, and only there", () => {
   const root = connectedRepository();
   try {
-    write(root, ".github/workflows/ci.yml", JOB(CLI_JOB_STEP));
+    write(root, ".github/workflows/ci.yml", JOB(CLI_JOB_STEP, RUNNER_JOB_STEP));
     const { problems } = checkRepository(root, { observe: () => [] });
     assert.equal(problems.length, 1, problems.join("\n"));
     assert.match(problems[0], /missing the step `- run: node --test /);
@@ -832,3 +834,9 @@ for (const [name, [mutate, diagnosis]] of Object.entries(cliMutations)) {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 }
+
+test("a node:test importer in fixtures is rejected", () => {
+  const path = "scripts/test/fixtures/hidden.mjs";
+  const problems = problemsAfter(root => write(root, path, 'import { test } from "node:test";\ntest("hidden", () => {});\n'));
+  assert.ok(problems.includes(`${path}: node:test importer is not a canonical entry`), problems.join("\n"));
+});

@@ -74,6 +74,12 @@ function classifyNodeTrees(root, all, problems) {
   return entries;
 }
 
+export function nodeEntries(root) {
+  const problems = [];
+  const entries = classifyNodeTrees(root, files(root), problems);
+  return { entries, problems };
+}
+
 function recorder(scratch) {
   const path = join(scratch, "recorder.mjs");
   writeFileSync(path, `import { appendFileSync } from "node:fs";
@@ -185,7 +191,7 @@ function helperProblems(row, problems) {
   }
 }
 
-function testModuleImports(root, all, problems) {
+function testModuleImports(root, all, entries, problems) {
   const { rows, problems: scanProblems } = analyzeSources(root, TYPESCRIPT, all);
   const byPath = new Map(rows.map(row => [row.path, row]));
   problems.push(...scanProblems);
@@ -211,6 +217,9 @@ function testModuleImports(root, all, problems) {
   for (const row of rows) {
     if (row.imports.length === 0) continue;
     const { path } = row;
+    if (row.imports.includes("node:test") && !entries.includes(path)) {
+      problems.push(`${path}: node:test importer is not a canonical entry`);
+    }
     if (CONTENT_CANARIES.includes(path)) {
       continue;
     }
@@ -354,7 +363,7 @@ export function checkTestIsolation(root, { observe = observeVitest } = {}) {
   const scratch = mkdtempSync(join(tmpdir(), "kaoiro-isolation-check-"));
   try {
     const entries = classifyNodeTrees(root, all, problems);
-    const sourceRows = testModuleImports(root, all, problems);
+    const sourceRows = testModuleImports(root, all, entries, problems);
     if (entries.length > 0) runtimeProof(root, entries, scratch, problems);
     strayFiles(all, problems);
     vitestWiring(root, all, sourceRows, scratch, observe, problems);
@@ -371,14 +380,16 @@ const CI_JOB = "test-isolation";
 // observation, and the tests keep its CLI and this reader honest. Each side
 // checks the other, so dropping either step fails the one that remains.
 const CI_STEPS = ["- run: node scripts/test-isolation/check.mjs",
+  "- run: node scripts/test-isolation/run-node-tests.mjs",
   "- run: node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs scripts/test/child-process-environment.test.mjs scripts/test/codex-backend-compatibility.test.mjs"];
-const CI_UNSAFE_KEY = /^(?:-\s+)?(?:continue-on-error|if)\s*:/;
+const CI_UNSAFE_KEY = /^(?:-\s+)?(?:continue-on-error|if|needs)\s*:/;
 
 /** Returns how the test-isolation job of a workflow fails to run the checker and its tests. */
 export function ciWiringProblems(text) {
   const lines = text.split("\n");
   const start = lines.indexOf(`  ${CI_JOB}:`);
   if (start < 0) return [`${CI_WORKFLOW}: job ${CI_JOB} not found`];
+  if (lines.filter(line => line === `  ${CI_JOB}:`).length !== 1) return [`${CI_WORKFLOW}: duplicate job ${CI_JOB}`];
   const next = lines.findIndex((line, index) => index > start && /^ {0,2}\S/.test(line));
   const job = lines.slice(start + 1, next < 0 ? undefined : next).map(line => line.trim());
   const problems = CI_STEPS.filter(step => !job.includes(step))

@@ -79,7 +79,7 @@ tool path, fixtures, state transitions and cleanup.
 - The first import must resolve to scripts/test/fixtures/test-isolation.mjs. Dashboard test files instead use the extensionless `./isolation.setup` specifier, which resolves to `dashboard/test/isolation.setup.ts`; that local setup file starts with the shared module. This remains one hop.
 - The three exact wrapper/codex helper files are exceptions because tests import them as helpers rather than run them: app_server_approval_harness.ts, fixtures/cli_app_server.ts and fixtures/notice_tap.ts. Their Vitest imports may name only vi and expect. A default or namespace import, a test-registration API (including an alias), unsupported acquisition, or a missing helper invalidates the exception. Other files, including siblings under test/fixtures, follow the first-import rule.
 - Each declared package has a guard-free setup canary, and dashboard also has a guard-free jsdom canary. They assert isolation at module scope and in a test. They import only Vitest and the canonical canary helper; the helper imports only Node built-ins. Do not import the shared guard or dashboard setup in a canary. The checker requires all nine canaries to remain guard-free and verifies that the default package observations select them.
-- The canonical node:test trees remain scripts/test and server/deploy/test. Every entry there is a *.test.mjs whose first import is the shared module. Other source files in those trees must be under fixtures or on the existing helper list. Content selection also checks node:test imports elsewhere in the repository.
+- The canonical node:test trees remain scripts/test and server/deploy/test. Every entry there is a *.test.mjs whose first import is the shared module. Other source files in those trees must be under fixtures or on the existing helper list. Every static `node:test` importer must be a canonical entry, including files under fixtures.
 - setupOrder remains a source-level declaration check. It reads setupFiles only in a declared package's own vitest.config.* or vite.config.* file, accepts one readable list of string literals, requires the shared module first (through the dashboard hop), and requires sequence.setupFiles to be list when multiple files are declared. It reports setupFiles mentions in other files or unreadable declarations. A config with no readable setupFiles mention is not rejected by this check.
 - The checker observes the default configuration of all eight declared Vitest packages using each package's own vitest list --json command. It requires one project and the selected canary files, including dashboard's jsdom canary. If default setup is missing or does not load the guard, the guard-free canary fails during collection. This observation needs installed dependencies and the wrapper and runner build outputs.
 - The existing package-ownership check remains for Vitest configuration files outside the eight declared packages. Package script text and workflow command strings do not affect ownership. CI still pins the exact checker and self-test lines in the test-isolation job.
@@ -94,12 +94,17 @@ pnpm -C dashboard install --frozen-lockfile
 pnpm -C wrapper build
 pnpm -C runner build
 node scripts/test-isolation/check.mjs
-node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs scripts/test/child-process-environment.test.mjs
+node scripts/test-isolation/run-node-tests.mjs
+node --test scripts/test/test-isolation.test.mjs scripts/test/check-test-isolation.test.mjs scripts/test/child-process-environment.test.mjs scripts/test/codex-backend-compatibility.test.mjs
 ~~~
 
 These are the CI job's steps. The checker prints each problem on stderr and one JSON line, {"entries":N,"problems":N}, on stdout; it exits 0 only with no problems. The test-isolation job runs the checker once against the real repository. Its self-tests cover content selection, first-import enforcement, unsupported acquisition, canary and helper contracts, setupOrder, the checker CLI failure path, and CI wiring. The separate isolation and child-process-environment suites continue to cover runtime refusals, network rules, permits, and child environment handling.
 
-The workflow tests pin both CI commands exactly, including the complete node:test file list. Update them together with ciWiringProblems in the checker.
+The Node runner uses the canonical entries, runs them serially from the repository root and requires each file to report a real, non-skipped, non-todo test. It removes `KAOIRO_PREGATE_REAL` from the child environment and does not add or change `NODE_OPTIONS`. Exceptions are exact entries with an issue and reason in `scripts/test-isolation/node-ci-exceptions.mjs`; their failures and missing events still fail the job, and a real test makes an exception stale. CI checks the issue number's shape, not whether it is open or relevant; reviewers must check that. The current exception is `pre-gate-real.test.mjs` (issue #872).
+
+The 15-minute job timeout budgets approximately 31 seconds for setup, 142 for isolation checking, 300 for the Node runner and 22 for the existing four-file suite (about 490 seconds total). Revisit it against actual CI duration as the suite grows.
+
+The workflow tests pin the CI commands exactly, including the complete four-file node:test list. Update them together with ciWiringProblems in the checker.
 
 ## Residual risks
 

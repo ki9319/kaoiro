@@ -89,5 +89,4 @@ code is never changed by recording.
   checks in turn and requires the matching scenario to go red.
 - `KAOIRO_PREGATE_REAL=1 node --test scripts/test/pre-gate-real.test.mjs`
   commits a defect into a scratch clone of the real repository and runs that
-  clone's gate on the new SHA. It takes about a minute per control and needs a
-  warm pnpm store.
+  clone's gate on the new SHA. Under the isolation guard it currently fails because pnpm workers are refused; see [issue #872](https://github.com/sakuraiyuta/kaoiro/issues/872).
