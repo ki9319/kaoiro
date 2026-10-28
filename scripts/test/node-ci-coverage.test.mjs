@@ -1,12 +1,12 @@
 import "./fixtures/test-isolation.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { runNodeEntries } from "../test-isolation/run-node-tests.mjs";
+import { entryProblem, runNodeEntries } from "../test-isolation/run-node-tests.mjs";
 
 function fixture(files, fn) {
   const root = mkdtempSync(join(tmpdir(), "kaoiro-node-ci-"));
@@ -67,7 +67,7 @@ test("an exception must remain present, tracked, unique and issue-linked", () =>
 }));
 
 test("Node reports an empty file as a synthetic pass with the expected shape", () => fixture({ "empty.test.mjs": testFile("") }, (root, entries) => {
-  const file = resolve(root, entries[0]);
+  const file = resolve(realpathSync(root), entries[0]);
   const reporter = fileURLToPath(new URL("../test-isolation/node-reporter.mjs", import.meta.url));
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
@@ -76,4 +76,34 @@ test("Node reports an empty file as a synthetic pass with the expected shape", (
   const events = result.stdout.trim().split("\n").map(JSON.parse);
   assert.ok(events.some(event => event.event === "test:pass" && event.file === file && event.name === file &&
     event.nesting === 0 && event.line === 1 && event.column === 1 && event.type === "test"), result.stdout);
+}));
+
+test("an unobserved exception is rejected", () => {
+  assert.equal(entryProblem("except.test.mjs", { reached: false, real: 0 }, true), "except.test.mjs: no Node test event");
+});
+
+test("an untracked exception is rejected", () => fixture({ "tracked.test.mjs": skipped }, root => {
+  const path = "untracked.test.mjs";
+  writeFileSync(join(root, path), skipped);
+  has(runNodeEntries(root, [path], exception(path)), "invalid or stale exception");
+}));
+
+test("exception issue and fields have exact types and shape", () => fixture({ "except.test.mjs": skipped }, (root, entries) => {
+  const path = entries[0];
+  for (const issue of ["872", 1.5, -1]) {
+    has(runNodeEntries(root, entries, [{ path, issue, reason: "fixture" }]), "invalid or stale exception");
+  }
+  has(runNodeEntries(root, entries, [{ path, issue: 872, reason: "fixture", run: false }]), "invalid or stale exception");
+}));
+
+test("runner forwards failure diagnostics and stack on stderr", () => fixture({ "bad.test.mjs":
+  testFile('test("bad", () => { throw Error("diagnostic-canary"); });') }, (root, entries) => {
+  const module = new URL("../test-isolation/run-node-tests.mjs", import.meta.url).href;
+  const source = `import { runNodeEntries } from ${JSON.stringify(module)}; runNodeEntries(${JSON.stringify(root)}, ${JSON.stringify(entries)}, []);`;
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", source], { env, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /diagnostic-canary/);
+  assert.match(result.stderr, /at TestContext/);
 }));

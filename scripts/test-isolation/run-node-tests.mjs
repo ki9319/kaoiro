@@ -9,13 +9,21 @@ import { NODE_CI_EXCEPTIONS } from "./node-ci-exceptions.mjs";
 const REPORTER = fileURLToPath(new URL("./node-reporter.mjs", import.meta.url));
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
+export function entryProblem(path, row, exempt) {
+  if (!row.reached) return `${path}: no Node test event`;
+  if (exempt && row.real) return `${path}: stale exception, a real test ran`;
+  if (!exempt && !row.real) return `${path}: no real test ran`;
+  return undefined;
+}
+
 export function runNodeEntries(root, entries, exceptions = NODE_CI_EXCEPTIONS) {
   root = realpathSync(root);
   const problems = [];
   const exempt = new Set();
   for (const record of exceptions) {
     const path = record?.path;
-    if (typeof path !== "string" || !entries.includes(path) || exempt.has(path) ||
+    if (!record || Object.keys(record).sort().join(",") !== "issue,path,reason" ||
+        typeof path !== "string" || !entries.includes(path) || exempt.has(path) ||
         !existsSync(resolve(root, path)) || !Number.isSafeInteger(record.issue) || record.issue <= 0 ||
         typeof record.reason !== "string" || !record.reason.trim() ||
         spawnSync("git", ["ls-files", "--error-unmatch", "--", path], { cwd: root, stdio: "ignore" }).status !== 0) {
@@ -28,9 +36,10 @@ export function runNodeEntries(root, entries, exceptions = NODE_CI_EXCEPTIONS) {
   const env = { ...process.env };
   delete env.KAOIRO_PREGATE_REAL;
   delete env.NODE_TEST_CONTEXT;
-  const run = spawnSync(process.execPath, ["--test", "--test-concurrency=1", `--test-reporter=${REPORTER}`, ...absolute],
-    { cwd: root, env, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  if (run.error || run.status !== 0) problems.push(`Node test runner failed: ${run.error?.message ?? run.status}\n${run.stderr}`);
+  const run = spawnSync(process.execPath, ["--test", "--test-concurrency=1", `--test-reporter=${REPORTER}`, "--test-reporter-destination=stdout",
+    "--test-reporter=spec", "--test-reporter-destination=stderr", ...absolute],
+    { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 64 * 1024 * 1024 });
+  if (run.error || run.status !== 0) problems.push(`Node test runner failed: ${run.error?.message ?? run.status}`);
   const seen = new Map(absolute.map(path => [path, { reached: false, real: 0 }]));
   for (const line of run.stdout.trim().split("\n").filter(Boolean)) {
     let event;
@@ -52,9 +61,8 @@ export function runNodeEntries(root, entries, exceptions = NODE_CI_EXCEPTIONS) {
   }
   for (const [index, file] of absolute.entries()) {
     const row = seen.get(file);
-    if (!row.reached) problems.push(`${entries[index]}: no Node test event`);
-    else if (exempt.has(entries[index]) && row.real) problems.push(`${entries[index]}: stale exception, a real test ran`);
-    else if (!exempt.has(entries[index]) && !row.real) problems.push(`${entries[index]}: no real test ran`);
+    const problem = entryProblem(entries[index], row, exempt.has(entries[index]));
+    if (problem) problems.push(problem);
     else console.log(`${entries[index]}: ${row.real} real test(s)${exempt.has(entries[index]) ? " (exception)" : ""}`);
   }
   return problems;

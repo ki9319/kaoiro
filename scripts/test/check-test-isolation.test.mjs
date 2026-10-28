@@ -754,6 +754,8 @@ const wiringMutations = {
   "the test step drops the child environment test": [text => text.replace(" scripts/test/child-process-environment.test.mjs", ""), /missing the step `- run: node --test scripts\/test\/test-isolation\.test\.mjs/],
   "the test step drops the compatibility test": [text => text.replace(" scripts/test/codex-backend-compatibility.test.mjs\n", "\n"), /missing the step `- run: node --test scripts\/test\/test-isolation\.test\.mjs/],
   "the runner step is removed": [text => text.replace("      - run: node scripts/test-isolation/run-node-tests.mjs\n", ""), /missing the step `- run: node scripts\/test-isolation\/run-node-tests\.mjs`/],
+  "the job declares needs": [text => text.replace("  test-isolation:\n", "  test-isolation:\n    needs: runner\n"), /`needs: runner` can skip a step/],
+  "the job is duplicated": [text => text.replace("  test-isolation:\n", "  test-isolation:\n  test-isolation:\n"), /duplicate job test-isolation/],
   "the job is renamed": [text => text.replace("  test-isolation:\n", "  test-isolation-renamed:\n"), /job test-isolation not found/],
 };
 

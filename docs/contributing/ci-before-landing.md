@@ -56,6 +56,8 @@ deployment behavior.
 
 ## Reviewer evidence
 
+The `test-isolation` job runs the canonical Node entries serially and checks the explicit exceptions in `scripts/test-isolation/node-ci-exceptions.mjs`. Reviewers verify that each exception issue remains open and relevant; CI cannot verify tracker state.
+
 The implementation reviewer records this evidence for the reviewed candidate:
 
 - PR URL and Actions run ID / URL.
@@ -150,5 +152,3 @@ merging it through GitHub. Include the landed commit SHA in the close note:
 gh pr close PR_NUMBER --repo sakuraiyuta/kaoiro \
   --comment "Landed on develop as LANDED_SHA; CI run RUN_ID covers it by matching patch IDs; closed without merging."
 ```
-
-The `test-isolation` job runs the canonical Node entries serially and checks the explicit exceptions in `scripts/test-isolation/node-ci-exceptions.mjs`. Reviewers verify that each exception issue remains open and relevant; CI cannot verify tracker state.
