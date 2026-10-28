@@ -24,7 +24,9 @@ it("sets a theme colour on full and inline markdown links", () => {
       const rules = Array.from(style.sheet!.cssRules).filter((rule): rule is CSSStyleRule =>
         rule instanceof CSSStyleRule && rule.selectorText.split(",").some((selector) => link!.matches(selector.trim())),
       );
-      expect(rules.some((rule) => rule.style.getPropertyValue("color") === "var(--c-thinking)")).toBe(true);
+      const colours = rules.map((rule) => rule.style.getPropertyValue("color")).filter(Boolean);
+      expect(colours.length).toBeGreaterThan(0);
+      expect(colours.every((value) => value === "var(--c-thinking)")).toBe(true);
     }
   } finally {
     style.remove();
